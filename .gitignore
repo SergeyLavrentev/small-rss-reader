@@ -1,0 +1,10 @@
+# Ignore logs directory
+logs/
+
+# Ignore all .log files
+*.log
+
+movie_data_cache.json
+feeds.json
+settings.json
+read_articles.json
