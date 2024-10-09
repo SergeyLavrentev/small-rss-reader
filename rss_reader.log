@@ -1,0 +1,679 @@
+2024-10-09 21:14:32,385 - INFO - Loaded 50 articles from http://feed.rutracker.cc/atom/f/1457.atom
+2024-10-09 21:14:32,386 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, Dolby Vision TV] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.94 GB]
+2024-10-09 21:14:32,386 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, Dolby Vision TV] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.94 GB]']
+2024-10-09 21:14:32,387 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:32,388 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:32,388 - DEBUG - Fetching movie data for: The Little Mermaid
+2024-10-09 21:14:32,390 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:33,327 - DEBUG - http://www.omdbapi.com:80 "GET /?t=The+Little+Mermaid&r=json&apikey=db8b3a7a HTTP/1.1" 200 None
+2024-10-09 21:14:33,329 - DEBUG - Movie data for 'The Little Mermaid': {'title': 'The Little Mermaid', 'year': '1989', 'rated': 'G', 'released': '17 Nov 1989', 'runtime': '83 min', 'genre': 'Animation, Adventure, Family', 'director': 'Ron Clements, John Musker', 'writer': 'John Musker, Ron Clements, Hans Christian Andersen', 'actors': 'Jodi Benson, Samuel E. Wright, Rene Auberjonois', 'plot': "A mermaid princess makes a Faustian bargain in an attempt to become human and win a prince's love.", 'language': 'English, French', 'country': 'United States', 'awards': 'Won 2 Oscars. 16 wins & 8 nominations total', 'poster': 'https://m.media-amazon.com/images/M/MV5BNmQ3ODcyZGMtMjNlOS00YzhlLTg0YzAtZGVjNmQ0OTYyNDg0XkEyXkFqcGc@._V1_SX300.jpg', 'ratings': [{'Source': 'Internet Movie Database', 'Value': '7.6/10'}, {'Source': 'Rotten Tomatoes', 'Value': '91%'}, {'Source': 'Metacritic', 'Value': '88/100'}], 'metascore': '88', 'imdbrating': '7.6', 'imdbvotes': '295,032', 'imdbid': 'tt0097757', 'type': 'movie', 'dvd': 'N/A', 'boxoffice': '$111,543,479', 'production': 'N/A', 'website': 'N/A'}
+2024-10-09 21:14:33,329 - DEBUG - Fetched data for movie: The Little Mermaid
+2024-10-09 21:14:33,337 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, HDR10+] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.69 GB]
+2024-10-09 21:14:33,341 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, HDR10+] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.69 GB]']
+2024-10-09 21:14:33,341 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:33,342 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:33,342 - DEBUG - Cache hit for movie: The Little Mermaid
+2024-10-09 21:14:33,342 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, SDR] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [26.01 GB]
+2024-10-09 21:14:33,342 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, SDR] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [26.01 GB]']
+2024-10-09 21:14:33,342 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:33,342 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:33,342 - DEBUG - Cache hit for movie: The Little Mermaid
+2024-10-09 21:14:33,342 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.9 GB]
+2024-10-09 21:14:33,342 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.9 GB]']
+2024-10-09 21:14:33,342 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:33,342 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:33,342 - DEBUG - Cache hit for movie: The Little Mermaid
+2024-10-09 21:14:33,342 - DEBUG - Title after removing leading tags: Артемис Фаул / Artemis Fowl (Кеннет Брана / Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.07 GB]
+2024-10-09 21:14:33,342 - DEBUG - Title parts after splitting by '/': ['Артемис Фаул ', ' Artemis Fowl (Кеннет Брана ', ' Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.07 GB]']
+2024-10-09 21:14:33,342 - DEBUG - Extracted English title: Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.07 GB]
+2024-10-09 21:14:33,343 - DEBUG - Final English title after cleanup: Kenneth Branagh)
+2024-10-09 21:14:33,343 - DEBUG - Fetching movie data for: Kenneth Branagh)
+2024-10-09 21:14:33,344 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:35,189 - INFO - Loaded 50 articles from https://feed.rutracker.cc/atom/f/1803.atom
+2024-10-09 21:14:35,190 - DEBUG - Title after removing leading tags: Извне / From / Сезон: 3 / Серии: 1-3 из 10 (Джек Бендер) [2024, США, Ужасы, фантастика, триллер, драма, детектив, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, AlexFilm, TVShows, Red Head Sound, LE-Production) + Original + Sub (Rus, Eng) [10.9 GB]
+2024-10-09 21:14:35,190 - DEBUG - Title parts after splitting by '/': ['Извне ', ' From ', ' Сезон: 3 ', ' Серии: 1-3 из 10 (Джек Бендер) [2024, США, Ужасы, фантастика, триллер, драма, детектив, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, AlexFilm, TVShows, Red Head Sound, LE-Production) + Original + Sub (Rus, Eng) [10.9 GB]']
+2024-10-09 21:14:35,190 - DEBUG - Extracted English title: From
+2024-10-09 21:14:35,190 - DEBUG - Final English title after cleanup: From
+2024-10-09 21:14:35,190 - DEBUG - Cache hit for movie: From
+2024-10-09 21:14:35,191 - DEBUG - Title after removing leading tags: Извне / From / Сезон: 3 / Серии: 1-3 из 10 (Александра Ла Рош, Брэд Тернер, Джек Бендер) [2024, США, Ужасы, фантастика, триллер, драма, детектив, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO (HDRezka, AlexFilm, LostFilm, TVShows, Red Head Sound, LE-Production, RuDub) + Original + Sub (Rus, Eng) [19.74 GB]
+2024-10-09 21:14:35,191 - DEBUG - Title parts after splitting by '/': ['Извне ', ' From ', ' Сезон: 3 ', ' Серии: 1-3 из 10 (Александра Ла Рош, Брэд Тернер, Джек Бендер) [2024, США, Ужасы, фантастика, триллер, драма, детектив, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO (HDRezka, AlexFilm, LostFilm, TVShows, Red Head Sound, LE-Production, RuDub) + Original + Sub (Rus, Eng) [19.74 GB]']
+2024-10-09 21:14:35,191 - DEBUG - Extracted English title: From
+2024-10-09 21:14:35,191 - DEBUG - Final English title after cleanup: From
+2024-10-09 21:14:35,191 - DEBUG - Cache hit for movie: From
+2024-10-09 21:14:35,191 - DEBUG - Title after removing leading tags: Моя гениальная подруга / L'amica geniale / My Brilliant Friend / Сезон: 4 / Серии: 1-5 из 8 (Саверио Костанцо, Даниэле Лукетти, Аличе Рорвахер) [2024, Италия, США, Драма, WEB-DL 1080p] MVO (HDRezka Studio) + Original + Sub (Rus, Eng) [18.28 GB]
+2024-10-09 21:14:35,191 - DEBUG - Title parts after splitting by '/': ['Моя гениальная подруга ', " L'amica geniale ", ' My Brilliant Friend ', ' Сезон: 4 ', ' Серии: 1-5 из 8 (Саверио Костанцо, Даниэле Лукетти, Аличе Рорвахер) [2024, Италия, США, Драма, WEB-DL 1080p] MVO (HDRezka Studio) + Original + Sub (Rus, Eng) [18.28 GB]']
+2024-10-09 21:14:35,192 - DEBUG - Extracted English title: L'amica geniale
+2024-10-09 21:14:35,192 - DEBUG - Final English title after cleanup: L'amica geniale
+2024-10-09 21:14:35,192 - DEBUG - Cache hit for movie: L'amica geniale
+2024-10-09 21:14:35,192 - DEBUG - Title after removing leading tags: Полиция Чикаго / Chicago P.D. / Сезон: 12 / Серии: 1-2 из ? (Марк Тинкер, Эрик Ла Салль) [2024, США, боевик, триллер, драма, криминал, WEB-DL 720p] MVO (TVShows) + Original + Sub (Eng) [2.74 GB]
+2024-10-09 21:14:35,192 - DEBUG - Title parts after splitting by '/': ['Полиция Чикаго ', ' Chicago P.D. ', ' Сезон: 12 ', ' Серии: 1-2 из ? (Марк Тинкер, Эрик Ла Салль) [2024, США, боевик, триллер, драма, криминал, WEB-DL 720p] MVO (TVShows) + Original + Sub (Eng) [2.74 GB]']
+2024-10-09 21:14:35,192 - DEBUG - Extracted English title: Chicago P.D.
+2024-10-09 21:14:35,192 - DEBUG - Final English title after cleanup: Chicago P.D.
+2024-10-09 21:14:35,192 - DEBUG - Cache hit for movie: Chicago P.D.
+2024-10-09 21:14:35,192 - DEBUG - Title after removing leading tags: Франшиза / The Franchise / Сезон: 1 / Серии: 1 из 8 (Сэм Мендес) [2024, США, комедия, WEB-DL 1080p] MVO (Pro-Dubbing & Deluxe Media, HDRezka, HDRezka (18+), 1WinStudio, LE-Production) + Original + Sub (Eng) [2.13 GB]
+2024-10-09 21:14:35,192 - DEBUG - Title parts after splitting by '/': ['Франшиза ', ' The Franchise ', ' Сезон: 1 ', ' Серии: 1 из 8 (Сэм Мендес) [2024, США, комедия, WEB-DL 1080p] MVO (Pro-Dubbing & Deluxe Media, HDRezka, HDRezka (18+), 1WinStudio, LE-Production) + Original + Sub (Eng) [2.13 GB]']
+2024-10-09 21:14:35,192 - DEBUG - Extracted English title: The Franchise
+2024-10-09 21:14:35,192 - DEBUG - Final English title after cleanup: The Franchise
+2024-10-09 21:14:35,193 - DEBUG - Cache hit for movie: The Franchise
+2024-10-09 21:14:35,193 - DEBUG - Title after removing leading tags: Пингвин / The Penguin / Сезон: 1 / Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, Фэнтези, драма, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] 7x MVO (HDRezka, Syncmer, NewComers, LostFilm, TVShows, 1WinStudio, LE-Production) + Dub (Red Head Sound) + DVO (Кубик в Кубе) + Original + Sub (Rus, Eng) [31.66 GB]
+2024-10-09 21:14:35,193 - DEBUG - Title parts after splitting by '/': ['Пингвин ', ' The Penguin ', ' Сезон: 1 ', ' Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, Фэнтези, драма, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] 7x MVO (HDRezka, Syncmer, NewComers, LostFilm, TVShows, 1WinStudio, LE-Production) + Dub (Red Head Sound) + DVO (Кубик в Кубе) + Original + Sub (Rus, Eng) [31.66 GB]']
+2024-10-09 21:14:35,193 - DEBUG - Extracted English title: The Penguin
+2024-10-09 21:14:35,193 - DEBUG - Final English title after cleanup: The Penguin
+2024-10-09 21:14:35,193 - DEBUG - Cache hit for movie: The Penguin
+2024-10-09 21:14:35,193 - DEBUG - Title after removing leading tags: Гротеск / Grotesquerie / Сезон: 1 / Серии: 1-4 из 10 (Макс Уинклер, Алексис Мартин Вудалл) [2024, США, ужасы, драма, WEB-DL 1080p] 4x MVO (HDRezka, TVShows, 1WinStudio, Red Head Sound) + Original + Sub (Eng) [7.55 GB]
+2024-10-09 21:14:35,193 - DEBUG - Title parts after splitting by '/': ['Гротеск ', ' Grotesquerie ', ' Сезон: 1 ', ' Серии: 1-4 из 10 (Макс Уинклер, Алексис Мартин Вудалл) [2024, США, ужасы, драма, WEB-DL 1080p] 4x MVO (HDRezka, TVShows, 1WinStudio, Red Head Sound) + Original + Sub (Eng) [7.55 GB]']
+2024-10-09 21:14:35,193 - DEBUG - Extracted English title: Grotesquerie
+2024-10-09 21:14:35,193 - DEBUG - Final English title after cleanup: Grotesquerie
+2024-10-09 21:14:35,193 - DEBUG - Cache hit for movie: Grotesquerie
+2024-10-09 21:14:35,193 - DEBUG - Title after removing leading tags: Поиски / Found / Сезон: 1 / Серии: 1 из 22 (Димэйн Дэвис, Джессика Борсицки, Чад Лоу) [2024, США, драма, WEB-DL 1080p] 2x MVO (TVShows, LE-Production) + Original + Sub (Eng) [2.36 GB]
+2024-10-09 21:14:35,193 - DEBUG - Title parts after splitting by '/': ['Поиски ', ' Found ', ' Сезон: 1 ', ' Серии: 1 из 22 (Димэйн Дэвис, Джессика Борсицки, Чад Лоу) [2024, США, драма, WEB-DL 1080p] 2x MVO (TVShows, LE-Production) + Original + Sub (Eng) [2.36 GB]']
+2024-10-09 21:14:35,193 - DEBUG - Extracted English title: Found
+2024-10-09 21:14:35,193 - DEBUG - Final English title after cleanup: Found
+2024-10-09 21:14:35,193 - DEBUG - Cache hit for movie: Found
+2024-10-09 21:14:35,193 - DEBUG - Title after removing leading tags: Властелин колец: Кольца власти / The Lord of the Rings: The Rings of Power / Сезон: 2 / Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма HDR10, HDR10+, Dolby Vision, WEB-DL 2160p, 4k] 5 x MVO + Dub (Red Head Sound) + Original + Sub Eng [64.84 GB]
+2024-10-09 21:14:35,193 - DEBUG - Title parts after splitting by '/': ['Властелин колец: Кольца власти ', ' The Lord of the Rings: The Rings of Power ', ' Сезон: 2 ', ' Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма HDR10, HDR10+, Dolby Vision, WEB-DL 2160p, 4k] 5 x MVO + Dub (Red Head Sound) + Original + Sub Eng [64.84 GB]']
+2024-10-09 21:14:35,194 - DEBUG - Extracted English title: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:35,194 - DEBUG - Final English title after cleanup: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:35,194 - DEBUG - Cache hit for movie: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:35,194 - DEBUG - Title after removing leading tags: Властелин колец: Кольца власти / The Lord of the Rings: The Rings of Power / Сезон: 2 / Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма, приключения, WEB-DL 1080p] 5 x MVO (HDRezka Studio, LostFilm, TVShows, NewComers, LE-Production) + Dub + Original + Sub Eng [30.56 GB]
+2024-10-09 21:14:35,194 - DEBUG - Title parts after splitting by '/': ['Властелин колец: Кольца власти ', ' The Lord of the Rings: The Rings of Power ', ' Сезон: 2 ', ' Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма, приключения, WEB-DL 1080p] 5 x MVO (HDRezka Studio, LostFilm, TVShows, NewComers, LE-Production) + Dub + Original + Sub Eng [30.56 GB]']
+2024-10-09 21:14:35,194 - DEBUG - Extracted English title: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:35,194 - DEBUG - Final English title after cleanup: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:35,194 - DEBUG - Cache hit for movie: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:35,194 - DEBUG - Title after removing leading tags: Фрейзер / Frasier / Сезон: 2 / Серии: 1-4 из 8 (Джеймс Берроуз, Виктор Гонзалез, Келли Парк) [2024, США, комедия, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Rus, Eng) [7.62 GB]
+2024-10-09 21:14:35,194 - DEBUG - Title parts after splitting by '/': ['Фрейзер ', ' Frasier ', ' Сезон: 2 ', ' Серии: 1-4 из 8 (Джеймс Берроуз, Виктор Гонзалез, Келли Парк) [2024, США, комедия, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Rus, Eng) [7.62 GB]']
+2024-10-09 21:14:35,194 - DEBUG - Extracted English title: Frasier
+2024-10-09 21:14:35,194 - DEBUG - Final English title after cleanup: Frasier
+2024-10-09 21:14:35,194 - DEBUG - Cache hit for movie: Frasier
+2024-10-09 21:14:35,194 - DEBUG - Title after removing leading tags: Властелин колец: Кольца власти / The Lord of the Rings: The Rings of Power / Сезон: 2 / Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма, приключения, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO + Dub (Red Head Sound) + Original + Sub (Eng) [64.98 GB]
+2024-10-09 21:14:35,194 - DEBUG - Title parts after splitting by '/': ['Властелин колец: Кольца власти ', ' The Lord of the Rings: The Rings of Power ', ' Сезон: 2 ', ' Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма, приключения, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO + Dub (Red Head Sound) + Original + Sub (Eng) [64.98 GB]']
+2024-10-09 21:14:35,195 - DEBUG - Extracted English title: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:35,195 - DEBUG - Final English title after cleanup: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:35,195 - DEBUG - Cache hit for movie: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:35,195 - DEBUG - Title after removing leading tags: Король Талсы / Tulsa King / Сезон: 2 / Серии: 1-4 из 10 (Крейг Зиск, Кевин Даулинг) [2024, США, Драма, криминал, комедия, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO (NewComers, HDRezka, LostFilm, TVShows, 1WinStudio, Red Head Sound, LE-Production) + Ukr (DniproFilm) + Original + Sub (Rus, Ukr, Eng) [21.21 GB]
+2024-10-09 21:14:35,195 - DEBUG - Title parts after splitting by '/': ['Король Талсы ', ' Tulsa King ', ' Сезон: 2 ', ' Серии: 1-4 из 10 (Крейг Зиск, Кевин Даулинг) [2024, США, Драма, криминал, комедия, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO (NewComers, HDRezka, LostFilm, TVShows, 1WinStudio, Red Head Sound, LE-Production) + Ukr (DniproFilm) + Original + Sub (Rus, Ukr, Eng) [21.21 GB]']
+2024-10-09 21:14:35,195 - DEBUG - Extracted English title: Tulsa King
+2024-10-09 21:14:35,195 - DEBUG - Final English title after cleanup: Tulsa King
+2024-10-09 21:14:35,195 - DEBUG - Cache hit for movie: Tulsa King
+2024-10-09 21:14:35,195 - DEBUG - Title after removing leading tags: Пингвин / The Penguin / Сезон: 1 / Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, HEVC, Dolby Vision TV, WEB-DL 2160p, 4k] MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [29.3 GB]
+2024-10-09 21:14:35,195 - DEBUG - Title parts after splitting by '/': ['Пингвин ', ' The Penguin ', ' Сезон: 1 ', ' Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, HEVC, Dolby Vision TV, WEB-DL 2160p, 4k] MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [29.3 GB]']
+2024-10-09 21:14:35,195 - DEBUG - Extracted English title: The Penguin
+2024-10-09 21:14:35,195 - DEBUG - Final English title after cleanup: The Penguin
+2024-10-09 21:14:35,195 - DEBUG - Cache hit for movie: The Penguin
+2024-10-09 21:14:35,195 - DEBUG - Title after removing leading tags: Пингвин / The Penguin / Сезон: 1 / Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, WEB-DL 1080p] MVO (Syncmer) + Original + Sub (Rus, Eng, Bul, Rom) [12.95 GB]
+2024-10-09 21:14:35,195 - DEBUG - Title parts after splitting by '/': ['Пингвин ', ' The Penguin ', ' Сезон: 1 ', ' Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, WEB-DL 1080p] MVO (Syncmer) + Original + Sub (Rus, Eng, Bul, Rom) [12.95 GB]']
+2024-10-09 21:14:35,195 - DEBUG - Extracted English title: The Penguin
+2024-10-09 21:14:35,195 - DEBUG - Final English title after cleanup: The Penguin
+2024-10-09 21:14:35,195 - DEBUG - Cache hit for movie: The Penguin
+2024-10-09 21:14:35,196 - DEBUG - Title after removing leading tags: Это всё Агата / Agatha All Along / Сезон: 1 / Серии: 1-4 из 9 (Ганджа Монтейру) [2024, США, фантастика, фэнтези, боевик, драма, комедия, приключения, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] 6 х MVO (HDRezka, NewComers, LostFilm, TVShows, 1WinStudio, LE-Production) Original + Sub (Rus, Eng) [17.76 GB]
+2024-10-09 21:14:35,196 - DEBUG - Title parts after splitting by '/': ['Это всё Агата ', ' Agatha All Along ', ' Сезон: 1 ', ' Серии: 1-4 из 9 (Ганджа Монтейру) [2024, США, фантастика, фэнтези, боевик, драма, комедия, приключения, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] 6 х MVO (HDRezka, NewComers, LostFilm, TVShows, 1WinStudio, LE-Production) Original + Sub (Rus, Eng) [17.76 GB]']
+2024-10-09 21:14:35,196 - DEBUG - Extracted English title: Agatha All Along
+2024-10-09 21:14:35,196 - DEBUG - Final English title after cleanup: Agatha All Along
+2024-10-09 21:14:35,196 - DEBUG - Cache hit for movie: Agatha All Along
+2024-10-09 21:14:35,196 - DEBUG - Title after removing leading tags: Убийство в маленьком городке / Murder in a Small Town / Сезон: 1 / Серии: 1-2 из 8 (Милан Чейлов, Лесли Хоуп, Аманда Таппинг) [2024, Канада, США, Драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [7.58 GB]
+2024-10-09 21:14:35,196 - DEBUG - Title parts after splitting by '/': ['Убийство в маленьком городке ', ' Murder in a Small Town ', ' Сезон: 1 ', ' Серии: 1-2 из 8 (Милан Чейлов, Лесли Хоуп, Аманда Таппинг) [2024, Канада, США, Драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [7.58 GB]']
+2024-10-09 21:14:35,196 - DEBUG - Extracted English title: Murder in a Small Town
+2024-10-09 21:14:35,196 - DEBUG - Final English title after cleanup: Murder in a Small Town
+2024-10-09 21:14:35,196 - DEBUG - Cache hit for movie: Murder in a Small Town
+2024-10-09 21:14:35,196 - DEBUG - Title after removing leading tags: Чикаго в огне / Chicago Fire / Сезон: 13 / Серии: 1-2 из 22 (Реза Табризи) [2024, США, Драма, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [5.46 GB]
+2024-10-09 21:14:35,196 - DEBUG - Title parts after splitting by '/': ['Чикаго в огне ', ' Chicago Fire ', ' Сезон: 13 ', ' Серии: 1-2 из 22 (Реза Табризи) [2024, США, Драма, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [5.46 GB]']
+2024-10-09 21:14:35,196 - DEBUG - Extracted English title: Chicago Fire
+2024-10-09 21:14:35,196 - DEBUG - Final English title after cleanup: Chicago Fire
+2024-10-09 21:14:35,196 - DEBUG - Cache hit for movie: Chicago Fire
+2024-10-09 21:14:35,196 - DEBUG - Title after removing leading tags: О всех созданиях - больших и малых / All Creatures Great and Small / Сезон: 5 / Серии: 1-3 из 6 (Энди Хэй, Стюарт Сваасанд) [2024, Великобритания, драма, комедия, WEB-DL 1080p] Original + Sub (Rus, Eng) [5.75 GB]
+2024-10-09 21:14:35,196 - DEBUG - Title parts after splitting by '/': ['О всех созданиях - больших и малых ', ' All Creatures Great and Small ', ' Сезон: 5 ', ' Серии: 1-3 из 6 (Энди Хэй, Стюарт Сваасанд) [2024, Великобритания, драма, комедия, WEB-DL 1080p] Original + Sub (Rus, Eng) [5.75 GB]']
+2024-10-09 21:14:35,196 - DEBUG - Extracted English title: All Creatures Great and Small
+2024-10-09 21:14:35,196 - DEBUG - Final English title after cleanup: All Creatures Great and Small
+2024-10-09 21:14:35,197 - DEBUG - Cache hit for movie: All Creatures Great and Small
+2024-10-09 21:14:35,197 - DEBUG - Title after removing leading tags: Медленные лошади / Slow Horses / Сезон: 4 / Серии: 1-5 из 6 (Адам Рэндолл) [2024, Великобритания, США, Триллер, детектив, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows, LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Ukr, Eng, Heb) [18.7 GB]
+2024-10-09 21:14:35,197 - DEBUG - Title parts after splitting by '/': ['Медленные лошади ', ' Slow Horses ', ' Сезон: 4 ', ' Серии: 1-5 из 6 (Адам Рэндолл) [2024, Великобритания, США, Триллер, детектив, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows, LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Ukr, Eng, Heb) [18.7 GB]']
+2024-10-09 21:14:35,197 - DEBUG - Extracted English title: Slow Horses
+2024-10-09 21:14:35,197 - DEBUG - Final English title after cleanup: Slow Horses
+2024-10-09 21:14:35,197 - DEBUG - Cache hit for movie: Slow Horses
+2024-10-09 21:14:35,197 - DEBUG - Title after removing leading tags: Медленные лошади / Хромые кони / Slow Horses / Сезон: 4 / Серии: 1-5 из 6 (Адам Рэндолл) [2024, Великобритания, США, Триллер, детектив, HEVC, Dolby Vision, HDR10+, HDR10, WEB-DL 2160p, 4k] [Hybrid] 4 x MVO (LostFilm, HDRezka, TVShows, LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Eng) [40.77 GB]
+2024-10-09 21:14:35,197 - DEBUG - Title parts after splitting by '/': ['Медленные лошади ', ' Хромые кони ', ' Slow Horses ', ' Сезон: 4 ', ' Серии: 1-5 из 6 (Адам Рэндолл) [2024, Великобритания, США, Триллер, детектив, HEVC, Dolby Vision, HDR10+, HDR10, WEB-DL 2160p, 4k] [Hybrid] 4 x MVO (LostFilm, HDRezka, TVShows, LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Eng) [40.77 GB]']
+2024-10-09 21:14:35,197 - DEBUG - Extracted English title: Slow Horses
+2024-10-09 21:14:35,197 - DEBUG - Final English title after cleanup: Slow Horses
+2024-10-09 21:14:35,197 - DEBUG - Cache hit for movie: Slow Horses
+2024-10-09 21:14:35,197 - DEBUG - Title after removing leading tags: Пингвин / The Penguin / Сезон: 1 / Серии: 1-2 из 8 (Крэйг Зобел) [2024, США, Фэнтези, драма, криминал, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, NewComers, TVShows, 1WinStudio) + DVO (Кубик в Кубе) + Dub (Red Head Sound) + Ukr (HDRezka Studio) + Original + Sub (Rus, Eng) [10.35 GB]
+2024-10-09 21:14:35,197 - DEBUG - Title parts after splitting by '/': ['Пингвин ', ' The Penguin ', ' Сезон: 1 ', ' Серии: 1-2 из 8 (Крэйг Зобел) [2024, США, Фэнтези, драма, криминал, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, NewComers, TVShows, 1WinStudio) + DVO (Кубик в Кубе) + Dub (Red Head Sound) + Ukr (HDRezka Studio) + Original + Sub (Rus, Eng) [10.35 GB]']
+2024-10-09 21:14:35,197 - DEBUG - Extracted English title: The Penguin
+2024-10-09 21:14:35,198 - DEBUG - Final English title after cleanup: The Penguin
+2024-10-09 21:14:35,198 - DEBUG - Cache hit for movie: The Penguin
+2024-10-09 21:14:35,198 - DEBUG - Title after removing leading tags: Убийства в одном здании / Only Murders in the Building / Сезон: 4 / Серии: 1-6 из 10 (Джон Хоффман) [2024, США, Детектив, комедия, криминал, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] MVO (HDRezka Studio, LostFilm, TVShows, Jaskier, LE-Production) + Original + Sub (Rus, Eng) [24.38 GB]
+2024-10-09 21:14:35,198 - DEBUG - Title parts after splitting by '/': ['Убийства в одном здании ', ' Only Murders in the Building ', ' Сезон: 4 ', ' Серии: 1-6 из 10 (Джон Хоффман) [2024, США, Детектив, комедия, криминал, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] MVO (HDRezka Studio, LostFilm, TVShows, Jaskier, LE-Production) + Original + Sub (Rus, Eng) [24.38 GB]']
+2024-10-09 21:14:35,198 - DEBUG - Extracted English title: Only Murders in the Building
+2024-10-09 21:14:35,198 - DEBUG - Final English title after cleanup: Only Murders in the Building
+2024-10-09 21:14:35,198 - DEBUG - Cache hit for movie: Only Murders in the Building
+2024-10-09 21:14:35,198 - DEBUG - Title after removing leading tags: Убийства в одном здании / Only Murders in the Building / Сезон: 4 / Серии: 1-6 из 10 (Джон Хоффман, Крис Кох, Джессика Ю) [2024, США, детектив, комедия, криминал, WEB-DL 1080p] 7 x MVO (HDRezka Studio, LostFilm, Jaskier, TVShows, 1WinStudio, RHS, LE-Production) + Original (Eng) + Sub (Rus, Eng) [11.62 GB]
+2024-10-09 21:14:35,198 - DEBUG - Title parts after splitting by '/': ['Убийства в одном здании ', ' Only Murders in the Building ', ' Сезон: 4 ', ' Серии: 1-6 из 10 (Джон Хоффман, Крис Кох, Джессика Ю) [2024, США, детектив, комедия, криминал, WEB-DL 1080p] 7 x MVO (HDRezka Studio, LostFilm, Jaskier, TVShows, 1WinStudio, RHS, LE-Production) + Original (Eng) + Sub (Rus, Eng) [11.62 GB]']
+2024-10-09 21:14:35,198 - DEBUG - Extracted English title: Only Murders in the Building
+2024-10-09 21:14:35,198 - DEBUG - Final English title after cleanup: Only Murders in the Building
+2024-10-09 21:14:35,198 - DEBUG - Cache hit for movie: Only Murders in the Building
+2024-10-09 21:14:35,198 - DEBUG - Title after removing leading tags: Король Талсы / Tulsa King / Сезон: 2 / Серии: 1-3 из 10 (Крейг Зиск, Кевин Даулинг) [2024, США, Драма, криминал, комедия, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows, NewComers, Red Head Sound, 1WinStudio, LE-Production) + Original + Sub (Rus, Eng) [9.23 GB]
+2024-10-09 21:14:35,198 - DEBUG - Title parts after splitting by '/': ['Король Талсы ', ' Tulsa King ', ' Сезон: 2 ', ' Серии: 1-3 из 10 (Крейг Зиск, Кевин Даулинг) [2024, США, Драма, криминал, комедия, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows, NewComers, Red Head Sound, 1WinStudio, LE-Production) + Original + Sub (Rus, Eng) [9.23 GB]']
+2024-10-09 21:14:35,198 - DEBUG - Extracted English title: Tulsa King
+2024-10-09 21:14:35,198 - DEBUG - Final English title after cleanup: Tulsa King
+2024-10-09 21:14:35,199 - DEBUG - Cache hit for movie: Tulsa King
+2024-10-09 21:14:35,199 - DEBUG - Title after removing leading tags: Плохая обезьяна / Bad Monkey / Сезон: 1 / Серии: 1-9 из 10 (Маркос Сига, Колин Бакси, Эрика Дантон) [2024, США, комедия, детектив, криминал, WEB-DL 1080p] 3 x MVO (HDRezka Studio, TVShows, LE-Production) + 2 x DVO (Кубик в Кубе, ViruseProject) + Original (Eng) + Sub (Rus, Eng) [37.39 GB]
+2024-10-09 21:14:35,199 - DEBUG - Title parts after splitting by '/': ['Плохая обезьяна ', ' Bad Monkey ', ' Сезон: 1 ', ' Серии: 1-9 из 10 (Маркос Сига, Колин Бакси, Эрика Дантон) [2024, США, комедия, детектив, криминал, WEB-DL 1080p] 3 x MVO (HDRezka Studio, TVShows, LE-Production) + 2 x DVO (Кубик в Кубе, ViruseProject) + Original (Eng) + Sub (Rus, Eng) [37.39 GB]']
+2024-10-09 21:14:35,199 - DEBUG - Extracted English title: Bad Monkey
+2024-10-09 21:14:35,199 - DEBUG - Final English title after cleanup: Bad Monkey
+2024-10-09 21:14:35,199 - DEBUG - Cache hit for movie: Bad Monkey
+2024-10-09 21:14:35,199 - DEBUG - Title after removing leading tags: Спецназ / SEAL Team / Сезон: 7 / Серии: 1-9 из 10 (Кристофер Чулак, Джеймс М. Муро) [2024, США, боевик, драма, военный, WEB-DL 720p] MVO (TVShows) + MVO (HDRezka) + Original + Sub (Eng) [11.22 GB]
+2024-10-09 21:14:35,199 - DEBUG - Title parts after splitting by '/': ['Спецназ ', ' SEAL Team ', ' Сезон: 7 ', ' Серии: 1-9 из 10 (Кристофер Чулак, Джеймс М. Муро) [2024, США, боевик, драма, военный, WEB-DL 720p] MVO (TVShows) + MVO (HDRezka) + Original + Sub (Eng) [11.22 GB]']
+2024-10-09 21:14:35,199 - DEBUG - Extracted English title: SEAL Team
+2024-10-09 21:14:35,199 - DEBUG - Final English title after cleanup: SEAL Team
+2024-10-09 21:14:35,199 - DEBUG - Cache hit for movie: SEAL Team
+2024-10-09 21:14:35,199 - DEBUG - Title after removing leading tags: Блестящие умы / Brilliant Minds / Сезон: 1 / Серии: 1-2 из 6 (Джордан Каннинг, Ли Толанд Кригер) [2024, США, драма, WEB-DL 1080p] 4x MVO (HDRezka, TVShows, 1WinStudio, LE-Production) + Original + Sub (Eng) [5.43 GB]
+2024-10-09 21:14:35,199 - DEBUG - Title parts after splitting by '/': ['Блестящие умы ', ' Brilliant Minds ', ' Сезон: 1 ', ' Серии: 1-2 из 6 (Джордан Каннинг, Ли Толанд Кригер) [2024, США, драма, WEB-DL 1080p] 4x MVO (HDRezka, TVShows, 1WinStudio, LE-Production) + Original + Sub (Eng) [5.43 GB]']
+2024-10-09 21:14:35,199 - DEBUG - Extracted English title: Brilliant Minds
+2024-10-09 21:14:35,199 - DEBUG - Final English title after cleanup: Brilliant Minds
+2024-10-09 21:14:35,199 - DEBUG - Cache hit for movie: Brilliant Minds
+2024-10-09 21:14:35,200 - DEBUG - Title after removing leading tags: О всех созданиях - больших и малых / All Creatures Great and Small / Сезон: 5 / Серии: 1-2 из 6 (Брайан Персивал, Стюарт Сваасанд) [2024, Великобритания, Драма, комедия, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [3.96 GB]
+2024-10-09 21:14:35,200 - DEBUG - Title parts after splitting by '/': ['О всех созданиях - больших и малых ', ' All Creatures Great and Small ', ' Сезон: 5 ', ' Серии: 1-2 из 6 (Брайан Персивал, Стюарт Сваасанд) [2024, Великобритания, Драма, комедия, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [3.96 GB]']
+2024-10-09 21:14:35,200 - DEBUG - Extracted English title: All Creatures Great and Small
+2024-10-09 21:14:35,200 - DEBUG - Final English title after cleanup: All Creatures Great and Small
+2024-10-09 21:14:35,200 - DEBUG - Cache hit for movie: All Creatures Great and Small
+2024-10-09 21:14:35,200 - DEBUG - Title after removing leading tags: Соври мне / Tell Me Lies / Сезон: 2 / Серии: 1-6 из 8 (Сэм Бойд, Эрин Фили, Эд Лилли) [2024, США, драма, WEB-DL 1080p] MVO (LE-Production) + Original + Sub (Eng) [11.28 GB]
+2024-10-09 21:14:35,200 - DEBUG - Title parts after splitting by '/': ['Соври мне ', ' Tell Me Lies ', ' Сезон: 2 ', ' Серии: 1-6 из 8 (Сэм Бойд, Эрин Фили, Эд Лилли) [2024, США, драма, WEB-DL 1080p] MVO (LE-Production) + Original + Sub (Eng) [11.28 GB]']
+2024-10-09 21:14:35,200 - DEBUG - Extracted English title: Tell Me Lies
+2024-10-09 21:14:35,200 - DEBUG - Final English title after cleanup: Tell Me Lies
+2024-10-09 21:14:35,200 - DEBUG - Cache hit for movie: Tell Me Lies
+2024-10-09 21:14:35,200 - DEBUG - Title after removing leading tags: Учитель английского / English Teacher / Сезон: 1 / Серии: 1-6 из 8 (Брайан Джордан Альварес) [2024, США, комедия, WEB-DL 1080p] 2x MVO (HDRezka, LE-Production) + Original + Sub (Eng) [7.74 GB]
+2024-10-09 21:14:35,200 - DEBUG - Title parts after splitting by '/': ['Учитель английского ', ' English Teacher ', ' Сезон: 1 ', ' Серии: 1-6 из 8 (Брайан Джордан Альварес) [2024, США, комедия, WEB-DL 1080p] 2x MVO (HDRezka, LE-Production) + Original + Sub (Eng) [7.74 GB]']
+2024-10-09 21:14:35,200 - DEBUG - Extracted English title: English Teacher
+2024-10-09 21:14:35,200 - DEBUG - Final English title after cleanup: English Teacher
+2024-10-09 21:14:35,200 - DEBUG - Cache hit for movie: English Teacher
+2024-10-09 21:14:35,200 - DEBUG - Title after removing leading tags: Властелин колец: Кольца власти / The Lord Of The Rings: The Rings Of Power / Сезон: 2 / Серии: 1-7 из 8 (Шарлотта Брандстром) [2024, США, Новая Зеландия, Канада, фэнтези, боевик, драма, приключения, WEB-DL 720p] 6 x MVO + Dub (Red Head Sound) + Original + Sub (Eng) [17 GB]
+2024-10-09 21:14:35,200 - DEBUG - Title parts after splitting by '/': ['Властелин колец: Кольца власти ', ' The Lord Of The Rings: The Rings Of Power ', ' Сезон: 2 ', ' Серии: 1-7 из 8 (Шарлотта Брандстром) [2024, США, Новая Зеландия, Канада, фэнтези, боевик, драма, приключения, WEB-DL 720p] 6 x MVO + Dub (Red Head Sound) + Original + Sub (Eng) [17 GB]']
+2024-10-09 21:14:35,201 - DEBUG - Extracted English title: The Lord Of The Rings: The Rings Of Power
+2024-10-09 21:14:35,201 - DEBUG - Final English title after cleanup: The Lord Of The Rings: The Rings Of Power
+2024-10-09 21:14:35,201 - DEBUG - Cache hit for movie: The Lord Of The Rings: The Rings Of Power
+2024-10-09 21:14:35,201 - DEBUG - Title after removing leading tags: Модный дом / La Maison / Сезон: 1 / Серии: 1-3 из 10 (Фабрис Гобер, Дэниэл Гру) [2024, Франция, драма, WEB-DL 1080p] 3 x MVO (HDRezka Studio, TVShows, 1WinStudio) + Original (Fra) + Sub (Rus, Fra) [12.57 GB]
+2024-10-09 21:14:35,201 - DEBUG - Title parts after splitting by '/': ['Модный дом ', ' La Maison ', ' Сезон: 1 ', ' Серии: 1-3 из 10 (Фабрис Гобер, Дэниэл Гру) [2024, Франция, драма, WEB-DL 1080p] 3 x MVO (HDRezka Studio, TVShows, 1WinStudio) + Original (Fra) + Sub (Rus, Fra) [12.57 GB]']
+2024-10-09 21:14:35,201 - DEBUG - Extracted English title: La Maison
+2024-10-09 21:14:35,201 - DEBUG - Final English title after cleanup: La Maison
+2024-10-09 21:14:35,201 - DEBUG - Cache hit for movie: La Maison
+2024-10-09 21:14:35,201 - DEBUG - Title after removing leading tags: Плохая обезьяна / Bad Monkey / Сезон: 1 / Серии: 1-8 из 10 (Маркос Сига, Колин Бакси, Эрика Дантон) [2024, США, Комедия, детектив, криминал, HEVC, HDR10, HDR10+, Dolby Vision, WEB-DL 2160p, 4k] MVO (HDRezka Studio, TVShows, LE-Production) + DVO (Кубик в Кубе) + Original + Sub (Rus, Ukr, Eng, Heb) [73.24 GB]
+2024-10-09 21:14:35,201 - DEBUG - Title parts after splitting by '/': ['Плохая обезьяна ', ' Bad Monkey ', ' Сезон: 1 ', ' Серии: 1-8 из 10 (Маркос Сига, Колин Бакси, Эрика Дантон) [2024, США, Комедия, детектив, криминал, HEVC, HDR10, HDR10+, Dolby Vision, WEB-DL 2160p, 4k] MVO (HDRezka Studio, TVShows, LE-Production) + DVO (Кубик в Кубе) + Original + Sub (Rus, Ukr, Eng, Heb) [73.24 GB]']
+2024-10-09 21:14:35,201 - DEBUG - Extracted English title: Bad Monkey
+2024-10-09 21:14:35,201 - DEBUG - Final English title after cleanup: Bad Monkey
+2024-10-09 21:14:35,201 - DEBUG - Cache hit for movie: Bad Monkey
+2024-10-09 21:14:35,201 - DEBUG - Title after removing leading tags: Старик / The Old Man / Сезон: 2 / Серии: 1-4 из 8 (Джет Уилкинсон, Джон Уоттс, Грег Яйтанс) [2024, США, Боевик, триллер, драма, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows) + DVO (Кубик в Кубе) + MVO (Red Head Sound) + AVO (Ю. Сербин) + Original + Sub (Eng) [14.46 GB]
+2024-10-09 21:14:35,201 - DEBUG - Title parts after splitting by '/': ['Старик ', ' The Old Man ', ' Сезон: 2 ', ' Серии: 1-4 из 8 (Джет Уилкинсон, Джон Уоттс, Грег Яйтанс) [2024, США, Боевик, триллер, драма, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows) + DVO (Кубик в Кубе) + MVO (Red Head Sound) + AVO (Ю. Сербин) + Original + Sub (Eng) [14.46 GB]']
+2024-10-09 21:14:35,201 - DEBUG - Extracted English title: The Old Man
+2024-10-09 21:14:35,201 - DEBUG - Final English title after cleanup: The Old Man
+2024-10-09 21:14:35,201 - DEBUG - Cache hit for movie: The Old Man
+2024-10-09 21:14:35,202 - DEBUG - Title after removing leading tags: Власть в ночном городе. Книга вторая: Призрак / Power Book II: Ghost / Сезон: 4 / Серии: 1-8 из 10 (Брендан Уолш) [2024, США, Драма, криминал, WEB-DL 1080p] MVO (NewStudio) + Original + Sub (Eng) [30.22 GB]
+2024-10-09 21:14:35,202 - DEBUG - Title parts after splitting by '/': ['Власть в ночном городе. Книга вторая: Призрак ', ' Power Book II: Ghost ', ' Сезон: 4 ', ' Серии: 1-8 из 10 (Брендан Уолш) [2024, США, Драма, криминал, WEB-DL 1080p] MVO (NewStudio) + Original + Sub (Eng) [30.22 GB]']
+2024-10-09 21:14:35,202 - DEBUG - Extracted English title: Power Book II: Ghost
+2024-10-09 21:14:35,202 - DEBUG - Final English title after cleanup: Power Book II: Ghost
+2024-10-09 21:14:35,202 - DEBUG - Cache hit for movie: Power Book II: Ghost
+2024-10-09 21:14:35,202 - DEBUG - Title after removing leading tags: Большой потенциал / High Potential / Сезон: 1 / Серии: 1-2 из 10 (Ребекка Эшер, Аманда Трейз, Алетеа Джонс) [2024, США, Драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub Eng [6.21 GB]
+2024-10-09 21:14:35,202 - DEBUG - Title parts after splitting by '/': ['Большой потенциал ', ' High Potential ', ' Сезон: 1 ', ' Серии: 1-2 из 10 (Ребекка Эшер, Аманда Трейз, Алетеа Джонс) [2024, США, Драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub Eng [6.21 GB]']
+2024-10-09 21:14:35,202 - DEBUG - Extracted English title: High Potential
+2024-10-09 21:14:35,202 - DEBUG - Final English title after cleanup: High Potential
+2024-10-09 21:14:35,202 - DEBUG - Cache hit for movie: High Potential
+2024-10-09 21:14:35,202 - DEBUG - Title after removing leading tags: Мэтлок / Matlock / Сезон: 1 / Серии: 1 из 10 (Кэт Койро, Янгзом Брауен, Брэд Силберлинг) [2024, США, драма, криминал, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [2.69 GB]
+2024-10-09 21:14:35,202 - DEBUG - Title parts after splitting by '/': ['Мэтлок ', ' Matlock ', ' Сезон: 1 ', ' Серии: 1 из 10 (Кэт Койро, Янгзом Брауен, Брэд Силберлинг) [2024, США, драма, криминал, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [2.69 GB]']
+2024-10-09 21:14:35,202 - DEBUG - Extracted English title: Matlock
+2024-10-09 21:14:35,202 - DEBUG - Final English title after cleanup: Matlock
+2024-10-09 21:14:35,202 - DEBUG - Cache hit for movie: Matlock
+2024-10-09 21:14:35,202 - DEBUG - Title after removing leading tags: Это всё Агата / Agatha All Along / Сезон: 1 / Серии: 1-3 из 9 (Ганджа Монтейру) [2024, США, фантастика, фэнтези, боевик, драма, комедия, приключения, WEB-DL 720p] MVO (Lostfilm) + MVO (TVShows) + MVO (HDrezka) + MVO (NewComers) + MVO (1WinStudio) + MVO (LE-Production) + Original + Sub (Rus, Eng) [4.47 GB]
+2024-10-09 21:14:35,203 - DEBUG - Title parts after splitting by '/': ['Это всё Агата ', ' Agatha All Along ', ' Сезон: 1 ', ' Серии: 1-3 из 9 (Ганджа Монтейру) [2024, США, фантастика, фэнтези, боевик, драма, комедия, приключения, WEB-DL 720p] MVO (Lostfilm) + MVO (TVShows) + MVO (HDrezka) + MVO (NewComers) + MVO (1WinStudio) + MVO (LE-Production) + Original + Sub (Rus, Eng) [4.47 GB]']
+2024-10-09 21:14:35,203 - DEBUG - Extracted English title: Agatha All Along
+2024-10-09 21:14:35,203 - DEBUG - Final English title after cleanup: Agatha All Along
+2024-10-09 21:14:35,203 - DEBUG - Cache hit for movie: Agatha All Along
+2024-10-09 21:14:35,203 - DEBUG - Title after removing leading tags: Медленные лошади / Хромые кони / Slow Horses / Сезон: 4 / Серии: 1-4 из 6 (Адам Рэндолл) [2024, Великобритания, США, триллер, детектив, WEB-DL 720p] MVO (LostFilm) + MVO (TVShows) + MVO (HDrezka) + MVO (LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Eng) [6.41 GB]
+2024-10-09 21:14:35,203 - DEBUG - Title parts after splitting by '/': ['Медленные лошади ', ' Хромые кони ', ' Slow Horses ', ' Сезон: 4 ', ' Серии: 1-4 из 6 (Адам Рэндолл) [2024, Великобритания, США, триллер, детектив, WEB-DL 720p] MVO (LostFilm) + MVO (TVShows) + MVO (HDrezka) + MVO (LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Eng) [6.41 GB]']
+2024-10-09 21:14:35,203 - DEBUG - Extracted English title: Slow Horses
+2024-10-09 21:14:35,203 - DEBUG - Final English title after cleanup: Slow Horses
+2024-10-09 21:14:35,203 - DEBUG - Cache hit for movie: Slow Horses
+2024-10-09 21:14:35,203 - DEBUG - Title after removing leading tags: Король Талсы / Tulsa King / Сезон: 2 / Серии: 1-2 из 10 (Крейг Зиск) [2024, США, драма, криминал, комедия, WEB-DL 720p] 7x MVO + Original + Sub (Rus, Eng) [3.58 GB]
+2024-10-09 21:14:35,203 - DEBUG - Title parts after splitting by '/': ['Король Талсы ', ' Tulsa King ', ' Сезон: 2 ', ' Серии: 1-2 из 10 (Крейг Зиск) [2024, США, драма, криминал, комедия, WEB-DL 720p] 7x MVO + Original + Sub (Rus, Eng) [3.58 GB]']
+2024-10-09 21:14:35,203 - DEBUG - Extracted English title: Tulsa King
+2024-10-09 21:14:35,203 - DEBUG - Final English title after cleanup: Tulsa King
+2024-10-09 21:14:35,203 - DEBUG - Cache hit for movie: Tulsa King
+2024-10-09 21:14:35,203 - DEBUG - Title after removing leading tags: Старик / The Old Man / Сезон: 2 / Серии: 1-3 из 8 (Джет Уилкинсон) [2024, США, Боевик, триллер, драма, WEB-DL 720p] DVO (Кубик в Кубе) + MVO (LostFilm) + MVO (TVShows) + MVO (HDRezka) + MVO (Red Head Sound) + AVO (Сербин) + Original + Sub (Eng) [6.7 GB]
+2024-10-09 21:14:35,204 - DEBUG - Title parts after splitting by '/': ['Старик ', ' The Old Man ', ' Сезон: 2 ', ' Серии: 1-3 из 8 (Джет Уилкинсон) [2024, США, Боевик, триллер, драма, WEB-DL 720p] DVO (Кубик в Кубе) + MVO (LostFilm) + MVO (TVShows) + MVO (HDRezka) + MVO (Red Head Sound) + AVO (Сербин) + Original + Sub (Eng) [6.7 GB]']
+2024-10-09 21:14:35,204 - DEBUG - Extracted English title: The Old Man
+2024-10-09 21:14:35,204 - DEBUG - Final English title after cleanup: The Old Man
+2024-10-09 21:14:35,204 - DEBUG - Cache hit for movie: The Old Man
+2024-10-09 21:14:35,204 - DEBUG - Title after removing leading tags: Пингвин / The Penguin / Сезон: 1 / Серии: 1 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, WEB-DL 720p] MVO (Syncmer) + MVO (LostFilm) + MVO (HDrezka) + MVO (1WinStudio) + Original + Sub (Rus, Eng) [2.55 GB]
+2024-10-09 21:14:35,204 - DEBUG - Title parts after splitting by '/': ['Пингвин ', ' The Penguin ', ' Сезон: 1 ', ' Серии: 1 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, WEB-DL 720p] MVO (Syncmer) + MVO (LostFilm) + MVO (HDrezka) + MVO (1WinStudio) + Original + Sub (Rus, Eng) [2.55 GB]']
+2024-10-09 21:14:35,204 - DEBUG - Extracted English title: The Penguin
+2024-10-09 21:14:35,204 - DEBUG - Final English title after cleanup: The Penguin
+2024-10-09 21:14:35,204 - DEBUG - Cache hit for movie: The Penguin
+2024-10-09 21:14:35,204 - DEBUG - Title after removing leading tags: Кобра Кай / Cobra Kai / Сезон: 6 / Серии: 1-5 из 15 (Джоэль Новоа, Шервин Шилати, Ральф Маччио) [2024, США, Боевик, драма, комедия, WEB-DL 1080p] MVO (HDrezka Studio, TVShows, AlexFilm) + Original + Sub (Rus, Ukr, Eng, Heb) [9.19 GB]
+2024-10-09 21:14:35,204 - DEBUG - Title parts after splitting by '/': ['Кобра Кай ', ' Cobra Kai ', ' Сезон: 6 ', ' Серии: 1-5 из 15 (Джоэль Новоа, Шервин Шилати, Ральф Маччио) [2024, США, Боевик, драма, комедия, WEB-DL 1080p] MVO (HDrezka Studio, TVShows, AlexFilm) + Original + Sub (Rus, Ukr, Eng, Heb) [9.19 GB]']
+2024-10-09 21:14:35,204 - DEBUG - Extracted English title: Cobra Kai
+2024-10-09 21:14:35,204 - DEBUG - Final English title after cleanup: Cobra Kai
+2024-10-09 21:14:35,204 - DEBUG - Cache hit for movie: Cobra Kai
+2024-10-09 21:14:35,204 - DEBUG - Title after removing leading tags: Кобра Кай / Cobra Kai / Сезон: 6 / Серии: 1-5 из 15 (Джоэль Новоа, Шервин Шилати, Ральф Маччио) [2024, США, Боевик, драма, комедия, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] [Hybrid] 3x MVO (AlexFilm, HDRezka, TVShows) Original + Sub (Rus, Eng) [27.78 GB]
+2024-10-09 21:14:35,205 - DEBUG - Title parts after splitting by '/': ['Кобра Кай ', ' Cobra Kai ', ' Сезон: 6 ', ' Серии: 1-5 из 15 (Джоэль Новоа, Шервин Шилати, Ральф Маччио) [2024, США, Боевик, драма, комедия, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] [Hybrid] 3x MVO (AlexFilm, HDRezka, TVShows) Original + Sub (Rus, Eng) [27.78 GB]']
+2024-10-09 21:14:35,205 - DEBUG - Extracted English title: Cobra Kai
+2024-10-09 21:14:35,205 - DEBUG - Final English title after cleanup: Cobra Kai
+2024-10-09 21:14:35,205 - DEBUG - Cache hit for movie: Cobra Kai
+2024-10-09 21:14:35,205 - DEBUG - Title after removing leading tags: Милые обманщицы: Первородный грех / Pretty Little Liars: Original Sin / Сезон: 2 / Серии: 1-6 из 8 (Роксанна Бенжамин, Мэгги Кили, Алекс Пиллаи) [2024, США, Ужасы, триллер, драма, мелодрама, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [18.57 GB]
+2024-10-09 21:14:35,205 - DEBUG - Title parts after splitting by '/': ['Милые обманщицы: Первородный грех ', ' Pretty Little Liars: Original Sin ', ' Сезон: 2 ', ' Серии: 1-6 из 8 (Роксанна Бенжамин, Мэгги Кили, Алекс Пиллаи) [2024, США, Ужасы, триллер, драма, мелодрама, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [18.57 GB]']
+2024-10-09 21:14:35,205 - DEBUG - Extracted English title: Pretty Little Liars: Original Sin
+2024-10-09 21:14:35,205 - DEBUG - Final English title after cleanup: Pretty Little Liars: Original Sin
+2024-10-09 21:14:35,205 - DEBUG - Cache hit for movie: Pretty Little Liars: Original Sin
+2024-10-09 21:14:35,205 - DEBUG - Title after removing leading tags: Голубая кровь / Blue Bloods / Сезон: 14 / Серии: 1-10 из ? (Алекс Закржевский, Жаклин Техада) [2024, США, Триллер, драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [27.03 GB]
+2024-10-09 21:14:35,205 - DEBUG - Title parts after splitting by '/': ['Голубая кровь ', ' Blue Bloods ', ' Сезон: 14 ', ' Серии: 1-10 из ? (Алекс Закржевский, Жаклин Техада) [2024, США, Триллер, драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [27.03 GB]']
+2024-10-09 21:14:35,205 - DEBUG - Extracted English title: Blue Bloods
+2024-10-09 21:14:35,205 - DEBUG - Final English title after cleanup: Blue Bloods
+2024-10-09 21:14:35,205 - DEBUG - Cache hit for movie: Blue Bloods
+2024-10-09 21:14:35,205 - DEBUG - Title after removing leading tags: Корона / The Crown / Сезон: 6 / Серии: 1-10 из 10 (Кристиан Швохов, Май эль-Туки, Алекс Габасси) [2023, Великобритания, Драма, история, биография, WEB-DL 1080p] MVO (NewStudio) + MVO (LostFilm) + MVO (TVShows) + MVO (HDRezka Studio) + Ukr (Так треба продакшн) + Original + Sub (Rus, Ukr, Eng) [27.91 GB]
+2024-10-09 21:14:35,206 - DEBUG - Title parts after splitting by '/': ['Корона ', ' The Crown ', ' Сезон: 6 ', ' Серии: 1-10 из 10 (Кристиан Швохов, Май эль-Туки, Алекс Габасси) [2023, Великобритания, Драма, история, биография, WEB-DL 1080p] MVO (NewStudio) + MVO (LostFilm) + MVO (TVShows) + MVO (HDRezka Studio) + Ukr (Так треба продакшн) + Original + Sub (Rus, Ukr, Eng) [27.91 GB]']
+2024-10-09 21:14:35,206 - DEBUG - Extracted English title: The Crown
+2024-10-09 21:14:35,206 - DEBUG - Final English title after cleanup: The Crown
+2024-10-09 21:14:35,206 - DEBUG - Cache hit for movie: The Crown
+2024-10-09 21:14:35,206 - DEBUG - Title after removing leading tags: Чужестранка / Outlander / Сезон: 7 / Серии: 1-8 из 16 (Метин Хусейн) [2023, США, Великобритания, Фэнтези, драма, мелодрама, WEB-DL 720p] MVO (NewStudio) + MVO (TVShows) + Original (Eng) + Sub (Eng) [17.58 GB]
+2024-10-09 21:14:35,206 - DEBUG - Title parts after splitting by '/': ['Чужестранка ', ' Outlander ', ' Сезон: 7 ', ' Серии: 1-8 из 16 (Метин Хусейн) [2023, США, Великобритания, Фэнтези, драма, мелодрама, WEB-DL 720p] MVO (NewStudio) + MVO (TVShows) + Original (Eng) + Sub (Eng) [17.58 GB]']
+2024-10-09 21:14:35,206 - DEBUG - Extracted English title: Outlander
+2024-10-09 21:14:35,206 - DEBUG - Final English title after cleanup: Outlander
+2024-10-09 21:14:35,206 - DEBUG - Cache hit for movie: Outlander
+2024-10-09 21:14:35,206 - DEBUG - Title after removing leading tags: Чужестранка / Outlander / Сезон: 7 / Серии: 1-8 из 16 (Метин Хусейн, Джэми Пэйн, Стивен Вульфенден, Лиза Кларк) [2023, США, Великобритания, Фэнтези, драма, мелодрама, WEB-DL 1080p] 2 x MVO (NewStudio, TVShows) + Original + Sub (Eng) [33.63 GB]
+2024-10-09 21:14:35,206 - DEBUG - Title parts after splitting by '/': ['Чужестранка ', ' Outlander ', ' Сезон: 7 ', ' Серии: 1-8 из 16 (Метин Хусейн, Джэми Пэйн, Стивен Вульфенден, Лиза Кларк) [2023, США, Великобритания, Фэнтези, драма, мелодрама, WEB-DL 1080p] 2 x MVO (NewStudio, TVShows) + Original + Sub (Eng) [33.63 GB]']
+2024-10-09 21:14:35,206 - DEBUG - Extracted English title: Outlander
+2024-10-09 21:14:35,206 - DEBUG - Final English title after cleanup: Outlander
+2024-10-09 21:14:35,206 - DEBUG - Cache hit for movie: Outlander
+2024-10-09 21:14:39,936 - INFO - Loaded 50 articles from http://feed.rutracker.cc/atom/f/1457.atom
+2024-10-09 21:14:39,936 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, Dolby Vision TV] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.94 GB]
+2024-10-09 21:14:39,936 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, Dolby Vision TV] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.94 GB]']
+2024-10-09 21:14:39,936 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:39,936 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:39,936 - DEBUG - Cache hit for movie: The Little Mermaid
+2024-10-09 21:14:39,936 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, HDR10+] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.69 GB]
+2024-10-09 21:14:39,937 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, HDR10+] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.69 GB]']
+2024-10-09 21:14:39,937 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:39,937 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:39,937 - DEBUG - Cache hit for movie: The Little Mermaid
+2024-10-09 21:14:39,937 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, SDR] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [26.01 GB]
+2024-10-09 21:14:39,937 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, SDR] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [26.01 GB]']
+2024-10-09 21:14:39,937 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:39,938 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:39,938 - DEBUG - Cache hit for movie: The Little Mermaid
+2024-10-09 21:14:39,938 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.9 GB]
+2024-10-09 21:14:39,938 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.9 GB]']
+2024-10-09 21:14:39,938 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:39,938 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:39,938 - DEBUG - Cache hit for movie: The Little Mermaid
+2024-10-09 21:14:39,938 - DEBUG - Title after removing leading tags: Артемис Фаул / Artemis Fowl (Кеннет Брана / Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.07 GB]
+2024-10-09 21:14:39,938 - DEBUG - Title parts after splitting by '/': ['Артемис Фаул ', ' Artemis Fowl (Кеннет Брана ', ' Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.07 GB]']
+2024-10-09 21:14:39,938 - DEBUG - Extracted English title: Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.07 GB]
+2024-10-09 21:14:39,938 - DEBUG - Final English title after cleanup: Kenneth Branagh)
+2024-10-09 21:14:39,939 - DEBUG - Fetching movie data for: Kenneth Branagh)
+2024-10-09 21:14:39,940 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:40,257 - INFO - Loaded 50 articles from https://feed.rutracker.cc/atom/f/1803.atom
+2024-10-09 21:14:40,257 - DEBUG - Title after removing leading tags: Извне / From / Сезон: 3 / Серии: 1-3 из 10 (Джек Бендер) [2024, США, Ужасы, фантастика, триллер, драма, детектив, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, AlexFilm, TVShows, Red Head Sound, LE-Production) + Original + Sub (Rus, Eng) [10.9 GB]
+2024-10-09 21:14:40,257 - DEBUG - Title parts after splitting by '/': ['Извне ', ' From ', ' Сезон: 3 ', ' Серии: 1-3 из 10 (Джек Бендер) [2024, США, Ужасы, фантастика, триллер, драма, детектив, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, AlexFilm, TVShows, Red Head Sound, LE-Production) + Original + Sub (Rus, Eng) [10.9 GB]']
+2024-10-09 21:14:40,257 - DEBUG - Extracted English title: From
+2024-10-09 21:14:40,257 - DEBUG - Final English title after cleanup: From
+2024-10-09 21:14:40,257 - DEBUG - Cache hit for movie: From
+2024-10-09 21:14:40,257 - DEBUG - Title after removing leading tags: Извне / From / Сезон: 3 / Серии: 1-3 из 10 (Александра Ла Рош, Брэд Тернер, Джек Бендер) [2024, США, Ужасы, фантастика, триллер, драма, детектив, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO (HDRezka, AlexFilm, LostFilm, TVShows, Red Head Sound, LE-Production, RuDub) + Original + Sub (Rus, Eng) [19.74 GB]
+2024-10-09 21:14:40,257 - DEBUG - Title parts after splitting by '/': ['Извне ', ' From ', ' Сезон: 3 ', ' Серии: 1-3 из 10 (Александра Ла Рош, Брэд Тернер, Джек Бендер) [2024, США, Ужасы, фантастика, триллер, драма, детектив, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO (HDRezka, AlexFilm, LostFilm, TVShows, Red Head Sound, LE-Production, RuDub) + Original + Sub (Rus, Eng) [19.74 GB]']
+2024-10-09 21:14:40,258 - DEBUG - Extracted English title: From
+2024-10-09 21:14:40,258 - DEBUG - Final English title after cleanup: From
+2024-10-09 21:14:40,258 - DEBUG - Cache hit for movie: From
+2024-10-09 21:14:40,258 - DEBUG - Title after removing leading tags: Моя гениальная подруга / L'amica geniale / My Brilliant Friend / Сезон: 4 / Серии: 1-5 из 8 (Саверио Костанцо, Даниэле Лукетти, Аличе Рорвахер) [2024, Италия, США, Драма, WEB-DL 1080p] MVO (HDRezka Studio) + Original + Sub (Rus, Eng) [18.28 GB]
+2024-10-09 21:14:40,258 - DEBUG - Title parts after splitting by '/': ['Моя гениальная подруга ', " L'amica geniale ", ' My Brilliant Friend ', ' Сезон: 4 ', ' Серии: 1-5 из 8 (Саверио Костанцо, Даниэле Лукетти, Аличе Рорвахер) [2024, Италия, США, Драма, WEB-DL 1080p] MVO (HDRezka Studio) + Original + Sub (Rus, Eng) [18.28 GB]']
+2024-10-09 21:14:40,258 - DEBUG - Extracted English title: L'amica geniale
+2024-10-09 21:14:40,258 - DEBUG - Final English title after cleanup: L'amica geniale
+2024-10-09 21:14:40,258 - DEBUG - Cache hit for movie: L'amica geniale
+2024-10-09 21:14:40,258 - DEBUG - Title after removing leading tags: Полиция Чикаго / Chicago P.D. / Сезон: 12 / Серии: 1-2 из ? (Марк Тинкер, Эрик Ла Салль) [2024, США, боевик, триллер, драма, криминал, WEB-DL 720p] MVO (TVShows) + Original + Sub (Eng) [2.74 GB]
+2024-10-09 21:14:40,258 - DEBUG - Title parts after splitting by '/': ['Полиция Чикаго ', ' Chicago P.D. ', ' Сезон: 12 ', ' Серии: 1-2 из ? (Марк Тинкер, Эрик Ла Салль) [2024, США, боевик, триллер, драма, криминал, WEB-DL 720p] MVO (TVShows) + Original + Sub (Eng) [2.74 GB]']
+2024-10-09 21:14:40,258 - DEBUG - Extracted English title: Chicago P.D.
+2024-10-09 21:14:40,258 - DEBUG - Final English title after cleanup: Chicago P.D.
+2024-10-09 21:14:40,258 - DEBUG - Cache hit for movie: Chicago P.D.
+2024-10-09 21:14:40,258 - DEBUG - Title after removing leading tags: Франшиза / The Franchise / Сезон: 1 / Серии: 1 из 8 (Сэм Мендес) [2024, США, комедия, WEB-DL 1080p] MVO (Pro-Dubbing & Deluxe Media, HDRezka, HDRezka (18+), 1WinStudio, LE-Production) + Original + Sub (Eng) [2.13 GB]
+2024-10-09 21:14:40,258 - DEBUG - Title parts after splitting by '/': ['Франшиза ', ' The Franchise ', ' Сезон: 1 ', ' Серии: 1 из 8 (Сэм Мендес) [2024, США, комедия, WEB-DL 1080p] MVO (Pro-Dubbing & Deluxe Media, HDRezka, HDRezka (18+), 1WinStudio, LE-Production) + Original + Sub (Eng) [2.13 GB]']
+2024-10-09 21:14:40,258 - DEBUG - Extracted English title: The Franchise
+2024-10-09 21:14:40,258 - DEBUG - Final English title after cleanup: The Franchise
+2024-10-09 21:14:40,258 - DEBUG - Cache hit for movie: The Franchise
+2024-10-09 21:14:40,258 - DEBUG - Title after removing leading tags: Пингвин / The Penguin / Сезон: 1 / Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, Фэнтези, драма, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] 7x MVO (HDRezka, Syncmer, NewComers, LostFilm, TVShows, 1WinStudio, LE-Production) + Dub (Red Head Sound) + DVO (Кубик в Кубе) + Original + Sub (Rus, Eng) [31.66 GB]
+2024-10-09 21:14:40,258 - DEBUG - Title parts after splitting by '/': ['Пингвин ', ' The Penguin ', ' Сезон: 1 ', ' Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, Фэнтези, драма, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] 7x MVO (HDRezka, Syncmer, NewComers, LostFilm, TVShows, 1WinStudio, LE-Production) + Dub (Red Head Sound) + DVO (Кубик в Кубе) + Original + Sub (Rus, Eng) [31.66 GB]']
+2024-10-09 21:14:40,258 - DEBUG - Extracted English title: The Penguin
+2024-10-09 21:14:40,258 - DEBUG - Final English title after cleanup: The Penguin
+2024-10-09 21:14:40,258 - DEBUG - Cache hit for movie: The Penguin
+2024-10-09 21:14:40,259 - DEBUG - Title after removing leading tags: Гротеск / Grotesquerie / Сезон: 1 / Серии: 1-4 из 10 (Макс Уинклер, Алексис Мартин Вудалл) [2024, США, ужасы, драма, WEB-DL 1080p] 4x MVO (HDRezka, TVShows, 1WinStudio, Red Head Sound) + Original + Sub (Eng) [7.55 GB]
+2024-10-09 21:14:40,259 - DEBUG - Title parts after splitting by '/': ['Гротеск ', ' Grotesquerie ', ' Сезон: 1 ', ' Серии: 1-4 из 10 (Макс Уинклер, Алексис Мартин Вудалл) [2024, США, ужасы, драма, WEB-DL 1080p] 4x MVO (HDRezka, TVShows, 1WinStudio, Red Head Sound) + Original + Sub (Eng) [7.55 GB]']
+2024-10-09 21:14:40,259 - DEBUG - Extracted English title: Grotesquerie
+2024-10-09 21:14:40,259 - DEBUG - Final English title after cleanup: Grotesquerie
+2024-10-09 21:14:40,259 - DEBUG - Cache hit for movie: Grotesquerie
+2024-10-09 21:14:40,259 - DEBUG - Title after removing leading tags: Поиски / Found / Сезон: 1 / Серии: 1 из 22 (Димэйн Дэвис, Джессика Борсицки, Чад Лоу) [2024, США, драма, WEB-DL 1080p] 2x MVO (TVShows, LE-Production) + Original + Sub (Eng) [2.36 GB]
+2024-10-09 21:14:40,259 - DEBUG - Title parts after splitting by '/': ['Поиски ', ' Found ', ' Сезон: 1 ', ' Серии: 1 из 22 (Димэйн Дэвис, Джессика Борсицки, Чад Лоу) [2024, США, драма, WEB-DL 1080p] 2x MVO (TVShows, LE-Production) + Original + Sub (Eng) [2.36 GB]']
+2024-10-09 21:14:40,259 - DEBUG - Extracted English title: Found
+2024-10-09 21:14:40,259 - DEBUG - Final English title after cleanup: Found
+2024-10-09 21:14:40,259 - DEBUG - Cache hit for movie: Found
+2024-10-09 21:14:40,259 - DEBUG - Title after removing leading tags: Властелин колец: Кольца власти / The Lord of the Rings: The Rings of Power / Сезон: 2 / Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма HDR10, HDR10+, Dolby Vision, WEB-DL 2160p, 4k] 5 x MVO + Dub (Red Head Sound) + Original + Sub Eng [64.84 GB]
+2024-10-09 21:14:40,259 - DEBUG - Title parts after splitting by '/': ['Властелин колец: Кольца власти ', ' The Lord of the Rings: The Rings of Power ', ' Сезон: 2 ', ' Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма HDR10, HDR10+, Dolby Vision, WEB-DL 2160p, 4k] 5 x MVO + Dub (Red Head Sound) + Original + Sub Eng [64.84 GB]']
+2024-10-09 21:14:40,259 - DEBUG - Extracted English title: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:40,259 - DEBUG - Final English title after cleanup: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:40,259 - DEBUG - Cache hit for movie: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:40,259 - DEBUG - Title after removing leading tags: Властелин колец: Кольца власти / The Lord of the Rings: The Rings of Power / Сезон: 2 / Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма, приключения, WEB-DL 1080p] 5 x MVO (HDRezka Studio, LostFilm, TVShows, NewComers, LE-Production) + Dub + Original + Sub Eng [30.56 GB]
+2024-10-09 21:14:40,259 - DEBUG - Title parts after splitting by '/': ['Властелин колец: Кольца власти ', ' The Lord of the Rings: The Rings of Power ', ' Сезон: 2 ', ' Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма, приключения, WEB-DL 1080p] 5 x MVO (HDRezka Studio, LostFilm, TVShows, NewComers, LE-Production) + Dub + Original + Sub Eng [30.56 GB]']
+2024-10-09 21:14:40,260 - DEBUG - Extracted English title: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:40,260 - DEBUG - Final English title after cleanup: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:40,260 - DEBUG - Cache hit for movie: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:40,260 - DEBUG - Title after removing leading tags: Фрейзер / Frasier / Сезон: 2 / Серии: 1-4 из 8 (Джеймс Берроуз, Виктор Гонзалез, Келли Парк) [2024, США, комедия, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Rus, Eng) [7.62 GB]
+2024-10-09 21:14:40,260 - DEBUG - Title parts after splitting by '/': ['Фрейзер ', ' Frasier ', ' Сезон: 2 ', ' Серии: 1-4 из 8 (Джеймс Берроуз, Виктор Гонзалез, Келли Парк) [2024, США, комедия, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Rus, Eng) [7.62 GB]']
+2024-10-09 21:14:40,260 - DEBUG - Extracted English title: Frasier
+2024-10-09 21:14:40,260 - DEBUG - Final English title after cleanup: Frasier
+2024-10-09 21:14:40,260 - DEBUG - Cache hit for movie: Frasier
+2024-10-09 21:14:40,260 - DEBUG - Title after removing leading tags: Властелин колец: Кольца власти / The Lord of the Rings: The Rings of Power / Сезон: 2 / Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма, приключения, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO + Dub (Red Head Sound) + Original + Sub (Eng) [64.98 GB]
+2024-10-09 21:14:40,260 - DEBUG - Title parts after splitting by '/': ['Властелин колец: Кольца власти ', ' The Lord of the Rings: The Rings of Power ', ' Сезон: 2 ', ' Серии: 1-8 из 8 (Уэйн Йип) [2024, США, Новая Зеландия, Канада, Фэнтези, боевик, драма, приключения, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO + Dub (Red Head Sound) + Original + Sub (Eng) [64.98 GB]']
+2024-10-09 21:14:40,260 - DEBUG - Extracted English title: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:40,260 - DEBUG - Final English title after cleanup: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:40,260 - DEBUG - Cache hit for movie: The Lord of the Rings: The Rings of Power
+2024-10-09 21:14:40,260 - DEBUG - Title after removing leading tags: Король Талсы / Tulsa King / Сезон: 2 / Серии: 1-4 из 10 (Крейг Зиск, Кевин Даулинг) [2024, США, Драма, криминал, комедия, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO (NewComers, HDRezka, LostFilm, TVShows, 1WinStudio, Red Head Sound, LE-Production) + Ukr (DniproFilm) + Original + Sub (Rus, Ukr, Eng) [21.21 GB]
+2024-10-09 21:14:40,260 - DEBUG - Title parts after splitting by '/': ['Король Талсы ', ' Tulsa King ', ' Сезон: 2 ', ' Серии: 1-4 из 10 (Крейг Зиск, Кевин Даулинг) [2024, США, Драма, криминал, комедия, HEVC, SDR, WEB-DL 2160p, 4k] 6 x MVO (NewComers, HDRezka, LostFilm, TVShows, 1WinStudio, Red Head Sound, LE-Production) + Ukr (DniproFilm) + Original + Sub (Rus, Ukr, Eng) [21.21 GB]']
+2024-10-09 21:14:40,261 - DEBUG - Extracted English title: Tulsa King
+2024-10-09 21:14:40,261 - DEBUG - Final English title after cleanup: Tulsa King
+2024-10-09 21:14:40,261 - DEBUG - Cache hit for movie: Tulsa King
+2024-10-09 21:14:40,261 - DEBUG - Title after removing leading tags: Пингвин / The Penguin / Сезон: 1 / Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, HEVC, Dolby Vision TV, WEB-DL 2160p, 4k] MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [29.3 GB]
+2024-10-09 21:14:40,261 - DEBUG - Title parts after splitting by '/': ['Пингвин ', ' The Penguin ', ' Сезон: 1 ', ' Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, HEVC, Dolby Vision TV, WEB-DL 2160p, 4k] MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [29.3 GB]']
+2024-10-09 21:14:40,261 - DEBUG - Extracted English title: The Penguin
+2024-10-09 21:14:40,261 - DEBUG - Final English title after cleanup: The Penguin
+2024-10-09 21:14:40,261 - DEBUG - Cache hit for movie: The Penguin
+2024-10-09 21:14:40,261 - DEBUG - Title after removing leading tags: Пингвин / The Penguin / Сезон: 1 / Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, WEB-DL 1080p] MVO (Syncmer) + Original + Sub (Rus, Eng, Bul, Rom) [12.95 GB]
+2024-10-09 21:14:40,261 - DEBUG - Title parts after splitting by '/': ['Пингвин ', ' The Penguin ', ' Сезон: 1 ', ' Серии: 1-3 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, WEB-DL 1080p] MVO (Syncmer) + Original + Sub (Rus, Eng, Bul, Rom) [12.95 GB]']
+2024-10-09 21:14:40,261 - DEBUG - Extracted English title: The Penguin
+2024-10-09 21:14:40,261 - DEBUG - Final English title after cleanup: The Penguin
+2024-10-09 21:14:40,261 - DEBUG - Cache hit for movie: The Penguin
+2024-10-09 21:14:40,261 - DEBUG - Title after removing leading tags: Это всё Агата / Agatha All Along / Сезон: 1 / Серии: 1-4 из 9 (Ганджа Монтейру) [2024, США, фантастика, фэнтези, боевик, драма, комедия, приключения, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] 6 х MVO (HDRezka, NewComers, LostFilm, TVShows, 1WinStudio, LE-Production) Original + Sub (Rus, Eng) [17.76 GB]
+2024-10-09 21:14:40,261 - DEBUG - Title parts after splitting by '/': ['Это всё Агата ', ' Agatha All Along ', ' Сезон: 1 ', ' Серии: 1-4 из 9 (Ганджа Монтейру) [2024, США, фантастика, фэнтези, боевик, драма, комедия, приключения, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] 6 х MVO (HDRezka, NewComers, LostFilm, TVShows, 1WinStudio, LE-Production) Original + Sub (Rus, Eng) [17.76 GB]']
+2024-10-09 21:14:40,261 - DEBUG - Extracted English title: Agatha All Along
+2024-10-09 21:14:40,261 - DEBUG - Final English title after cleanup: Agatha All Along
+2024-10-09 21:14:40,262 - DEBUG - Cache hit for movie: Agatha All Along
+2024-10-09 21:14:40,262 - DEBUG - Title after removing leading tags: Убийство в маленьком городке / Murder in a Small Town / Сезон: 1 / Серии: 1-2 из 8 (Милан Чейлов, Лесли Хоуп, Аманда Таппинг) [2024, Канада, США, Драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [7.58 GB]
+2024-10-09 21:14:40,262 - DEBUG - Title parts after splitting by '/': ['Убийство в маленьком городке ', ' Murder in a Small Town ', ' Сезон: 1 ', ' Серии: 1-2 из 8 (Милан Чейлов, Лесли Хоуп, Аманда Таппинг) [2024, Канада, США, Драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [7.58 GB]']
+2024-10-09 21:14:40,262 - DEBUG - Extracted English title: Murder in a Small Town
+2024-10-09 21:14:40,262 - DEBUG - Final English title after cleanup: Murder in a Small Town
+2024-10-09 21:14:40,262 - DEBUG - Cache hit for movie: Murder in a Small Town
+2024-10-09 21:14:40,262 - DEBUG - Title after removing leading tags: Чикаго в огне / Chicago Fire / Сезон: 13 / Серии: 1-2 из 22 (Реза Табризи) [2024, США, Драма, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [5.46 GB]
+2024-10-09 21:14:40,262 - DEBUG - Title parts after splitting by '/': ['Чикаго в огне ', ' Chicago Fire ', ' Сезон: 13 ', ' Серии: 1-2 из 22 (Реза Табризи) [2024, США, Драма, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [5.46 GB]']
+2024-10-09 21:14:40,262 - DEBUG - Extracted English title: Chicago Fire
+2024-10-09 21:14:40,262 - DEBUG - Final English title after cleanup: Chicago Fire
+2024-10-09 21:14:40,262 - DEBUG - Cache hit for movie: Chicago Fire
+2024-10-09 21:14:40,262 - DEBUG - Title after removing leading tags: О всех созданиях - больших и малых / All Creatures Great and Small / Сезон: 5 / Серии: 1-3 из 6 (Энди Хэй, Стюарт Сваасанд) [2024, Великобритания, драма, комедия, WEB-DL 1080p] Original + Sub (Rus, Eng) [5.75 GB]
+2024-10-09 21:14:40,262 - DEBUG - Title parts after splitting by '/': ['О всех созданиях - больших и малых ', ' All Creatures Great and Small ', ' Сезон: 5 ', ' Серии: 1-3 из 6 (Энди Хэй, Стюарт Сваасанд) [2024, Великобритания, драма, комедия, WEB-DL 1080p] Original + Sub (Rus, Eng) [5.75 GB]']
+2024-10-09 21:14:40,262 - DEBUG - Extracted English title: All Creatures Great and Small
+2024-10-09 21:14:40,262 - DEBUG - Final English title after cleanup: All Creatures Great and Small
+2024-10-09 21:14:40,262 - DEBUG - Cache hit for movie: All Creatures Great and Small
+2024-10-09 21:14:40,262 - DEBUG - Title after removing leading tags: Медленные лошади / Slow Horses / Сезон: 4 / Серии: 1-5 из 6 (Адам Рэндолл) [2024, Великобритания, США, Триллер, детектив, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows, LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Ukr, Eng, Heb) [18.7 GB]
+2024-10-09 21:14:40,262 - DEBUG - Title parts after splitting by '/': ['Медленные лошади ', ' Slow Horses ', ' Сезон: 4 ', ' Серии: 1-5 из 6 (Адам Рэндолл) [2024, Великобритания, США, Триллер, детектив, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows, LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Ukr, Eng, Heb) [18.7 GB]']
+2024-10-09 21:14:40,262 - DEBUG - Extracted English title: Slow Horses
+2024-10-09 21:14:40,262 - DEBUG - Final English title after cleanup: Slow Horses
+2024-10-09 21:14:40,263 - DEBUG - Cache hit for movie: Slow Horses
+2024-10-09 21:14:40,263 - DEBUG - Title after removing leading tags: Медленные лошади / Хромые кони / Slow Horses / Сезон: 4 / Серии: 1-5 из 6 (Адам Рэндолл) [2024, Великобритания, США, Триллер, детектив, HEVC, Dolby Vision, HDR10+, HDR10, WEB-DL 2160p, 4k] [Hybrid] 4 x MVO (LostFilm, HDRezka, TVShows, LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Eng) [40.77 GB]
+2024-10-09 21:14:40,263 - DEBUG - Title parts after splitting by '/': ['Медленные лошади ', ' Хромые кони ', ' Slow Horses ', ' Сезон: 4 ', ' Серии: 1-5 из 6 (Адам Рэндолл) [2024, Великобритания, США, Триллер, детектив, HEVC, Dolby Vision, HDR10+, HDR10, WEB-DL 2160p, 4k] [Hybrid] 4 x MVO (LostFilm, HDRezka, TVShows, LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Eng) [40.77 GB]']
+2024-10-09 21:14:40,263 - DEBUG - Extracted English title: Slow Horses
+2024-10-09 21:14:40,263 - DEBUG - Final English title after cleanup: Slow Horses
+2024-10-09 21:14:40,263 - DEBUG - Cache hit for movie: Slow Horses
+2024-10-09 21:14:40,263 - DEBUG - Title after removing leading tags: Пингвин / The Penguin / Сезон: 1 / Серии: 1-2 из 8 (Крэйг Зобел) [2024, США, Фэнтези, драма, криминал, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, NewComers, TVShows, 1WinStudio) + DVO (Кубик в Кубе) + Dub (Red Head Sound) + Ukr (HDRezka Studio) + Original + Sub (Rus, Eng) [10.35 GB]
+2024-10-09 21:14:40,263 - DEBUG - Title parts after splitting by '/': ['Пингвин ', ' The Penguin ', ' Сезон: 1 ', ' Серии: 1-2 из 8 (Крэйг Зобел) [2024, США, Фэнтези, драма, криминал, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, NewComers, TVShows, 1WinStudio) + DVO (Кубик в Кубе) + Dub (Red Head Sound) + Ukr (HDRezka Studio) + Original + Sub (Rus, Eng) [10.35 GB]']
+2024-10-09 21:14:40,263 - DEBUG - Extracted English title: The Penguin
+2024-10-09 21:14:40,263 - DEBUG - Final English title after cleanup: The Penguin
+2024-10-09 21:14:40,263 - DEBUG - Cache hit for movie: The Penguin
+2024-10-09 21:14:40,263 - DEBUG - Title after removing leading tags: Убийства в одном здании / Only Murders in the Building / Сезон: 4 / Серии: 1-6 из 10 (Джон Хоффман) [2024, США, Детектив, комедия, криминал, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] MVO (HDRezka Studio, LostFilm, TVShows, Jaskier, LE-Production) + Original + Sub (Rus, Eng) [24.38 GB]
+2024-10-09 21:14:40,263 - DEBUG - Title parts after splitting by '/': ['Убийства в одном здании ', ' Only Murders in the Building ', ' Сезон: 4 ', ' Серии: 1-6 из 10 (Джон Хоффман) [2024, США, Детектив, комедия, криминал, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] MVO (HDRezka Studio, LostFilm, TVShows, Jaskier, LE-Production) + Original + Sub (Rus, Eng) [24.38 GB]']
+2024-10-09 21:14:40,263 - DEBUG - Extracted English title: Only Murders in the Building
+2024-10-09 21:14:40,263 - DEBUG - Final English title after cleanup: Only Murders in the Building
+2024-10-09 21:14:40,264 - DEBUG - Cache hit for movie: Only Murders in the Building
+2024-10-09 21:14:40,264 - DEBUG - Title after removing leading tags: Убийства в одном здании / Only Murders in the Building / Сезон: 4 / Серии: 1-6 из 10 (Джон Хоффман, Крис Кох, Джессика Ю) [2024, США, детектив, комедия, криминал, WEB-DL 1080p] 7 x MVO (HDRezka Studio, LostFilm, Jaskier, TVShows, 1WinStudio, RHS, LE-Production) + Original (Eng) + Sub (Rus, Eng) [11.62 GB]
+2024-10-09 21:14:40,264 - DEBUG - Title parts after splitting by '/': ['Убийства в одном здании ', ' Only Murders in the Building ', ' Сезон: 4 ', ' Серии: 1-6 из 10 (Джон Хоффман, Крис Кох, Джессика Ю) [2024, США, детектив, комедия, криминал, WEB-DL 1080p] 7 x MVO (HDRezka Studio, LostFilm, Jaskier, TVShows, 1WinStudio, RHS, LE-Production) + Original (Eng) + Sub (Rus, Eng) [11.62 GB]']
+2024-10-09 21:14:40,264 - DEBUG - Extracted English title: Only Murders in the Building
+2024-10-09 21:14:40,264 - DEBUG - Final English title after cleanup: Only Murders in the Building
+2024-10-09 21:14:40,264 - DEBUG - Cache hit for movie: Only Murders in the Building
+2024-10-09 21:14:40,264 - DEBUG - Title after removing leading tags: Король Талсы / Tulsa King / Сезон: 2 / Серии: 1-3 из 10 (Крейг Зиск, Кевин Даулинг) [2024, США, Драма, криминал, комедия, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows, NewComers, Red Head Sound, 1WinStudio, LE-Production) + Original + Sub (Rus, Eng) [9.23 GB]
+2024-10-09 21:14:40,264 - DEBUG - Title parts after splitting by '/': ['Король Талсы ', ' Tulsa King ', ' Сезон: 2 ', ' Серии: 1-3 из 10 (Крейг Зиск, Кевин Даулинг) [2024, США, Драма, криминал, комедия, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows, NewComers, Red Head Sound, 1WinStudio, LE-Production) + Original + Sub (Rus, Eng) [9.23 GB]']
+2024-10-09 21:14:40,264 - DEBUG - Extracted English title: Tulsa King
+2024-10-09 21:14:40,264 - DEBUG - Final English title after cleanup: Tulsa King
+2024-10-09 21:14:40,264 - DEBUG - Cache hit for movie: Tulsa King
+2024-10-09 21:14:40,264 - DEBUG - Title after removing leading tags: Плохая обезьяна / Bad Monkey / Сезон: 1 / Серии: 1-9 из 10 (Маркос Сига, Колин Бакси, Эрика Дантон) [2024, США, комедия, детектив, криминал, WEB-DL 1080p] 3 x MVO (HDRezka Studio, TVShows, LE-Production) + 2 x DVO (Кубик в Кубе, ViruseProject) + Original (Eng) + Sub (Rus, Eng) [37.39 GB]
+2024-10-09 21:14:40,264 - DEBUG - Title parts after splitting by '/': ['Плохая обезьяна ', ' Bad Monkey ', ' Сезон: 1 ', ' Серии: 1-9 из 10 (Маркос Сига, Колин Бакси, Эрика Дантон) [2024, США, комедия, детектив, криминал, WEB-DL 1080p] 3 x MVO (HDRezka Studio, TVShows, LE-Production) + 2 x DVO (Кубик в Кубе, ViruseProject) + Original (Eng) + Sub (Rus, Eng) [37.39 GB]']
+2024-10-09 21:14:40,264 - DEBUG - Extracted English title: Bad Monkey
+2024-10-09 21:14:40,264 - DEBUG - Final English title after cleanup: Bad Monkey
+2024-10-09 21:14:40,264 - DEBUG - Cache hit for movie: Bad Monkey
+2024-10-09 21:14:40,264 - DEBUG - Title after removing leading tags: Спецназ / SEAL Team / Сезон: 7 / Серии: 1-9 из 10 (Кристофер Чулак, Джеймс М. Муро) [2024, США, боевик, драма, военный, WEB-DL 720p] MVO (TVShows) + MVO (HDRezka) + Original + Sub (Eng) [11.22 GB]
+2024-10-09 21:14:40,264 - DEBUG - Title parts after splitting by '/': ['Спецназ ', ' SEAL Team ', ' Сезон: 7 ', ' Серии: 1-9 из 10 (Кристофер Чулак, Джеймс М. Муро) [2024, США, боевик, драма, военный, WEB-DL 720p] MVO (TVShows) + MVO (HDRezka) + Original + Sub (Eng) [11.22 GB]']
+2024-10-09 21:14:40,265 - DEBUG - Extracted English title: SEAL Team
+2024-10-09 21:14:40,265 - DEBUG - Final English title after cleanup: SEAL Team
+2024-10-09 21:14:40,265 - DEBUG - Cache hit for movie: SEAL Team
+2024-10-09 21:14:40,265 - DEBUG - Title after removing leading tags: Блестящие умы / Brilliant Minds / Сезон: 1 / Серии: 1-2 из 6 (Джордан Каннинг, Ли Толанд Кригер) [2024, США, драма, WEB-DL 1080p] 4x MVO (HDRezka, TVShows, 1WinStudio, LE-Production) + Original + Sub (Eng) [5.43 GB]
+2024-10-09 21:14:40,265 - DEBUG - Title parts after splitting by '/': ['Блестящие умы ', ' Brilliant Minds ', ' Сезон: 1 ', ' Серии: 1-2 из 6 (Джордан Каннинг, Ли Толанд Кригер) [2024, США, драма, WEB-DL 1080p] 4x MVO (HDRezka, TVShows, 1WinStudio, LE-Production) + Original + Sub (Eng) [5.43 GB]']
+2024-10-09 21:14:40,265 - DEBUG - Extracted English title: Brilliant Minds
+2024-10-09 21:14:40,265 - DEBUG - Final English title after cleanup: Brilliant Minds
+2024-10-09 21:14:40,265 - DEBUG - Cache hit for movie: Brilliant Minds
+2024-10-09 21:14:40,265 - DEBUG - Title after removing leading tags: О всех созданиях - больших и малых / All Creatures Great and Small / Сезон: 5 / Серии: 1-2 из 6 (Брайан Персивал, Стюарт Сваасанд) [2024, Великобритания, Драма, комедия, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [3.96 GB]
+2024-10-09 21:14:40,265 - DEBUG - Title parts after splitting by '/': ['О всех созданиях - больших и малых ', ' All Creatures Great and Small ', ' Сезон: 5 ', ' Серии: 1-2 из 6 (Брайан Персивал, Стюарт Сваасанд) [2024, Великобритания, Драма, комедия, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [3.96 GB]']
+2024-10-09 21:14:40,265 - DEBUG - Extracted English title: All Creatures Great and Small
+2024-10-09 21:14:40,265 - DEBUG - Final English title after cleanup: All Creatures Great and Small
+2024-10-09 21:14:40,265 - DEBUG - Cache hit for movie: All Creatures Great and Small
+2024-10-09 21:14:40,265 - DEBUG - Title after removing leading tags: Соври мне / Tell Me Lies / Сезон: 2 / Серии: 1-6 из 8 (Сэм Бойд, Эрин Фили, Эд Лилли) [2024, США, драма, WEB-DL 1080p] MVO (LE-Production) + Original + Sub (Eng) [11.28 GB]
+2024-10-09 21:14:40,265 - DEBUG - Title parts after splitting by '/': ['Соври мне ', ' Tell Me Lies ', ' Сезон: 2 ', ' Серии: 1-6 из 8 (Сэм Бойд, Эрин Фили, Эд Лилли) [2024, США, драма, WEB-DL 1080p] MVO (LE-Production) + Original + Sub (Eng) [11.28 GB]']
+2024-10-09 21:14:40,266 - DEBUG - Extracted English title: Tell Me Lies
+2024-10-09 21:14:40,266 - DEBUG - Final English title after cleanup: Tell Me Lies
+2024-10-09 21:14:40,266 - DEBUG - Cache hit for movie: Tell Me Lies
+2024-10-09 21:14:40,266 - DEBUG - Title after removing leading tags: Учитель английского / English Teacher / Сезон: 1 / Серии: 1-6 из 8 (Брайан Джордан Альварес) [2024, США, комедия, WEB-DL 1080p] 2x MVO (HDRezka, LE-Production) + Original + Sub (Eng) [7.74 GB]
+2024-10-09 21:14:40,266 - DEBUG - Title parts after splitting by '/': ['Учитель английского ', ' English Teacher ', ' Сезон: 1 ', ' Серии: 1-6 из 8 (Брайан Джордан Альварес) [2024, США, комедия, WEB-DL 1080p] 2x MVO (HDRezka, LE-Production) + Original + Sub (Eng) [7.74 GB]']
+2024-10-09 21:14:40,266 - DEBUG - Extracted English title: English Teacher
+2024-10-09 21:14:40,266 - DEBUG - Final English title after cleanup: English Teacher
+2024-10-09 21:14:40,266 - DEBUG - Cache hit for movie: English Teacher
+2024-10-09 21:14:40,266 - DEBUG - Title after removing leading tags: Властелин колец: Кольца власти / The Lord Of The Rings: The Rings Of Power / Сезон: 2 / Серии: 1-7 из 8 (Шарлотта Брандстром) [2024, США, Новая Зеландия, Канада, фэнтези, боевик, драма, приключения, WEB-DL 720p] 6 x MVO + Dub (Red Head Sound) + Original + Sub (Eng) [17 GB]
+2024-10-09 21:14:40,266 - DEBUG - Title parts after splitting by '/': ['Властелин колец: Кольца власти ', ' The Lord Of The Rings: The Rings Of Power ', ' Сезон: 2 ', ' Серии: 1-7 из 8 (Шарлотта Брандстром) [2024, США, Новая Зеландия, Канада, фэнтези, боевик, драма, приключения, WEB-DL 720p] 6 x MVO + Dub (Red Head Sound) + Original + Sub (Eng) [17 GB]']
+2024-10-09 21:14:40,266 - DEBUG - Extracted English title: The Lord Of The Rings: The Rings Of Power
+2024-10-09 21:14:40,266 - DEBUG - Final English title after cleanup: The Lord Of The Rings: The Rings Of Power
+2024-10-09 21:14:40,266 - DEBUG - Cache hit for movie: The Lord Of The Rings: The Rings Of Power
+2024-10-09 21:14:40,266 - DEBUG - Title after removing leading tags: Модный дом / La Maison / Сезон: 1 / Серии: 1-3 из 10 (Фабрис Гобер, Дэниэл Гру) [2024, Франция, драма, WEB-DL 1080p] 3 x MVO (HDRezka Studio, TVShows, 1WinStudio) + Original (Fra) + Sub (Rus, Fra) [12.57 GB]
+2024-10-09 21:14:40,266 - DEBUG - Title parts after splitting by '/': ['Модный дом ', ' La Maison ', ' Сезон: 1 ', ' Серии: 1-3 из 10 (Фабрис Гобер, Дэниэл Гру) [2024, Франция, драма, WEB-DL 1080p] 3 x MVO (HDRezka Studio, TVShows, 1WinStudio) + Original (Fra) + Sub (Rus, Fra) [12.57 GB]']
+2024-10-09 21:14:40,266 - DEBUG - Extracted English title: La Maison
+2024-10-09 21:14:40,266 - DEBUG - Final English title after cleanup: La Maison
+2024-10-09 21:14:40,266 - DEBUG - Cache hit for movie: La Maison
+2024-10-09 21:14:40,266 - DEBUG - Title after removing leading tags: Плохая обезьяна / Bad Monkey / Сезон: 1 / Серии: 1-8 из 10 (Маркос Сига, Колин Бакси, Эрика Дантон) [2024, США, Комедия, детектив, криминал, HEVC, HDR10, HDR10+, Dolby Vision, WEB-DL 2160p, 4k] MVO (HDRezka Studio, TVShows, LE-Production) + DVO (Кубик в Кубе) + Original + Sub (Rus, Ukr, Eng, Heb) [73.24 GB]
+2024-10-09 21:14:40,266 - DEBUG - Title parts after splitting by '/': ['Плохая обезьяна ', ' Bad Monkey ', ' Сезон: 1 ', ' Серии: 1-8 из 10 (Маркос Сига, Колин Бакси, Эрика Дантон) [2024, США, Комедия, детектив, криминал, HEVC, HDR10, HDR10+, Dolby Vision, WEB-DL 2160p, 4k] MVO (HDRezka Studio, TVShows, LE-Production) + DVO (Кубик в Кубе) + Original + Sub (Rus, Ukr, Eng, Heb) [73.24 GB]']
+2024-10-09 21:14:40,266 - DEBUG - Extracted English title: Bad Monkey
+2024-10-09 21:14:40,267 - DEBUG - Final English title after cleanup: Bad Monkey
+2024-10-09 21:14:40,267 - DEBUG - Cache hit for movie: Bad Monkey
+2024-10-09 21:14:40,267 - DEBUG - Title after removing leading tags: Старик / The Old Man / Сезон: 2 / Серии: 1-4 из 8 (Джет Уилкинсон, Джон Уоттс, Грег Яйтанс) [2024, США, Боевик, триллер, драма, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows) + DVO (Кубик в Кубе) + MVO (Red Head Sound) + AVO (Ю. Сербин) + Original + Sub (Eng) [14.46 GB]
+2024-10-09 21:14:40,267 - DEBUG - Title parts after splitting by '/': ['Старик ', ' The Old Man ', ' Сезон: 2 ', ' Серии: 1-4 из 8 (Джет Уилкинсон, Джон Уоттс, Грег Яйтанс) [2024, США, Боевик, триллер, драма, WEB-DL 1080p] MVO (HDRezka Studio, LostFilm, TVShows) + DVO (Кубик в Кубе) + MVO (Red Head Sound) + AVO (Ю. Сербин) + Original + Sub (Eng) [14.46 GB]']
+2024-10-09 21:14:40,267 - DEBUG - Extracted English title: The Old Man
+2024-10-09 21:14:40,267 - DEBUG - Final English title after cleanup: The Old Man
+2024-10-09 21:14:40,267 - DEBUG - Cache hit for movie: The Old Man
+2024-10-09 21:14:40,267 - DEBUG - Title after removing leading tags: Власть в ночном городе. Книга вторая: Призрак / Power Book II: Ghost / Сезон: 4 / Серии: 1-8 из 10 (Брендан Уолш) [2024, США, Драма, криминал, WEB-DL 1080p] MVO (NewStudio) + Original + Sub (Eng) [30.22 GB]
+2024-10-09 21:14:40,267 - DEBUG - Title parts after splitting by '/': ['Власть в ночном городе. Книга вторая: Призрак ', ' Power Book II: Ghost ', ' Сезон: 4 ', ' Серии: 1-8 из 10 (Брендан Уолш) [2024, США, Драма, криминал, WEB-DL 1080p] MVO (NewStudio) + Original + Sub (Eng) [30.22 GB]']
+2024-10-09 21:14:40,267 - DEBUG - Extracted English title: Power Book II: Ghost
+2024-10-09 21:14:40,267 - DEBUG - Final English title after cleanup: Power Book II: Ghost
+2024-10-09 21:14:40,267 - DEBUG - Cache hit for movie: Power Book II: Ghost
+2024-10-09 21:14:40,267 - DEBUG - Title after removing leading tags: Большой потенциал / High Potential / Сезон: 1 / Серии: 1-2 из 10 (Ребекка Эшер, Аманда Трейз, Алетеа Джонс) [2024, США, Драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub Eng [6.21 GB]
+2024-10-09 21:14:40,267 - DEBUG - Title parts after splitting by '/': ['Большой потенциал ', ' High Potential ', ' Сезон: 1 ', ' Серии: 1-2 из 10 (Ребекка Эшер, Аманда Трейз, Алетеа Джонс) [2024, США, Драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub Eng [6.21 GB]']
+2024-10-09 21:14:40,267 - DEBUG - Extracted English title: High Potential
+2024-10-09 21:14:40,267 - DEBUG - Final English title after cleanup: High Potential
+2024-10-09 21:14:40,267 - DEBUG - Cache hit for movie: High Potential
+2024-10-09 21:14:40,268 - DEBUG - Title after removing leading tags: Мэтлок / Matlock / Сезон: 1 / Серии: 1 из 10 (Кэт Койро, Янгзом Брауен, Брэд Силберлинг) [2024, США, драма, криминал, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [2.69 GB]
+2024-10-09 21:14:40,268 - DEBUG - Title parts after splitting by '/': ['Мэтлок ', ' Matlock ', ' Сезон: 1 ', ' Серии: 1 из 10 (Кэт Койро, Янгзом Брауен, Брэд Силберлинг) [2024, США, драма, криминал, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [2.69 GB]']
+2024-10-09 21:14:40,268 - DEBUG - Extracted English title: Matlock
+2024-10-09 21:14:40,268 - DEBUG - Final English title after cleanup: Matlock
+2024-10-09 21:14:40,268 - DEBUG - Cache hit for movie: Matlock
+2024-10-09 21:14:40,268 - DEBUG - Title after removing leading tags: Это всё Агата / Agatha All Along / Сезон: 1 / Серии: 1-3 из 9 (Ганджа Монтейру) [2024, США, фантастика, фэнтези, боевик, драма, комедия, приключения, WEB-DL 720p] MVO (Lostfilm) + MVO (TVShows) + MVO (HDrezka) + MVO (NewComers) + MVO (1WinStudio) + MVO (LE-Production) + Original + Sub (Rus, Eng) [4.47 GB]
+2024-10-09 21:14:40,268 - DEBUG - Title parts after splitting by '/': ['Это всё Агата ', ' Agatha All Along ', ' Сезон: 1 ', ' Серии: 1-3 из 9 (Ганджа Монтейру) [2024, США, фантастика, фэнтези, боевик, драма, комедия, приключения, WEB-DL 720p] MVO (Lostfilm) + MVO (TVShows) + MVO (HDrezka) + MVO (NewComers) + MVO (1WinStudio) + MVO (LE-Production) + Original + Sub (Rus, Eng) [4.47 GB]']
+2024-10-09 21:14:40,268 - DEBUG - Extracted English title: Agatha All Along
+2024-10-09 21:14:40,268 - DEBUG - Final English title after cleanup: Agatha All Along
+2024-10-09 21:14:40,268 - DEBUG - Cache hit for movie: Agatha All Along
+2024-10-09 21:14:40,268 - DEBUG - Title after removing leading tags: Медленные лошади / Хромые кони / Slow Horses / Сезон: 4 / Серии: 1-4 из 6 (Адам Рэндолл) [2024, Великобритания, США, триллер, детектив, WEB-DL 720p] MVO (LostFilm) + MVO (TVShows) + MVO (HDrezka) + MVO (LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Eng) [6.41 GB]
+2024-10-09 21:14:40,268 - DEBUG - Title parts after splitting by '/': ['Медленные лошади ', ' Хромые кони ', ' Slow Horses ', ' Сезон: 4 ', ' Серии: 1-4 из 6 (Адам Рэндолл) [2024, Великобритания, США, триллер, детектив, WEB-DL 720p] MVO (LostFilm) + MVO (TVShows) + MVO (HDrezka) + MVO (LE-Production) + AVO (Ю. Сербин) + Original + Sub (Rus, Eng) [6.41 GB]']
+2024-10-09 21:14:40,268 - DEBUG - Extracted English title: Slow Horses
+2024-10-09 21:14:40,268 - DEBUG - Final English title after cleanup: Slow Horses
+2024-10-09 21:14:40,268 - DEBUG - Cache hit for movie: Slow Horses
+2024-10-09 21:14:40,268 - DEBUG - Title after removing leading tags: Король Талсы / Tulsa King / Сезон: 2 / Серии: 1-2 из 10 (Крейг Зиск) [2024, США, драма, криминал, комедия, WEB-DL 720p] 7x MVO + Original + Sub (Rus, Eng) [3.58 GB]
+2024-10-09 21:14:40,268 - DEBUG - Title parts after splitting by '/': ['Король Талсы ', ' Tulsa King ', ' Сезон: 2 ', ' Серии: 1-2 из 10 (Крейг Зиск) [2024, США, драма, криминал, комедия, WEB-DL 720p] 7x MVO + Original + Sub (Rus, Eng) [3.58 GB]']
+2024-10-09 21:14:40,269 - DEBUG - Extracted English title: Tulsa King
+2024-10-09 21:14:40,269 - DEBUG - Final English title after cleanup: Tulsa King
+2024-10-09 21:14:40,269 - DEBUG - Cache hit for movie: Tulsa King
+2024-10-09 21:14:40,269 - DEBUG - Title after removing leading tags: Старик / The Old Man / Сезон: 2 / Серии: 1-3 из 8 (Джет Уилкинсон) [2024, США, Боевик, триллер, драма, WEB-DL 720p] DVO (Кубик в Кубе) + MVO (LostFilm) + MVO (TVShows) + MVO (HDRezka) + MVO (Red Head Sound) + AVO (Сербин) + Original + Sub (Eng) [6.7 GB]
+2024-10-09 21:14:40,269 - DEBUG - Title parts after splitting by '/': ['Старик ', ' The Old Man ', ' Сезон: 2 ', ' Серии: 1-3 из 8 (Джет Уилкинсон) [2024, США, Боевик, триллер, драма, WEB-DL 720p] DVO (Кубик в Кубе) + MVO (LostFilm) + MVO (TVShows) + MVO (HDRezka) + MVO (Red Head Sound) + AVO (Сербин) + Original + Sub (Eng) [6.7 GB]']
+2024-10-09 21:14:40,269 - DEBUG - Extracted English title: The Old Man
+2024-10-09 21:14:40,269 - DEBUG - Final English title after cleanup: The Old Man
+2024-10-09 21:14:40,269 - DEBUG - Cache hit for movie: The Old Man
+2024-10-09 21:14:40,269 - DEBUG - Title after removing leading tags: Пингвин / The Penguin / Сезон: 1 / Серии: 1 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, WEB-DL 720p] MVO (Syncmer) + MVO (LostFilm) + MVO (HDrezka) + MVO (1WinStudio) + Original + Sub (Rus, Eng) [2.55 GB]
+2024-10-09 21:14:40,269 - DEBUG - Title parts after splitting by '/': ['Пингвин ', ' The Penguin ', ' Сезон: 1 ', ' Серии: 1 из 8 (Крэйг Зобел) [2024, США, фэнтези, драма, криминал, WEB-DL 720p] MVO (Syncmer) + MVO (LostFilm) + MVO (HDrezka) + MVO (1WinStudio) + Original + Sub (Rus, Eng) [2.55 GB]']
+2024-10-09 21:14:40,269 - DEBUG - Extracted English title: The Penguin
+2024-10-09 21:14:40,269 - DEBUG - Final English title after cleanup: The Penguin
+2024-10-09 21:14:40,269 - DEBUG - Cache hit for movie: The Penguin
+2024-10-09 21:14:40,269 - DEBUG - Title after removing leading tags: Кобра Кай / Cobra Kai / Сезон: 6 / Серии: 1-5 из 15 (Джоэль Новоа, Шервин Шилати, Ральф Маччио) [2024, США, Боевик, драма, комедия, WEB-DL 1080p] MVO (HDrezka Studio, TVShows, AlexFilm) + Original + Sub (Rus, Ukr, Eng, Heb) [9.19 GB]
+2024-10-09 21:14:40,269 - DEBUG - Title parts after splitting by '/': ['Кобра Кай ', ' Cobra Kai ', ' Сезон: 6 ', ' Серии: 1-5 из 15 (Джоэль Новоа, Шервин Шилати, Ральф Маччио) [2024, США, Боевик, драма, комедия, WEB-DL 1080p] MVO (HDrezka Studio, TVShows, AlexFilm) + Original + Sub (Rus, Ukr, Eng, Heb) [9.19 GB]']
+2024-10-09 21:14:40,269 - DEBUG - Extracted English title: Cobra Kai
+2024-10-09 21:14:40,269 - DEBUG - Final English title after cleanup: Cobra Kai
+2024-10-09 21:14:40,269 - DEBUG - Cache hit for movie: Cobra Kai
+2024-10-09 21:14:40,270 - DEBUG - Title after removing leading tags: Кобра Кай / Cobra Kai / Сезон: 6 / Серии: 1-5 из 15 (Джоэль Новоа, Шервин Шилати, Ральф Маччио) [2024, США, Боевик, драма, комедия, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] [Hybrid] 3x MVO (AlexFilm, HDRezka, TVShows) Original + Sub (Rus, Eng) [27.78 GB]
+2024-10-09 21:14:40,270 - DEBUG - Title parts after splitting by '/': ['Кобра Кай ', ' Cobra Kai ', ' Сезон: 6 ', ' Серии: 1-5 из 15 (Джоэль Новоа, Шервин Шилати, Ральф Маччио) [2024, США, Боевик, драма, комедия, HEVC, HDR10, Dolby Vision, WEB-DL 2160p, 4k] [Hybrid] 3x MVO (AlexFilm, HDRezka, TVShows) Original + Sub (Rus, Eng) [27.78 GB]']
+2024-10-09 21:14:40,270 - DEBUG - Extracted English title: Cobra Kai
+2024-10-09 21:14:40,270 - DEBUG - Final English title after cleanup: Cobra Kai
+2024-10-09 21:14:40,270 - DEBUG - Cache hit for movie: Cobra Kai
+2024-10-09 21:14:40,270 - DEBUG - Title after removing leading tags: Милые обманщицы: Первородный грех / Pretty Little Liars: Original Sin / Сезон: 2 / Серии: 1-6 из 8 (Роксанна Бенжамин, Мэгги Кили, Алекс Пиллаи) [2024, США, Ужасы, триллер, драма, мелодрама, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [18.57 GB]
+2024-10-09 21:14:40,270 - DEBUG - Title parts after splitting by '/': ['Милые обманщицы: Первородный грех ', ' Pretty Little Liars: Original Sin ', ' Сезон: 2 ', ' Серии: 1-6 из 8 (Роксанна Бенжамин, Мэгги Кили, Алекс Пиллаи) [2024, США, Ужасы, триллер, драма, мелодрама, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [18.57 GB]']
+2024-10-09 21:14:40,270 - DEBUG - Extracted English title: Pretty Little Liars: Original Sin
+2024-10-09 21:14:40,270 - DEBUG - Final English title after cleanup: Pretty Little Liars: Original Sin
+2024-10-09 21:14:40,270 - DEBUG - Cache hit for movie: Pretty Little Liars: Original Sin
+2024-10-09 21:14:40,270 - DEBUG - Title after removing leading tags: Голубая кровь / Blue Bloods / Сезон: 14 / Серии: 1-10 из ? (Алекс Закржевский, Жаклин Техада) [2024, США, Триллер, драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [27.03 GB]
+2024-10-09 21:14:40,270 - DEBUG - Title parts after splitting by '/': ['Голубая кровь ', ' Blue Bloods ', ' Сезон: 14 ', ' Серии: 1-10 из ? (Алекс Закржевский, Жаклин Техада) [2024, США, Триллер, драма, криминал, детектив, WEB-DL 1080p] MVO (TVShows) + Original + Sub (Eng) [27.03 GB]']
+2024-10-09 21:14:40,270 - DEBUG - Extracted English title: Blue Bloods
+2024-10-09 21:14:40,270 - DEBUG - Final English title after cleanup: Blue Bloods
+2024-10-09 21:14:40,270 - DEBUG - Cache hit for movie: Blue Bloods
+2024-10-09 21:14:40,270 - DEBUG - Title after removing leading tags: Корона / The Crown / Сезон: 6 / Серии: 1-10 из 10 (Кристиан Швохов, Май эль-Туки, Алекс Габасси) [2023, Великобритания, Драма, история, биография, WEB-DL 1080p] MVO (NewStudio) + MVO (LostFilm) + MVO (TVShows) + MVO (HDRezka Studio) + Ukr (Так треба продакшн) + Original + Sub (Rus, Ukr, Eng) [27.91 GB]
+2024-10-09 21:14:40,270 - DEBUG - Title parts after splitting by '/': ['Корона ', ' The Crown ', ' Сезон: 6 ', ' Серии: 1-10 из 10 (Кристиан Швохов, Май эль-Туки, Алекс Габасси) [2023, Великобритания, Драма, история, биография, WEB-DL 1080p] MVO (NewStudio) + MVO (LostFilm) + MVO (TVShows) + MVO (HDRezka Studio) + Ukr (Так треба продакшн) + Original + Sub (Rus, Ukr, Eng) [27.91 GB]']
+2024-10-09 21:14:40,270 - DEBUG - Extracted English title: The Crown
+2024-10-09 21:14:40,270 - DEBUG - Final English title after cleanup: The Crown
+2024-10-09 21:14:40,270 - DEBUG - Cache hit for movie: The Crown
+2024-10-09 21:14:40,271 - DEBUG - Title after removing leading tags: Чужестранка / Outlander / Сезон: 7 / Серии: 1-8 из 16 (Метин Хусейн) [2023, США, Великобритания, Фэнтези, драма, мелодрама, WEB-DL 720p] MVO (NewStudio) + MVO (TVShows) + Original (Eng) + Sub (Eng) [17.58 GB]
+2024-10-09 21:14:40,271 - DEBUG - Title parts after splitting by '/': ['Чужестранка ', ' Outlander ', ' Сезон: 7 ', ' Серии: 1-8 из 16 (Метин Хусейн) [2023, США, Великобритания, Фэнтези, драма, мелодрама, WEB-DL 720p] MVO (NewStudio) + MVO (TVShows) + Original (Eng) + Sub (Eng) [17.58 GB]']
+2024-10-09 21:14:40,271 - DEBUG - Extracted English title: Outlander
+2024-10-09 21:14:40,271 - DEBUG - Final English title after cleanup: Outlander
+2024-10-09 21:14:40,271 - DEBUG - Cache hit for movie: Outlander
+2024-10-09 21:14:40,271 - DEBUG - Title after removing leading tags: Чужестранка / Outlander / Сезон: 7 / Серии: 1-8 из 16 (Метин Хусейн, Джэми Пэйн, Стивен Вульфенден, Лиза Кларк) [2023, США, Великобритания, Фэнтези, драма, мелодрама, WEB-DL 1080p] 2 x MVO (NewStudio, TVShows) + Original + Sub (Eng) [33.63 GB]
+2024-10-09 21:14:40,271 - DEBUG - Title parts after splitting by '/': ['Чужестранка ', ' Outlander ', ' Сезон: 7 ', ' Серии: 1-8 из 16 (Метин Хусейн, Джэми Пэйн, Стивен Вульфенден, Лиза Кларк) [2023, США, Великобритания, Фэнтези, драма, мелодрама, WEB-DL 1080p] 2 x MVO (NewStudio, TVShows) + Original + Sub (Eng) [33.63 GB]']
+2024-10-09 21:14:40,271 - DEBUG - Extracted English title: Outlander
+2024-10-09 21:14:40,271 - DEBUG - Final English title after cleanup: Outlander
+2024-10-09 21:14:40,271 - DEBUG - Cache hit for movie: Outlander
+2024-10-09 21:14:40,456 - DEBUG - http://www.omdbapi.com:80 "GET /?t=Kenneth+Branagh%29&r=json&apikey=db8b3a7a HTTP/1.1" 200 None
+2024-10-09 21:14:40,457 - DEBUG - Movie data for 'Kenneth Branagh)': {'title': "Kenneth Branagh Films 'The Magic Flute'", 'year': '2008', 'rated': 'N/A', 'released': 'N/A', 'runtime': '51 min', 'genre': 'Documentary', 'director': 'N/A', 'writer': 'N/A', 'actors': 'Kenneth Branagh, Louise Callinan, Amy Carson, James Conlon', 'plot': 'The making of Kenneth Branagh\'s film version of Mozart\'s "The Magic Flute", included as a supplement on the British DVD release of the film.', 'language': 'English', 'country': 'UK', 'awards': 'N/A', 'poster': 'N/A', 'ratings': [{'Source': 'Internet Movie Database', 'Value': '7.2/10'}], 'metascore': 'N/A', 'imdbrating': '7.2', 'imdbvotes': '9', 'imdbid': 'tt1663341', 'type': 'movie', 'dvd': 'N/A', 'boxoffice': 'N/A', 'production': 'N/A', 'website': 'N/A'}
+2024-10-09 21:14:40,457 - DEBUG - Fetched data for movie: Kenneth Branagh)
+2024-10-09 21:14:40,457 - DEBUG - Title after removing leading tags: Артемис Фаул / Artemis Fowl (Кеннет Брана / Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.16 GB]
+2024-10-09 21:14:40,457 - DEBUG - Title parts after splitting by '/': ['Артемис Фаул ', ' Artemis Fowl (Кеннет Брана ', ' Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.16 GB]']
+2024-10-09 21:14:40,457 - DEBUG - Extracted English title: Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.16 GB]
+2024-10-09 21:14:40,457 - DEBUG - Final English title after cleanup: Kenneth Branagh)
+2024-10-09 21:14:40,457 - DEBUG - Cache hit for movie: Kenneth Branagh)
+2024-10-09 21:14:40,457 - DEBUG - Title after removing leading tags: Брамаюгам / Эпоха безумия / Bramayugam (Рахул Садасиван / Rahul Sadasivan) [2024, Индия, ужасы, мистика, WEB-DL 2160p, SDR] MVO + Original + Sub Eng [10.22 GB]
+2024-10-09 21:14:40,457 - DEBUG - Title parts after splitting by '/': ['Брамаюгам ', ' Эпоха безумия ', ' Bramayugam (Рахул Садасиван ', ' Rahul Sadasivan) [2024, Индия, ужасы, мистика, WEB-DL 2160p, SDR] MVO + Original + Sub Eng [10.22 GB]']
+2024-10-09 21:14:40,457 - DEBUG - Extracted English title: Rahul Sadasivan) [2024, Индия, ужасы, мистика, WEB-DL 2160p, SDR] MVO + Original + Sub Eng [10.22 GB]
+2024-10-09 21:14:40,457 - DEBUG - Final English title after cleanup: Rahul Sadasivan)
+2024-10-09 21:14:40,457 - DEBUG - Fetching movie data for: Rahul Sadasivan)
+2024-10-09 21:14:40,458 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:41,022 - DEBUG - http://www.omdbapi.com:80 "GET /?t=Rahul+Sadasivan%29&r=json&apikey=db8b3a7a HTTP/1.1" 200 47
+2024-10-09 21:14:41,023 - ERROR - Error fetching data for Rahul Sadasivan): Movie not found!
+2024-10-09 21:14:41,023 - DEBUG - Fetched data for movie: Rahul Sadasivan)
+2024-10-09 21:14:41,023 - DEBUG - Title after removing leading tags: Не говори никому / Speak No Evil (Джеймс Уоткинс / James Watkins) [2024, США, Хорватия, Канада, триллер, драма, WEB-DL 2160p, HDR10+, Dolby Vision] [Hybrid] MVO (HDRezka Studio) + DVO (ViruseProject) + Original Eng + Sub (Rus, Eng) [20.14 GB]
+2024-10-09 21:14:41,032 - DEBUG - Title parts after splitting by '/': ['Не говори никому ', ' Speak No Evil (Джеймс Уоткинс ', ' James Watkins) [2024, США, Хорватия, Канада, триллер, драма, WEB-DL 2160p, HDR10+, Dolby Vision] [Hybrid] MVO (HDRezka Studio) + DVO (ViruseProject) + Original Eng + Sub (Rus, Eng) [20.14 GB]']
+2024-10-09 21:14:41,034 - DEBUG - Extracted English title: James Watkins) [2024, США, Хорватия, Канада, триллер, драма, WEB-DL 2160p, HDR10+, Dolby Vision] [Hybrid] MVO (HDRezka Studio) + DVO (ViruseProject) + Original Eng + Sub (Rus, Eng) [20.14 GB]
+2024-10-09 21:14:41,034 - DEBUG - Final English title after cleanup: James Watkins)
+2024-10-09 21:14:41,035 - DEBUG - Fetching movie data for: James Watkins)
+2024-10-09 21:14:41,036 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:41,465 - DEBUG - http://www.omdbapi.com:80 "GET /?t=James+Watkins%29&r=json&apikey=db8b3a7a HTTP/1.1" 200 47
+2024-10-09 21:14:41,466 - ERROR - Error fetching data for James Watkins): Movie not found!
+2024-10-09 21:14:41,467 - DEBUG - Fetched data for movie: James Watkins)
+2024-10-09 21:14:41,467 - DEBUG - Title after removing leading tags: Достать ножи: Стеклянная луковица / Glass Onion: A Knives Out Mystery (Райан Джонсон / Rian Johnson) [2022, США, детектив, комедия, криминал, WEB-DL 2160p, Dolby Vision TV] 2x Dub + 3x MVO + 2x AVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [23.78 GB]
+2024-10-09 21:14:41,482 - DEBUG - Title parts after splitting by '/': ['Достать ножи: Стеклянная луковица ', ' Glass Onion: A Knives Out Mystery (Райан Джонсон ', ' Rian Johnson) [2022, США, детектив, комедия, криминал, WEB-DL 2160p, Dolby Vision TV] 2x Dub + 3x MVO + 2x AVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [23.78 GB]']
+2024-10-09 21:14:41,486 - DEBUG - Extracted English title: Glass Onion: A Knives Out Mystery (Райан Джонсон
+2024-10-09 21:14:41,486 - DEBUG - Final English title after cleanup: Glass Onion: A Knives Out Mystery
+2024-10-09 21:14:41,486 - DEBUG - Fetching movie data for: Glass Onion: A Knives Out Mystery
+2024-10-09 21:14:41,488 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:41,879 - DEBUG - http://www.omdbapi.com:80 "GET /?t=Glass+Onion%3A+A+Knives+Out+Mystery&r=json&apikey=db8b3a7a HTTP/1.1" 200 None
+2024-10-09 21:14:41,881 - DEBUG - Movie data for 'Glass Onion: A Knives Out Mystery': {'title': 'Glass Onion: A Knives Out Mystery (2022)', 'year': '2022', 'rated': 'N/A', 'released': '24 Nov 2022', 'runtime': 'N/A', 'genre': 'N/A', 'director': 'N/A', 'writer': 'N/A', 'actors': 'N/A', 'plot': 'N/A', 'language': 'N/A', 'country': 'N/A', 'awards': 'N/A', 'poster': 'https://m.media-amazon.com/images/M/MV5BMzAxOGJiYmMtZDEwNS00MzdhLTg1NDctNTM5OGRkNDI5OWI0XkEyXkFqcGc@._V1_SX300.jpg', 'ratings': [{'Source': 'Rotten Tomatoes', 'Value': '91%'}], 'metascore': 'N/A', 'imdbrating': 'N/A', 'imdbvotes': 'N/A', 'imdbid': 'tt24734444', 'type': 'movie', 'dvd': 'N/A', 'boxoffice': 'N/A', 'production': 'N/A', 'website': 'N/A'}
+2024-10-09 21:14:41,882 - DEBUG - Fetched data for movie: Glass Onion: A Knives Out Mystery
+2024-10-09 21:14:41,882 - DEBUG - Title after removing leading tags: Достать ножи: Стеклянная луковица / Glass Onion: A Knives Out Mystery (Райан Джонсон / Rian Johnson) [2022, США, детектив, комедия, криминал, WEB-DL 2160p, SDR] 2x Dub + 3x MVO + 2x AVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [16.75 GB]
+2024-10-09 21:14:41,898 - DEBUG - Title parts after splitting by '/': ['Достать ножи: Стеклянная луковица ', ' Glass Onion: A Knives Out Mystery (Райан Джонсон ', ' Rian Johnson) [2022, США, детектив, комедия, криминал, WEB-DL 2160p, SDR] 2x Dub + 3x MVO + 2x AVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [16.75 GB]']
+2024-10-09 21:14:41,898 - DEBUG - Extracted English title: Glass Onion: A Knives Out Mystery (Райан Джонсон
+2024-10-09 21:14:41,898 - DEBUG - Final English title after cleanup: Glass Onion: A Knives Out Mystery
+2024-10-09 21:14:41,898 - DEBUG - Cache hit for movie: Glass Onion: A Knives Out Mystery
+2024-10-09 21:14:41,898 - DEBUG - Title after removing leading tags: Достать ножи: Стеклянная луковица / Glass Onion: A Knives Out Mystery (Райан Джонсон / Rian Johnson) [2022, США, детектив, комедия, криминал, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] 2x Dub + 3x MVO + 2x AVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [23.88 GB]
+2024-10-09 21:14:41,898 - DEBUG - Title parts after splitting by '/': ['Достать ножи: Стеклянная луковица ', ' Glass Onion: A Knives Out Mystery (Райан Джонсон ', ' Rian Johnson) [2022, США, детектив, комедия, криминал, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] 2x Dub + 3x MVO + 2x AVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [23.88 GB]']
+2024-10-09 21:14:41,899 - DEBUG - Extracted English title: Glass Onion: A Knives Out Mystery (Райан Джонсон
+2024-10-09 21:14:41,899 - DEBUG - Final English title after cleanup: Glass Onion: A Knives Out Mystery
+2024-10-09 21:14:41,899 - DEBUG - Cache hit for movie: Glass Onion: A Knives Out Mystery
+2024-10-09 21:14:41,899 - DEBUG - Title after removing leading tags: В тени Луны / In the Shadow of the Moon (Джим Микл / Jim Mickle) [2019, США, фантастика, детектив, триллер, криминал, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] Dub + Original (Eng) + Sub (Rus, Eng) [13.63 GB]
+2024-10-09 21:14:41,899 - DEBUG - Title parts after splitting by '/': ['В тени Луны ', ' In the Shadow of the Moon (Джим Микл ', ' Jim Mickle) [2019, США, фантастика, детектив, триллер, криминал, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] Dub + Original (Eng) + Sub (Rus, Eng) [13.63 GB]']
+2024-10-09 21:14:41,899 - DEBUG - Extracted English title: In the Shadow of the Moon (Джим Микл
+2024-10-09 21:14:41,899 - DEBUG - Final English title after cleanup: In the Shadow of the Moon
+2024-10-09 21:14:41,899 - DEBUG - Fetching movie data for: In the Shadow of the Moon
+2024-10-09 21:14:41,901 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:42,578 - DEBUG - http://www.omdbapi.com:80 "GET /?t=In+the+Shadow+of+the+Moon&r=json&apikey=db8b3a7a HTTP/1.1" 200 None
+2024-10-09 21:14:42,580 - DEBUG - Movie data for 'In the Shadow of the Moon': {'title': 'In the Shadow of the Moon', 'year': '2019', 'rated': 'TV-MA', 'released': '27 Sep 2019', 'runtime': '115 min', 'genre': 'Action, Crime, Mystery', 'director': 'Jim Mickle', 'writer': 'Gregory Weidman, Geoffrey Tock', 'actors': 'Boyd Holbrook, Cleopatra Coleman, Bokeem Woodbine', 'plot': 'A Philadelphia police officer struggles with a lifelong obsession to track down a mysterious serial killer whose crimes defy explanation.', 'language': 'English', 'country': 'United States, Canada', 'awards': '2 nominations', 'poster': 'https://m.media-amazon.com/images/M/MV5BYWM3YzQ2MTEtZjA2OS00NzRkLWFmMWEtYjZjODUzN2VlNmY1XkEyXkFqcGc@._V1_SX300.jpg', 'ratings': [{'Source': 'Internet Movie Database', 'Value': '6.2/10'}, {'Source': 'Rotten Tomatoes', 'Value': '95%'}, {'Source': 'Metacritic', 'Value': '48/100'}], 'metascore': '48', 'imdbrating': '6.2', 'imdbvotes': '62,511', 'imdbid': 'tt8110640', 'type': 'movie', 'dvd': 'N/A', 'boxoffice': 'N/A', 'production': 'N/A', 'website': 'N/A'}
+2024-10-09 21:14:42,580 - DEBUG - Fetched data for movie: In the Shadow of the Moon
+2024-10-09 21:14:42,581 - DEBUG - Title after removing leading tags: Дэдпул и Росомаха / Deadpool & Wolverine (Шон Леви / Shawn Levy) [2024, США, фантастика, боевик, комедия, приключения, WEB-DL 2160p, HDR10+, Dolby Vision] [Hybrid] 3x Dub (MovieDalen, TVShows, RHS) + 2x MVO (Jaskier, LineFilm) + VO (Гаевский) + Dub Ukr + DVO Ukr + Original Eng + Sub (Rus, Ukr, Eng) [26.31 GB]
+2024-10-09 21:14:42,597 - DEBUG - Title parts after splitting by '/': ['Дэдпул и Росомаха ', ' Deadpool & Wolverine (Шон Леви ', ' Shawn Levy) [2024, США, фантастика, боевик, комедия, приключения, WEB-DL 2160p, HDR10+, Dolby Vision] [Hybrid] 3x Dub (MovieDalen, TVShows, RHS) + 2x MVO (Jaskier, LineFilm) + VO (Гаевский) + Dub Ukr + DVO Ukr + Original Eng + Sub (Rus, Ukr, Eng) [26.31 GB]']
+2024-10-09 21:14:42,600 - DEBUG - Extracted English title: Deadpool & Wolverine (Шон Леви
+2024-10-09 21:14:42,600 - DEBUG - Final English title after cleanup: Deadpool & Wolverine
+2024-10-09 21:14:42,600 - DEBUG - Fetching movie data for: Deadpool & Wolverine
+2024-10-09 21:14:42,602 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:43,362 - DEBUG - http://www.omdbapi.com:80 "GET /?t=Deadpool+%26+Wolverine&r=json&apikey=db8b3a7a HTTP/1.1" 200 None
+2024-10-09 21:14:43,364 - DEBUG - Movie data for 'Deadpool & Wolverine': {'title': 'Deadpool & Wolverine', 'year': '2024', 'rated': 'R', 'released': '26 Jul 2024', 'runtime': '128 min', 'genre': 'Action, Adventure, Comedy', 'director': 'Shawn Levy', 'writer': 'Ryan Reynolds, Rhett Reese, Paul Wernick', 'actors': 'Ryan Reynolds, Hugh Jackman, Emma Corrin', 'plot': 'Deadpool is offered a place in the Marvel Cinematic Universe by the Time Variance Authority, but instead recruits a variant of Wolverine to save his universe from extinction.', 'language': 'English, French, Spanish', 'country': 'United States, United Kingdom, Australia, New Zealand, Canada', 'awards': '4 wins & 1 nomination', 'poster': 'https://m.media-amazon.com/images/M/MV5BZTk5ODY0MmQtMzA3Ni00NGY1LThiYzItZThiNjFiNDM4MTM3XkEyXkFqcGc@._V1_SX300.jpg', 'ratings': [{'Source': 'Internet Movie Database', 'Value': '7.9/10'}, {'Source': 'Rotten Tomatoes', 'Value': '78%'}], 'metascore': 'N/A', 'imdbrating': '7.9', 'imdbvotes': '312,522', 'imdbid': 'tt6263850', 'type': 'movie', 'dvd': 'N/A', 'boxoffice': '$632,727,345', 'production': 'N/A', 'website': 'N/A'}
+2024-10-09 21:14:43,364 - DEBUG - Fetched data for movie: Deadpool & Wolverine
+2024-10-09 21:14:43,372 - DEBUG - Title after removing leading tags: Артемис Фаул / Artemis Fowl (Кеннет Брана / Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, Dolby Vision TV] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.15 GB]
+2024-10-09 21:14:43,383 - DEBUG - Title parts after splitting by '/': ['Артемис Фаул ', ' Artemis Fowl (Кеннет Брана ', ' Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, Dolby Vision TV] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.15 GB]']
+2024-10-09 21:14:43,384 - DEBUG - Extracted English title: Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, Dolby Vision TV] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.15 GB]
+2024-10-09 21:14:43,384 - DEBUG - Final English title after cleanup: Kenneth Branagh)
+2024-10-09 21:14:43,384 - DEBUG - Cache hit for movie: Kenneth Branagh)
+2024-10-09 21:14:43,384 - DEBUG - Title after removing leading tags: Рождество / The Night Before (Джонатан Левин / Jonathan Levine) [2015, США, комедия, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [19.44 GB]
+2024-10-09 21:14:43,384 - DEBUG - Title parts after splitting by '/': ['Рождество ', ' The Night Before (Джонатан Левин ', ' Jonathan Levine) [2015, США, комедия, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [19.44 GB]']
+2024-10-09 21:14:43,384 - DEBUG - Extracted English title: The Night Before (Джонатан Левин
+2024-10-09 21:14:43,384 - DEBUG - Final English title after cleanup: The Night Before
+2024-10-09 21:14:43,384 - DEBUG - Fetching movie data for: The Night Before
+2024-10-09 21:14:43,385 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:43,964 - DEBUG - http://www.omdbapi.com:80 "GET /?t=The+Night+Before&r=json&apikey=db8b3a7a HTTP/1.1" 200 None
+2024-10-09 21:14:43,965 - DEBUG - Movie data for 'The Night Before': {'title': 'The Night Before', 'year': '2015', 'rated': 'R', 'released': '20 Nov 2015', 'runtime': '101 min', 'genre': 'Comedy, Fantasy', 'director': 'Jonathan Levine', 'writer': 'Jonathan Levine, Kyle Hunter, Ariel Shaffir', 'actors': 'Joseph Gordon-Levitt, Seth Rogen, Jillian Bell', 'plot': 'On Christmas Eve, three lifelong friends spend the night in New York City looking for the Holy Grail of Christmas parties.', 'language': 'English, Ukrainian', 'country': 'United States', 'awards': '2 nominations', 'poster': 'https://m.media-amazon.com/images/M/MV5BMTkyNDY1ODQwNV5BMl5BanBnXkFtZTgwNzA2MjUwNzE@._V1_SX300.jpg', 'ratings': [{'Source': 'Internet Movie Database', 'Value': '6.4/10'}, {'Source': 'Rotten Tomatoes', 'Value': '68%'}, {'Source': 'Metacritic', 'Value': '58/100'}], 'metascore': '58', 'imdbrating': '6.4', 'imdbvotes': '83,201', 'imdbid': 'tt3530002', 'type': 'movie', 'dvd': 'N/A', 'boxoffice': '$43,047,372', 'production': 'N/A', 'website': 'N/A'}
+2024-10-09 21:14:43,965 - DEBUG - Fetched data for movie: The Night Before
+2024-10-09 21:14:43,966 - DEBUG - Title after removing leading tags: Рождество / The Night Before (Джонатан Левин / Jonathan Levine) [2015, США, комедия, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [19.5 GB]
+2024-10-09 21:14:43,980 - DEBUG - Title parts after splitting by '/': ['Рождество ', ' The Night Before (Джонатан Левин ', ' Jonathan Levine) [2015, США, комедия, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [19.5 GB]']
+2024-10-09 21:14:43,983 - DEBUG - Extracted English title: The Night Before (Джонатан Левин
+2024-10-09 21:14:43,984 - DEBUG - Final English title after cleanup: The Night Before
+2024-10-09 21:14:43,984 - DEBUG - Cache hit for movie: The Night Before
+2024-10-09 21:14:43,984 - DEBUG - Title after removing leading tags: Одинокие волки / Wolfs (Джон Уоттс / Jon Watts) [2024, Великобритания, США, комедия, криминал, боевик, WEB-DL 2160p, SDR] 5x MVO (TVShows, Lostfilm, HDrezka Studio, RGB, LE-Production) + Original (Eng) + Sub (Rus, Eng) [17.29 GB]
+2024-10-09 21:14:43,984 - DEBUG - Title parts after splitting by '/': ['Одинокие волки ', ' Wolfs (Джон Уоттс ', ' Jon Watts) [2024, Великобритания, США, комедия, криминал, боевик, WEB-DL 2160p, SDR] 5x MVO (TVShows, Lostfilm, HDrezka Studio, RGB, LE-Production) + Original (Eng) + Sub (Rus, Eng) [17.29 GB]']
+2024-10-09 21:14:43,984 - DEBUG - Extracted English title: Jon Watts) [2024, Великобритания, США, комедия, криминал, боевик, WEB-DL 2160p, SDR] 5x MVO (TVShows, Lostfilm, HDrezka Studio, RGB, LE-Production) + Original (Eng) + Sub (Rus, Eng) [17.29 GB]
+2024-10-09 21:14:43,984 - DEBUG - Final English title after cleanup: Jon Watts)
+2024-10-09 21:14:43,984 - DEBUG - Fetching movie data for: Jon Watts)
+2024-10-09 21:14:43,986 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:54,592 - INFO - Loaded 50 articles from http://feed.rutracker.cc/atom/f/1457.atom
+2024-10-09 21:14:54,593 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, Dolby Vision TV] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.94 GB]
+2024-10-09 21:14:54,593 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, Dolby Vision TV] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.94 GB]']
+2024-10-09 21:14:54,593 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:54,593 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:54,593 - DEBUG - Fetching movie data for: The Little Mermaid
+2024-10-09 21:14:54,596 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
+2024-10-09 21:14:54,992 - DEBUG - http://www.omdbapi.com:80 "GET /?t=The+Little+Mermaid&r=json&apikey=db8b3a7a HTTP/1.1" 200 None
+2024-10-09 21:14:54,993 - DEBUG - Movie data for 'The Little Mermaid': {'title': 'The Little Mermaid', 'year': '1989', 'rated': 'G', 'released': '17 Nov 1989', 'runtime': '83 min', 'genre': 'Animation, Adventure, Family', 'director': 'Ron Clements, John Musker', 'writer': 'John Musker, Ron Clements, Hans Christian Andersen', 'actors': 'Jodi Benson, Samuel E. Wright, Rene Auberjonois', 'plot': "A mermaid princess makes a Faustian bargain in an attempt to become human and win a prince's love.", 'language': 'English, French', 'country': 'United States', 'awards': 'Won 2 Oscars. 16 wins & 8 nominations total', 'poster': 'https://m.media-amazon.com/images/M/MV5BNmQ3ODcyZGMtMjNlOS00YzhlLTg0YzAtZGVjNmQ0OTYyNDg0XkEyXkFqcGc@._V1_SX300.jpg', 'ratings': [{'Source': 'Internet Movie Database', 'Value': '7.6/10'}, {'Source': 'Rotten Tomatoes', 'Value': '91%'}, {'Source': 'Metacritic', 'Value': '88/100'}], 'metascore': '88', 'imdbrating': '7.6', 'imdbvotes': '295,032', 'imdbid': 'tt0097757', 'type': 'movie', 'dvd': 'N/A', 'boxoffice': '$111,543,479', 'production': 'N/A', 'website': 'N/A'}
+2024-10-09 21:14:54,994 - DEBUG - Fetched data for movie: The Little Mermaid
+2024-10-09 21:14:55,003 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, HDR10+] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.69 GB]
+2024-10-09 21:14:55,005 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, HDR10+] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.69 GB]']
+2024-10-09 21:14:55,005 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:55,006 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:55,006 - DEBUG - Cache hit for movie: The Little Mermaid
+2024-10-09 21:14:55,006 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, SDR] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [26.01 GB]
+2024-10-09 21:14:55,006 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, SDR] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [26.01 GB]']
+2024-10-09 21:14:55,006 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:55,006 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:55,006 - DEBUG - Cache hit for movie: The Little Mermaid
+2024-10-09 21:14:55,006 - DEBUG - Title after removing leading tags: Русалочка / The Little Mermaid (Роб Маршалл / Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.9 GB]
+2024-10-09 21:14:55,006 - DEBUG - Title parts after splitting by '/': ['Русалочка ', ' The Little Mermaid (Роб Маршалл ', ' Rob Marshall) [2023, США, фэнтези, мелодрама, мюзикл, WEB-DL 2160p, HDR10, Dolby Vision] [Hybrid] Dub + 3x MVO + Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [25.9 GB]']
+2024-10-09 21:14:55,006 - DEBUG - Extracted English title: The Little Mermaid (Роб Маршалл
+2024-10-09 21:14:55,006 - DEBUG - Final English title after cleanup: The Little Mermaid
+2024-10-09 21:14:55,006 - DEBUG - Cache hit for movie: The Little Mermaid
+2024-10-09 21:14:55,006 - DEBUG - Title after removing leading tags: Артемис Фаул / Artemis Fowl (Кеннет Брана / Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.07 GB]
+2024-10-09 21:14:55,006 - DEBUG - Title parts after splitting by '/': ['Артемис Фаул ', ' Artemis Fowl (Кеннет Брана ', ' Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.07 GB]']
+2024-10-09 21:14:55,006 - DEBUG - Extracted English title: Kenneth Branagh) [2020, США, фантастика, фэнтези, приключения, семейный, WEB-DL 2160p, SDR] MVO + 2x Ukr + Original (Eng) + Sub (Rus, Ukr, Eng) [17.07 GB]
+2024-10-09 21:14:55,007 - DEBUG - Final English title after cleanup: Kenneth Branagh)
+2024-10-09 21:14:55,007 - DEBUG - Fetching movie data for: Kenneth Branagh)
+2024-10-09 21:14:55,008 - DEBUG - Starting new HTTP connection (1): www.omdbapi.com:80
