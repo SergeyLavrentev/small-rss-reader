@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QTreeWidget, QTreeWidgetItem, QSplitter, QMessageBox, QAction,
     QFileDialog, QMenu, QToolBar, QHeaderView, QDialog, QFormLayout,
-    QSizePolicy,QStyle
+    QSizePolicy, QStyle
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize
@@ -45,7 +45,6 @@ class FetchFeedThread(QThread):
         except Exception as e:
             logging.error(f"Failed to fetch feed {self.url}: {e}")
             self.feed_fetched.emit(self.url, None)
-
 
 class FetchMovieDataThread(QThread):
     movie_data_fetched = pyqtSignal(int, dict)  # Signal to emit the index and movie data
@@ -126,10 +125,10 @@ class FetchMovieDataThread(QThread):
             logging.error(f"Error fetching data for {movie_title}: {e}")
             return {}
 
-
 class ArticleTreeWidgetItem(QTreeWidgetItem):
     def __lt__(self, other):
         column = self.treeWidget().sortColumn()
+        column_name = self.treeWidget().headerItem().text(column)
         data1 = self.data(column, Qt.UserRole)
         data2 = other.data(column, Qt.UserRole)
         
@@ -139,17 +138,19 @@ class ArticleTreeWidgetItem(QTreeWidgetItem):
         if data2 is None:
             data2 = ''
 
-        # Sorting logic based on column
-        if column == 2:  # Rating column
+        # Sorting logic based on column name
+        if column_name == 'Rating':
             try:
                 return float(data1) < float(data2)
-            except:
+            except ValueError:
                 return QTreeWidgetItem.__lt__(self, other)
-        elif column == 3:  # Released column
-            return data1 < data2
+        elif column_name == 'Released':
+            try:
+                return data1 < data2
+            except TypeError:
+                return QTreeWidgetItem.__lt__(self, other)
         else:
             return QTreeWidgetItem.__lt__(self, other)
-
 
 class WebEnginePage(QWebEnginePage):
     def acceptNavigationRequest(self, url, _type, isMainFrame):
@@ -157,7 +158,6 @@ class WebEnginePage(QWebEnginePage):
             QDesktopServices.openUrl(url)
             return False
         return True  # Allow other navigation
-
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
@@ -190,7 +190,6 @@ class SettingsDialog(QDialog):
         else:
             QMessageBox.warning(self, "Input Error", "API Key cannot be empty.")
 
-
 class RSSReader(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -203,6 +202,7 @@ class RSSReader(QMainWindow):
         self.api_key = ''  # Initialize API key
         self.movie_data_cache = {}  # Cache for movie data
         self.read_articles = set()  # Set to track read articles
+        self.threads = []  # List to keep references to active threads
         self.init_ui()
         self.load_feeds()
         self.load_settings()
@@ -545,9 +545,16 @@ class RSSReader(QMainWindow):
         item = selected_items[0]
         url = item.data(Qt.UserRole)
         self.statusBar().showMessage(f"Loading articles from {item.text()}")
-        self.thread = FetchFeedThread(url)
-        self.thread.feed_fetched.connect(self.on_feed_fetched)
-        self.thread.start()
+        thread = FetchFeedThread(url)
+        thread.feed_fetched.connect(self.on_feed_fetched)
+        self.threads.append(thread)  # Keep a reference
+        # Bind the current thread instance to the lambda using a default argument
+        thread.finished.connect(lambda t=thread: self.remove_thread(t))
+        thread.start()
+
+    def remove_thread(self, thread):
+        if thread in self.threads:
+            self.threads.remove(thread)
 
     def on_feed_fetched(self, url, feed):
         if feed is None:
@@ -586,9 +593,12 @@ class RSSReader(QMainWindow):
         logging.info(f"Loaded {len(self.current_entries)} articles from {url}")
 
         # Start the movie data fetching thread
-        self.movie_data_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
-        self.movie_data_thread.movie_data_fetched.connect(self.update_movie_info)
-        self.movie_data_thread.start()
+        movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
+        movie_thread.movie_data_fetched.connect(self.update_movie_info)
+        self.threads.append(movie_thread)  # Keep a reference
+        # Bind the current thread instance to the lambda using a default argument
+        movie_thread.finished.connect(lambda t=movie_thread: self.remove_thread(t))
+        movie_thread.start()
 
     def update_movie_info(self, index, movie_data):
         item = self.articles_tree.topLevelItem(index)
@@ -615,20 +625,18 @@ class RSSReader(QMainWindow):
             # Store the movie data in the entry for later use
             self.current_entries[index]['movie_data'] = movie_data
 
-        # After updating all items, sorting is already enabled and can be triggered by user
-
     def parse_rating(self, rating_str):
         try:
             # Extract the numeric part before '/'
             return float(rating_str.split('/')[0])
-        except:
+        except (ValueError, IndexError):
             return 0.0
 
     def parse_release_date(self, released_str):
         try:
             # Convert to datetime object
             return datetime.datetime.strptime(released_str, '%d %b %Y')
-        except:
+        except (ValueError, TypeError):
             return datetime.datetime.min
 
     def display_content(self):
@@ -778,7 +786,11 @@ class RSSReader(QMainWindow):
         """
 
         # Get the base URL
-        feed_url = self.feeds_list.currentItem().data(Qt.UserRole)
+        current_feed_item = self.feeds_list.currentItem()
+        if current_feed_item:
+            feed_url = current_feed_item.data(Qt.UserRole)
+        else:
+            feed_url = QUrl()
         self.content_view.setHtml(html_content, baseUrl=QUrl(feed_url))
         self.statusBar().showMessage(f"Displaying article: {title}")
         self.update_navigation_buttons()
@@ -829,6 +841,9 @@ class RSSReader(QMainWindow):
             url = feed_data['url']
             thread = FetchFeedThread(url)
             thread.feed_fetched.connect(self.on_feed_fetched_force_refresh)
+            self.threads.append(thread)  # Keep a reference to prevent garbage collection
+            # Bind the current thread instance to the lambda using a default argument
+            thread.finished.connect(lambda t=thread: self.remove_thread(t))
             thread.start()
 
     def on_feed_fetched_force_refresh(self, url, feed):
@@ -958,455 +973,6 @@ class RSSReader(QMainWindow):
         painter.drawEllipse(0, 0, 10, 10)
         painter.end()
         return QIcon(pixmap)
-
-    def on_feed_fetched(self, url, feed):
-        if feed is None:
-            QMessageBox.critical(self, "Feed Error", f"Failed to load feed.")
-            return
-        self.current_entries = feed.entries
-        # Update entries in feeds data
-        for feed_data in self.feeds:
-            if feed_data['url'] == url:
-                feed_data['entries'] = self.current_entries
-                break
-        self.articles_tree.clear()
-        for index, entry in enumerate(self.current_entries):
-            title = entry.get('title', 'No Title')
-            date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
-            if date_struct:
-                date_obj = datetime.datetime(*date_struct[:6])
-                date_formatted = date_obj.strftime('%d-%m-%Y')
-            else:
-                date_formatted = 'No Date'
-
-            # Initially set placeholders for new columns
-            rating_str = 'Loading...'
-            released_str = ''
-            genre_str = ''
-            director_str = ''
-
-            item = ArticleTreeWidgetItem([title, date_formatted, rating_str, released_str, genre_str, director_str])
-            
-            # Check if the article is unread
-            article_id = entry.get('id', entry.get('link', title))
-            if article_id not in self.read_articles:
-                item.setIcon(0, self.get_unread_icon())  # Set blue dot icon
-            self.articles_tree.addTopLevelItem(item)
-        self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
-        logging.info(f"Loaded {len(self.current_entries)} articles from {url}")
-
-        # Start the movie data fetching thread
-        self.movie_data_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
-        self.movie_data_thread.movie_data_fetched.connect(self.update_movie_info)
-        self.movie_data_thread.start()
-
-    def update_movie_info(self, index, movie_data):
-        item = self.articles_tree.topLevelItem(index)
-        if item:
-            # Parse and set Rating
-            imdb_rating = movie_data.get('imdbrating', 'N/A')
-            # Extract numeric part if possible
-            rating_value = self.parse_rating(imdb_rating)
-            item.setData(2, Qt.UserRole, rating_value)
-            item.setText(2, imdb_rating)
-
-            # Parse and set Release Date
-            released = movie_data.get('released', '')
-            release_date = self.parse_release_date(released)
-            item.setData(3, Qt.UserRole, release_date)
-            item.setText(3, released)
-
-            # Set other fields
-            genre = movie_data.get('genre', '')
-            director = movie_data.get('director', '')
-            item.setText(4, genre)
-            item.setText(5, director)
-
-            # Store the movie data in the entry for later use
-            self.current_entries[index]['movie_data'] = movie_data
-
-    def parse_rating(self, rating_str):
-        try:
-            # Extract the numeric part before '/'
-            return float(rating_str.split('/')[0])
-        except:
-            return 0.0
-
-    def parse_release_date(self, released_str):
-        try:
-            # Convert to datetime object
-            return datetime.datetime.strptime(released_str, '%d %b %Y')
-        except:
-            return datetime.datetime.min
-
-    def display_content(self):
-        selected_items = self.articles_tree.selectedItems()
-        if not selected_items:
-            return
-        item = selected_items[0]
-        index = self.articles_tree.indexOfTopLevelItem(item)
-        entry = self.current_entries[index]
-        title = entry.get('title', 'No Title')
-        date_formatted = item.text(1)
-
-        # Safely extract content
-        if 'content' in entry and entry['content']:
-            content = entry['content'][0].get('value', '')
-        elif 'summary' in entry:
-            content = entry.get('summary', 'No Content')
-        else:
-            content = 'No Content Available.'
-
-        # Extract images
-        images_html = ''
-        if 'media_content' in entry:
-            for media in entry.media_content:
-                img_url = media.get('url')
-                if img_url:
-                    images_html += f'<img src="{img_url}" alt="" /><br/>'
-        elif 'media_thumbnail' in entry:
-            for media in entry.media_thumbnail:
-                img_url = media.get('url')
-                if img_url:
-                    images_html += f'<img src="{img_url}" alt="" /><br/>'
-        elif 'links' in entry:
-            for link in entry.links:
-                if link.get('rel') == 'enclosure' and 'image' in link.get('type', ''):
-                    img_url = link.get('href')
-                    if img_url:
-                        images_html += f'<img src="{img_url}" alt="" /><br/>'
-
-        # Get the link to the original article
-        link = entry.get('link', '')
-
-        # Include additional movie data if available
-        movie_data = entry.get('movie_data', {})
-        movie_info_html = ''
-        if movie_data:
-            # Poster
-            poster_url = movie_data.get('poster', '')
-            if poster_url and poster_url != 'N/A':
-                movie_info_html += f'<img src="{poster_url}" alt="Poster" style="max-width:200px;" /><br/>'
-            # Other details
-            details = [
-                ('Plot', movie_data.get('plot', '')),
-                ('Writer', movie_data.get('writer', '')),
-                ('Actors', movie_data.get('actors', '')),
-                ('Language', movie_data.get('language', '')),
-                ('Country', movie_data.get('country', '')),
-                ('Awards', movie_data.get('awards', '')),
-                ('DVD Release', movie_data.get('dvd', '')),
-                ('Box Office', movie_data.get('boxoffice', '')),
-            ]
-            for label, value in details:
-                if value and value != 'N/A':
-                    movie_info_html += f'<p><strong>{label}:</strong> {value}</p>'
-            # Ratings from different sources
-            ratings = movie_data.get('ratings', [])
-            if ratings:
-                ratings_html = '<ul>'
-                for rating in ratings:
-                    ratings_html += f"<li>{rating.get('Source')}: {rating.get('Value')}</li>"
-                ratings_html += '</ul>'
-                movie_info_html += f'<p><strong>Ratings:</strong>{ratings_html}</p>'
-
-        # Add CSS styles
-        styles = """
-        <style>
-        body {
-            max-width: 800px;
-            margin: auto;
-            padding: 20px;
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-size: 16px;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f9f9f9;
-        }
-        h1, h2, h3, h4, h5, h6 {
-            font-weight: 600;
-            line-height: 1.2;
-            margin: 10px 0 5px;
-        }
-        h1 {
-            font-size: 24px;  /* Reduce the font size of h1 */
-        }
-        p {
-            margin: 0 0 10px;
-        }
-        img {
-            max-width: 100%;
-            height: auto;
-            display: block;
-            margin: 10px 0;
-        }
-        a {
-            color: #1e90ff;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        blockquote {
-            margin: 20px 0;
-            padding: 10px 20px;
-            background-color: #f0f0f0;
-            border-left: 5px solid #ccc;
-        }
-        code {
-            font-family: monospace;
-            background-color: #f0f0f0;
-            padding: 2px 4px;
-            border-radius: 4px;
-        }
-        pre {
-            background-color: #f0f0f0;
-            padding: 10px;
-            overflow: auto;
-            border-radius: 4px;
-        }
-        </style>
-        """
-
-        # Include the link to the original article
-        if link:
-            read_more = f'<p><a href="{link}">Read more</a></p>'
-        else:
-            read_more = ''
-
-        # Use h3 tag for the title to make it smaller
-        html_content = f"""
-        {styles}
-        <h3>{title}</h3>
-        <p><em>{date_formatted}</em></p>
-        {images_html}
-        {content}
-        {movie_info_html}
-        {read_more}
-        """
-
-        # Get the base URL
-        feed_url = self.feeds_list.currentItem().data(Qt.UserRole)
-        self.content_view.setHtml(html_content, baseUrl=QUrl(feed_url))
-        self.statusBar().showMessage(f"Displaying article: {title}")
-        self.update_navigation_buttons()
-
-        # Mark the article as read
-        article_id = entry.get('id', entry.get('link', title))
-        if article_id not in self.read_articles:
-            self.read_articles.add(article_id)
-            item.setIcon(0, QIcon())  # Remove the blue dot
-            self.save_read_articles()
-
-    def filter_articles(self, text):
-        for i in range(self.articles_tree.topLevelItemCount()):
-            item = self.articles_tree.topLevelItem(i)
-            if text.lower() in item.text(0).lower():
-                item.setHidden(False)
-            else:
-                item.setHidden(True)
-
-    def go_back(self):
-        if self.history_index > 0:
-            self.history_index -= 1
-            self.load_history()
-
-    def go_forward(self):
-        if self.history_index < len(self.content_history) - 1:
-            self.history_index += 1
-            self.load_history()
-
-    def load_history(self):
-        # Implement history loading if required
-        pass
-
-    def update_navigation_buttons(self):
-        self.back_action.setEnabled(self.history_index > 0)
-        self.forward_action.setEnabled(self.history_index < len(self.content_history) - 1)
-
-    def refresh_feed(self):
-        self.load_articles()
-
-    def force_refresh_all_feeds(self):
-        if not self.api_key:
-            QMessageBox.warning(self, "API Key Missing", "Please set your OMDb API key in Settings.")
-            return
-        logging.info("Force refreshing all feeds")
-        self.statusBar().showMessage("Force refreshing all feeds...")
-        for feed_data in self.feeds:
-            url = feed_data['url']
-            thread = FetchFeedThread(url)
-            thread.feed_fetched.connect(self.on_feed_fetched_force_refresh)
-            thread.start()
-
-    def on_feed_fetched_force_refresh(self, url, feed):
-        if feed is not None:
-            # Update entries in feeds data
-            for feed_data in self.feeds:
-                if feed_data['url'] == url:
-                    feed_data['entries'] = feed.entries
-                    break
-            logging.info(f"Refreshed feed: {url}")
-        else:
-            logging.error(f"Failed to refresh feed: {url}")
-
-        # If the refreshed feed is currently selected, update the articles tree
-        current_feed_item = self.feeds_list.currentItem()
-        if current_feed_item and current_feed_item.data(Qt.UserRole) == url:
-            self.on_feed_fetched(url, feed)
-
-    def import_feeds(self):
-        file_name, _ = QFileDialog.getOpenFileName(self, "Import Feeds", "", "JSON Files (*.json)")
-        if file_name:
-            try:
-                with open(file_name, 'r') as f:
-                    feeds = json.load(f)
-                    for feed in feeds:
-                        if feed['url'] not in [f['url'] for f in self.feeds]:
-                            self.feeds.append(feed)
-                            item = QListWidgetItem(feed['title'])
-                            item.setData(Qt.UserRole, feed['url'])
-                            self.feeds_list.addItem(item)
-                self.save_feeds()
-                self.statusBar().showMessage("Feeds imported")
-                logging.info("Feeds imported successfully.")
-            except Exception as e:
-                QMessageBox.critical(self, "Import Error", f"Failed to import feeds: {e}")
-                logging.error(f"Failed to import feeds from {file_name}: {e}")
-
-    def export_feeds(self):
-        file_name, _ = QFileDialog.getSaveFileName(self, "Export Feeds", "", "JSON Files (*.json)")
-        if file_name:
-            try:
-                with open(file_name, 'w') as f:
-                    json.dump(self.feeds, f, indent=4)
-                self.statusBar().showMessage("Feeds exported")
-                logging.info("Feeds exported successfully.")
-            except Exception as e:
-                QMessageBox.critical(self, "Export Error", f"Failed to export feeds: {e}")
-                logging.error(f"Failed to export feeds to {file_name}: {e}")
-
-    def increase_font_size(self):
-        font = self.font()
-        font.setPointSize(font.pointSize() + 1)
-        self.setFont(font)
-
-    def decrease_font_size(self):
-        font = self.font()
-        font.setPointSize(font.pointSize() - 1)
-        self.setFont(font)
-
-    def load_read_articles(self):
-        settings = QSettings('YourOrganization', 'SmallRSSReader')
-        read_articles = settings.value('read_articles', [])
-        if read_articles:
-            self.read_articles = set(read_articles)
-        else:
-            self.read_articles = set()
-
-    def save_read_articles(self):
-        settings = QSettings('YourOrganization', 'SmallRSSReader')
-        settings.setValue('read_articles', list(self.read_articles))
-
-    def closeEvent(self, event):
-        self.save_feeds()
-        # Save settings using QSettings
-        settings = QSettings('YourOrganization', 'SmallRSSReader')
-        settings.setValue('geometry', self.saveGeometry())
-        settings.setValue('windowState', self.saveState())  # Correctly saveState()
-        settings.setValue('splitterState', self.main_splitter.saveState())
-        # Save the header state of the articles tree
-        settings.setValue('articlesTreeHeaderState', self.articles_tree.header().saveState())
-        # Save the movie data cache
-        try:
-            with open('movie_data_cache.json', 'w') as f:
-                json.dump(self.movie_data_cache, f, indent=4)
-            logging.info("Movie data cache saved successfully.")
-        except Exception as e:
-            logging.error(f"Failed to save movie data cache: {e}")
-        # Save read articles
-        self.save_read_articles()
-        event.accept()
-
-    def load_settings(self):
-        settings = QSettings('YourOrganization', 'SmallRSSReader')
-        geometry = settings.value('geometry')
-        if geometry:
-            self.restoreGeometry(geometry)
-        windowState = settings.value('windowState')
-        if windowState:
-            self.restoreState(windowState)
-        splitterState = settings.value('splitterState')
-        if splitterState:
-            self.main_splitter.restoreState(splitterState)
-        headerState = settings.value('articlesTreeHeaderState')
-        if headerState:
-            self.articles_tree.header().restoreState(headerState)
-        # Load API key
-        self.api_key = settings.value('omdb_api_key', '')
-        # Load the movie data cache
-        if os.path.exists('movie_data_cache.json'):
-            try:
-                with open('movie_data_cache.json', 'r') as f:
-                    self.movie_data_cache = json.load(f)
-                logging.info("Movie data cache loaded successfully.")
-            except Exception as e:
-                logging.error(f"Failed to load movie data cache: {e}")
-                self.movie_data_cache = {}
-        else:
-            self.movie_data_cache = {}
-
-    def get_unread_icon(self):
-        # Create a simple blue dot pixmap
-        pixmap = QPixmap(10, 10)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setBrush(QBrush(QColor(0, 122, 204)))  # A pleasant blue color
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(0, 0, 10, 10)
-        painter.end()
-        return QIcon(pixmap)
-
-    def on_feed_fetched(self, url, feed):
-        if feed is None:
-            QMessageBox.critical(self, "Feed Error", f"Failed to load feed.")
-            return
-        self.current_entries = feed.entries
-        # Update entries in feeds data
-        for feed_data in self.feeds:
-            if feed_data['url'] == url:
-                feed_data['entries'] = self.current_entries
-                break
-        self.articles_tree.clear()
-        for index, entry in enumerate(self.current_entries):
-            title = entry.get('title', 'No Title')
-            date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
-            if date_struct:
-                date_obj = datetime.datetime(*date_struct[:6])
-                date_formatted = date_obj.strftime('%d-%m-%Y')
-            else:
-                date_formatted = 'No Date'
-
-            # Initially set placeholders for new columns
-            rating_str = 'Loading...'
-            released_str = ''
-            genre_str = ''
-            director_str = ''
-
-            item = ArticleTreeWidgetItem([title, date_formatted, rating_str, released_str, genre_str, director_str])
-            
-            # Check if the article is unread
-            article_id = entry.get('id', entry.get('link', title))
-            if article_id not in self.read_articles:
-                item.setIcon(0, self.get_unread_icon())  # Set blue dot icon
-            self.articles_tree.addTopLevelItem(item)
-        self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
-        logging.info(f"Loaded {len(self.current_entries)} articles from {url}")
-
-        # Start the movie data fetching thread
-        self.movie_data_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
-        self.movie_data_thread.movie_data_fetched.connect(self.update_movie_info)
-        self.movie_data_thread.start()
 
 if __name__ == "__main__":
     def main():
