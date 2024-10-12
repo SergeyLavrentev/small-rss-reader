@@ -22,7 +22,7 @@ from PyQt5.QtGui import QDesktopServices, QFont, QIcon, QPixmap, QPainter, QBrus
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,  # Set level to INFO to suppress debug messages
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('rss_reader.log'),
@@ -88,8 +88,6 @@ class FetchMovieDataThread(QThread):
 
         if not english_title:
             english_title = text.strip()
-        else:
-            pass
 
         english_title = re.split(r'[\(\[]', english_title)[0].strip()
         return english_title
@@ -180,7 +178,7 @@ class RSSReader(QMainWindow):
         self.content_history = []
         self.history_index = -1
         self.api_key = ''
-        self.refresh_interval = 15
+        self.refresh_interval = 60  # Set a default refresh interval
         self.movie_data_cache = {}
         self.read_articles = set()
         self.threads = []
@@ -546,6 +544,8 @@ class RSSReader(QMainWindow):
 
             if article_id not in self.read_articles:
                 item.setIcon(0, self.get_unread_icon())
+            else:
+                item.setIcon(0, QIcon())
             self.articles_tree.addTopLevelItem(item)
         self.articles_tree.setSortingEnabled(True)
         self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
@@ -613,17 +613,17 @@ class RSSReader(QMainWindow):
 
         images_html = ''
         if 'media_content' in entry:
-            for media in entry.media_content:
+            for media in entry.get('media_content', []):
                 img_url = media.get('url')
                 if img_url:
                     images_html += f'<img src="{img_url}" alt="" /><br/>'
         elif 'media_thumbnail' in entry:
-            for media in entry.media_thumbnail:
+            for media in entry.get('media_thumbnail', []):
                 img_url = media.get('url')
                 if img_url:
                     images_html += f'<img src="{img_url}" alt="" /><br/>'
         elif 'links' in entry:
-            for link in entry.links:
+            for link in entry.get('links', []):
                 if link.get('rel') == 'enclosure' and 'image' in link.get('type', ''):
                     img_url = link.get('href')
                     if img_url:
@@ -860,11 +860,11 @@ class RSSReader(QMainWindow):
         if headerState:
             self.articles_tree.header().restoreState(headerState)
         self.api_key = settings.value('omdb_api_key', '')
-        refresh_interval = settings.value('refresh_interval', 15)
+        refresh_interval = settings.value('refresh_interval', 60)
         try:
             self.refresh_interval = int(refresh_interval)
         except ValueError:
-            self.refresh_interval = 15
+            self.refresh_interval = 60
         self.update_refresh_timer()
         if os.path.exists('movie_data_cache.json'):
             try:
@@ -886,7 +886,7 @@ class RSSReader(QMainWindow):
         return QIcon(pixmap)
 
     def get_article_id(self, entry):
-        unique_string = entry.get('id') or entry.get('link') or entry.get('title', '') + entry.get('published', '')
+        unique_string = entry.get('id') or entry.get('link') or (entry.get('title', '') + entry.get('published', ''))
         return hashlib.md5(unique_string.encode('utf-8')).hexdigest()
 
     def mark_feed_unread(self):
