@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QTreeWidget, QTreeWidgetItem, QSplitter, QMessageBox, QAction,
     QFileDialog, QMenu, QToolBar, QHeaderView, QDialog, QFormLayout,
-    QSizePolicy, QStyle, QSpinBox, QAbstractItemView
+    QSizePolicy, QStyle, QSpinBox, QAbstractItemView, QTextEdit
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize
@@ -31,6 +31,7 @@ logging.basicConfig(
 )
 
 class FetchFeedThread(QThread):
+    """Thread for fetching RSS feed data asynchronously."""
     feed_fetched = pyqtSignal(object, object)
 
     def __init__(self, url):
@@ -48,6 +49,7 @@ class FetchFeedThread(QThread):
             self.feed_fetched.emit(self.url, None)
 
 class FetchMovieDataThread(QThread):
+    """Thread for fetching movie data from OMDb API asynchronously."""
     movie_data_fetched = pyqtSignal(int, dict)
 
     def __init__(self, entries, api_key, cache):
@@ -57,6 +59,8 @@ class FetchMovieDataThread(QThread):
         self.movie_data_cache = cache
 
     def run(self):
+        if not self.api_key:
+            return  # Do not attempt to fetch movie data without an API key
         for index, entry in enumerate(self.entries):
             title = entry.get('title', 'No Title')
             movie_title = self.extract_movie_title(title)
@@ -68,6 +72,7 @@ class FetchMovieDataThread(QThread):
             self.movie_data_fetched.emit(index, movie_data)
 
     def extract_movie_title(self, text):
+        """Extracts the movie title from the RSS entry title."""
         text = re.sub(r'^\[.*?\]\s*', '', text)
         parts = text.split('/')
 
@@ -93,6 +98,7 @@ class FetchMovieDataThread(QThread):
         return english_title
 
     def fetch_movie_data(self, movie_title):
+        """Fetches movie data from OMDb API."""
         if not self.api_key:
             return {}
         if movie_title in self.movie_data_cache:
@@ -105,6 +111,7 @@ class FetchMovieDataThread(QThread):
             return {}
 
 class ArticleTreeWidgetItem(QTreeWidgetItem):
+    """Custom QTreeWidgetItem to handle sorting of different data types."""
     def __lt__(self, other):
         column = self.treeWidget().sortColumn()
         data1 = self.data(column, Qt.UserRole)
@@ -123,6 +130,7 @@ class ArticleTreeWidgetItem(QTreeWidgetItem):
             return str(data1) < str(data2)
 
 class WebEnginePage(QWebEnginePage):
+    """Custom QWebEnginePage to handle link clicks in the content view."""
     def acceptNavigationRequest(self, url, _type, isMainFrame):
         if _type == QWebEnginePage.NavigationTypeLinkClicked:
             QDesktopServices.openUrl(url)
@@ -130,6 +138,7 @@ class WebEnginePage(QWebEnginePage):
         return True
 
 class SettingsDialog(QDialog):
+    """Dialog for application settings."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
@@ -139,6 +148,15 @@ class SettingsDialog(QDialog):
         self.api_key_input.setEchoMode(QLineEdit.Password)
         self.api_key_input.setText(self.parent().api_key)
         layout.addRow("OMDb API Key:", self.api_key_input)
+
+        # Notice about rating feature being disabled without API key
+        self.api_key_notice = QLabel()
+        self.api_key_notice.setStyleSheet("color: red;")
+        if not self.parent().api_key:
+            self.api_key_notice.setText("Ratings feature is disabled without an API key.")
+        else:
+            self.api_key_notice.setText("")
+        layout.addRow("", self.api_key_notice)
 
         self.refresh_interval_input = QSpinBox(self)
         self.refresh_interval_input.setRange(1, 1440)
@@ -155,30 +173,27 @@ class SettingsDialog(QDialog):
         layout.addRow(buttons_layout)
 
     def save_settings(self):
+        """Saves the settings when the user clicks 'Save'."""
         api_key = self.api_key_input.text().strip()
         refresh_interval = self.refresh_interval_input.value()
-        if api_key:
-            self.parent().api_key = api_key
-            self.parent().refresh_interval = refresh_interval
-            settings = QSettings('YourOrganization', 'SmallRSSReader')
-            settings.setValue('omdb_api_key', api_key)
-            settings.setValue('refresh_interval', refresh_interval)
-            self.parent().update_refresh_timer()
-            self.accept()
-        else:
-            QMessageBox.warning(self, "Input Error", "API Key cannot be empty.")
+        self.parent().api_key = api_key
+        self.parent().refresh_interval = refresh_interval
+        settings = QSettings('YourOrganization', 'SmallRSSReader')
+        settings.setValue('omdb_api_key', api_key)
+        settings.setValue('refresh_interval', refresh_interval)
+        self.parent().update_refresh_timer()
+        self.accept()
 
 class RSSReader(QMainWindow):
+    """Main application class for the RSS Reader."""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Small RSS Reader")
         self.resize(1200, 800)
         self.feeds = []
         self.current_entries = []
-        self.content_history = []
-        self.history_index = -1
         self.api_key = ''
-        self.refresh_interval = 60  # Set a default refresh interval
+        self.refresh_interval = 60  # Default refresh interval in minutes
         self.movie_data_cache = {}
         self.read_articles = set()
         self.threads = []
@@ -188,13 +203,16 @@ class RSSReader(QMainWindow):
         self.load_read_articles()
 
     def init_ui(self):
+        """Initializes the main UI components."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
+        # Main splitter divides the window vertically
         self.main_splitter = QSplitter(Qt.Vertical)
         main_layout.addWidget(self.main_splitter)
 
+        # Horizontal splitter divides the top part horizontally
         self.horizontal_splitter = QSplitter(Qt.Horizontal)
         self.main_splitter.addWidget(self.horizontal_splitter)
 
@@ -202,6 +220,7 @@ class RSSReader(QMainWindow):
         self.init_articles_panel()
         self.init_content_panel()
 
+        # Set stretch factors for splitters
         self.horizontal_splitter.setStretchFactor(0, 1)
         self.horizontal_splitter.setStretchFactor(1, 3)
         self.main_splitter.setStretchFactor(0, 3)
@@ -212,17 +231,20 @@ class RSSReader(QMainWindow):
 
         self.statusBar().showMessage("Ready")
 
+        # Refresh timer for auto-updating feeds
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self.force_refresh_all_feeds)
         self.update_refresh_timer()
 
     def update_refresh_timer(self):
+        """Updates the refresh timer based on the refresh interval."""
         if self.refresh_timer.isActive():
             self.refresh_timer.stop()
         self.refresh_timer.start(self.refresh_interval * 60 * 1000)
         logging.info(f"Refresh timer set to {self.refresh_interval} minutes.")
 
     def init_feeds_panel(self):
+        """Initializes the feeds panel."""
         self.feeds_panel = QWidget()
         feeds_layout = QVBoxLayout(self.feeds_panel)
         feeds_layout.setContentsMargins(5, 5, 5, 5)
@@ -238,6 +260,7 @@ class RSSReader(QMainWindow):
         self.feeds_list.customContextMenuRequested.connect(self.feeds_context_menu)
         feeds_layout.addWidget(self.feeds_list)
 
+        # Enable drag-and-drop reordering of feeds
         self.feeds_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.feeds_list.model().rowsMoved.connect(self.on_feeds_reordered)
 
@@ -256,6 +279,7 @@ class RSSReader(QMainWindow):
         self.horizontal_splitter.addWidget(self.feeds_panel)
 
     def init_articles_panel(self):
+        """Initializes the articles panel."""
         self.articles_panel = QWidget()
         articles_layout = QVBoxLayout(self.articles_panel)
         articles_layout.setContentsMargins(5, 5, 5, 5)
@@ -283,6 +307,7 @@ class RSSReader(QMainWindow):
         self.horizontal_splitter.addWidget(self.articles_panel)
 
     def init_content_panel(self):
+        """Initializes the content panel."""
         self.content_panel = QWidget()
         content_layout = QVBoxLayout(self.content_panel)
         content_layout.setContentsMargins(5, 5, 5, 5)
@@ -296,8 +321,10 @@ class RSSReader(QMainWindow):
         self.main_splitter.addWidget(self.content_panel)
 
     def init_menu(self):
+        """Initializes the menu bar."""
         menu = self.menuBar()
 
+        # File menu
         file_menu = menu.addMenu("File")
         import_action = QAction("Import Feeds", self)
         import_action.triggered.connect(self.import_feeds)
@@ -316,6 +343,7 @@ class RSSReader(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        # View menu
         view_menu = menu.addMenu("View")
 
         self.toggle_toolbar_action = QAction("Show Toolbar", self)
@@ -324,11 +352,35 @@ class RSSReader(QMainWindow):
         self.toggle_toolbar_action.triggered.connect(self.toggle_toolbar_visibility)
         view_menu.addAction(self.toggle_toolbar_action)
 
+        self.toggle_statusbar_action = QAction("Show Status Bar", self)
+        self.toggle_statusbar_action.setCheckable(True)
+        self.toggle_statusbar_action.setChecked(True)
+        self.toggle_statusbar_action.triggered.connect(self.toggle_statusbar_visibility)
+        view_menu.addAction(self.toggle_statusbar_action)
+
+        self.toggle_menubar_action = QAction("Show Menu Bar", self)
+        self.toggle_menubar_action.setCheckable(True)
+        self.toggle_menubar_action.setChecked(True)
+        self.toggle_menubar_action.triggered.connect(self.toggle_menubar_visibility)
+        view_menu.addAction(self.toggle_menubar_action)
+
     def toggle_toolbar_visibility(self):
+        """Toggles the visibility of the toolbar."""
         visible = self.toggle_toolbar_action.isChecked()
         self.toolbar.setVisible(visible)
 
+    def toggle_statusbar_visibility(self):
+        """Toggles the visibility of the status bar."""
+        visible = self.toggle_statusbar_action.isChecked()
+        self.statusBar().setVisible(visible)
+
+    def toggle_menubar_visibility(self):
+        """Toggles the visibility of the menu bar."""
+        visible = self.toggle_menubar_action.isChecked()
+        self.menuBar().setVisible(visible)
+
     def init_toolbar(self):
+        """Initializes the toolbar."""
         self.toolbar = QToolBar("Main Toolbar")
         self.toolbar.setIconSize(QSize(16, 16))
 
@@ -364,10 +416,12 @@ class RSSReader(QMainWindow):
         self.toolbar.setVisible(True)
 
     def open_settings_dialog(self):
+        """Opens the settings dialog."""
         dialog = SettingsDialog(self)
         dialog.exec_()
 
     def feeds_context_menu(self, position):
+        """Context menu for the feeds list."""
         menu = QMenu()
         remove_action = QAction("Remove Feed", self)
         remove_action.triggered.connect(self.remove_feed)
@@ -375,6 +429,7 @@ class RSSReader(QMainWindow):
         menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
 
     def show_header_menu(self, position):
+        """Context menu for the articles tree header."""
         menu = QMenu()
         header = self.articles_tree.header()
         for i in range(header.count()):
@@ -387,6 +442,7 @@ class RSSReader(QMainWindow):
         menu.exec_(header.mapToGlobal(position))
 
     def toggle_column_visibility(self, checked):
+        """Toggles the visibility of a column in the articles tree."""
         action = self.sender()
         index = action.data()
         if checked:
@@ -395,6 +451,7 @@ class RSSReader(QMainWindow):
             self.articles_tree.hideColumn(index)
 
     def add_feed(self):
+        """Adds a new feed to the feeds list."""
         url = self.feed_url_input.text().strip()
         if not url:
             QMessageBox.warning(self, "Input Error", "Please enter a feed URL.")
@@ -425,6 +482,7 @@ class RSSReader(QMainWindow):
         self.save_feeds()
 
     def remove_feed(self):
+        """Removes the selected feed(s) from the feeds list."""
         selected_items = self.feeds_list.selectedItems()
         if not selected_items:
             return
@@ -440,6 +498,7 @@ class RSSReader(QMainWindow):
             self.save_feeds()
 
     def load_feeds(self):
+        """Loads the feeds from the saved feeds.json file."""
         if os.path.exists('feeds.json'):
             with open('feeds.json', 'r') as f:
                 data = json.load(f)
@@ -462,6 +521,7 @@ class RSSReader(QMainWindow):
             self.feeds = []
 
     def update_feed_titles(self):
+        """Updates the feed titles in case they were not set properly."""
         for feed in self.feeds:
             if feed['title'] == feed['url']:
                 try:
@@ -480,6 +540,7 @@ class RSSReader(QMainWindow):
         self.save_feeds()
 
     def save_feeds(self):
+        """Saves the feeds to feeds.json file."""
         try:
             with open('feeds.json', 'w') as f:
                 json.dump(self.feeds, f, indent=4)
@@ -487,9 +548,7 @@ class RSSReader(QMainWindow):
             pass
 
     def load_articles(self):
-        if not self.api_key:
-            QMessageBox.warning(self, "API Key Missing", "Please set your OMDb API key in Settings.")
-            return
+        """Loads the articles for the selected feed."""
         selected_items = self.feeds_list.selectedItems()
         if not selected_items:
             return
@@ -508,6 +567,7 @@ class RSSReader(QMainWindow):
             thread.start()
 
     def on_feed_fetched(self, url, feed):
+        """Callback when a feed is fetched."""
         if feed is None:
             QMessageBox.critical(self, "Feed Error", f"Failed to load feed.")
             return
@@ -519,6 +579,7 @@ class RSSReader(QMainWindow):
         self.populate_articles()
 
     def populate_articles(self):
+        """Populates the articles tree with the current entries."""
         self.articles_tree.setSortingEnabled(False)
         self.articles_tree.clear()
         for index, entry in enumerate(self.current_entries):
@@ -530,7 +591,7 @@ class RSSReader(QMainWindow):
             else:
                 date_formatted = 'No Date'
 
-            rating_str = 'Loading...'
+            rating_str = 'N/A' if not self.api_key else 'Loading...'
             released_str = ''
             genre_str = ''
             director_str = ''
@@ -550,17 +611,23 @@ class RSSReader(QMainWindow):
         self.articles_tree.setSortingEnabled(True)
         self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
 
-        movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
-        movie_thread.movie_data_fetched.connect(self.update_movie_info)
-        self.threads.append(movie_thread)
-        movie_thread.finished.connect(lambda t=movie_thread: self.remove_thread(t))
-        movie_thread.start()
+        if self.api_key:
+            # Start fetching movie data if API key is provided
+            movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
+            movie_thread.movie_data_fetched.connect(self.update_movie_info)
+            self.threads.append(movie_thread)
+            movie_thread.finished.connect(lambda t=movie_thread: self.remove_thread(t))
+            movie_thread.start()
+        else:
+            logging.info("OMDb API key not provided; skipping movie data fetching.")
 
     def remove_thread(self, thread):
+        """Removes a finished thread from the threads list."""
         if thread in self.threads:
             self.threads.remove(thread)
 
     def update_movie_info(self, index, movie_data):
+        """Updates the article item with movie data."""
         item = self.articles_tree.topLevelItem(index)
         if item:
             imdb_rating = movie_data.get('imdbrating', 'N/A')
@@ -583,18 +650,21 @@ class RSSReader(QMainWindow):
             self.articles_tree.sortItems(self.articles_tree.sortColumn(), self.articles_tree.header().sortIndicatorOrder())
 
     def parse_rating(self, rating_str):
+        """Parses the IMDb rating string to a float value."""
         try:
             return float(rating_str.split('/')[0])
         except (ValueError, IndexError):
             return 0.0
 
     def parse_release_date(self, released_str):
+        """Parses the release date string to a datetime object."""
         try:
             return datetime.datetime.strptime(released_str, '%d %b %Y')
         except (ValueError, TypeError):
             return datetime.datetime.min
 
     def display_content(self):
+        """Displays the content of the selected article."""
         selected_items = self.articles_tree.selectedItems()
         if not selected_items:
             return
@@ -741,6 +811,7 @@ class RSSReader(QMainWindow):
             self.save_read_articles()
 
     def filter_articles(self, text):
+        """Filters the articles based on the search input."""
         for i in range(self.articles_tree.topLevelItemCount()):
             item = self.articles_tree.topLevelItem(i)
             if text.lower() in item.text(0).lower():
@@ -749,29 +820,24 @@ class RSSReader(QMainWindow):
                 item.setHidden(True)
 
     def go_back(self):
-        if self.history_index > 0:
-            self.history_index -= 1
-            self.load_history()
+        """Placeholder for back navigation."""
+        pass
 
     def go_forward(self):
-        if self.history_index < len(self.content_history) - 1:
-            self.history_index += 1
-            self.load_history()
-
-    def load_history(self):
+        """Placeholder for forward navigation."""
         pass
 
     def update_navigation_buttons(self):
-        self.back_action.setEnabled(self.history_index > 0)
-        self.forward_action.setEnabled(self.history_index < len(self.content_history) - 1)
+        """Updates the state of navigation buttons."""
+        self.back_action.setEnabled(False)
+        self.forward_action.setEnabled(False)
 
     def refresh_feed(self):
+        """Refreshes the selected feed."""
         self.load_articles()
 
     def force_refresh_all_feeds(self):
-        if not self.api_key:
-            QMessageBox.warning(self, "API Key Missing", "Please set your OMDb API key in Settings.")
-            return
+        """Forces a refresh of all feeds."""
         for feed_data in self.feeds:
             url = feed_data['url']
             thread = FetchFeedThread(url)
@@ -781,6 +847,7 @@ class RSSReader(QMainWindow):
             thread.start()
 
     def on_feed_fetched_force_refresh(self, url, feed):
+        """Callback when a feed is forcefully refreshed."""
         if feed is not None:
             for feed_data in self.feeds:
                 if feed_data['url'] == url:
@@ -791,6 +858,7 @@ class RSSReader(QMainWindow):
             self.on_feed_fetched(url, feed)
 
     def import_feeds(self):
+        """Imports feeds from a JSON file."""
         file_name, _ = QFileDialog.getOpenFileName(self, "Import Feeds", "", "JSON Files (*.json)")
         if file_name:
             try:
@@ -808,6 +876,7 @@ class RSSReader(QMainWindow):
                 QMessageBox.critical(self, "Import Error", f"Failed to import feeds: {e}")
 
     def export_feeds(self):
+        """Exports feeds to a JSON file."""
         file_name, _ = QFileDialog.getSaveFileName(self, "Export Feeds", "", "JSON Files (*.json)")
         if file_name:
             try:
@@ -818,6 +887,7 @@ class RSSReader(QMainWindow):
                 QMessageBox.critical(self, "Export Error", f"Failed to export feeds: {e}")
 
     def load_read_articles(self):
+        """Loads the set of read articles from settings."""
         settings = QSettings('YourOrganization', 'SmallRSSReader')
         read_articles = settings.value('read_articles', [])
         if read_articles:
@@ -826,10 +896,12 @@ class RSSReader(QMainWindow):
             self.read_articles = set()
 
     def save_read_articles(self):
+        """Saves the set of read articles to settings."""
         settings = QSettings('YourOrganization', 'SmallRSSReader')
         settings.setValue('read_articles', list(self.read_articles))
 
     def closeEvent(self, event):
+        """Handles the window close event."""
         self.save_feeds()
         settings = QSettings('YourOrganization', 'SmallRSSReader')
         settings.setValue('geometry', self.saveGeometry())
@@ -846,6 +918,7 @@ class RSSReader(QMainWindow):
         event.accept()
 
     def load_settings(self):
+        """Loads application settings."""
         settings = QSettings('YourOrganization', 'SmallRSSReader')
         geometry = settings.value('geometry')
         if geometry:
@@ -876,6 +949,7 @@ class RSSReader(QMainWindow):
             self.movie_data_cache = {}
 
     def get_unread_icon(self):
+        """Returns the icon used for unread articles."""
         pixmap = QPixmap(10, 10)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
@@ -886,10 +960,12 @@ class RSSReader(QMainWindow):
         return QIcon(pixmap)
 
     def get_article_id(self, entry):
+        """Generates a unique ID for an article."""
         unique_string = entry.get('id') or entry.get('link') or (entry.get('title', '') + entry.get('published', ''))
         return hashlib.md5(unique_string.encode('utf-8')).hexdigest()
 
     def mark_feed_unread(self):
+        """Marks all articles in the selected feed as unread."""
         selected_items = self.feeds_list.selectedItems()
         if not selected_items:
             QMessageBox.information(self, "No Feed Selected", "Please select a feed to mark as unread.")
@@ -912,6 +988,7 @@ class RSSReader(QMainWindow):
             self.load_articles()
 
     def on_feeds_reordered(self, parent, start, end, destination, row):
+        """Updates the internal feeds list when feeds are reordered."""
         new_order = []
         for i in range(self.feeds_list.count()):
             item = self.feeds_list.item(i)
@@ -923,6 +1000,7 @@ class RSSReader(QMainWindow):
         self.save_feeds()
 
 def main():
+    """Main function to start the application."""
     app = QApplication(sys.argv)
     app.setOrganizationName("YourOrganization")
     app.setApplicationName("Small RSS Reader")

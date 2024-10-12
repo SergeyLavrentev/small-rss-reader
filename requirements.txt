@@ -1,0 +1,4 @@
+PyQt5>=5.12
+PyQtWebEngine>=5.12
+feedparser>=6.0.0
+omdbapi>=0.5.0
