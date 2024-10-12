@@ -18,40 +18,31 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
 - **Auto Refresh**: Automatically refresh feeds at a specified interval.
 
 ## Prerequisites
-
 - Python 3.6 or newer
 
 ## Installation
 
 1. **Clone the repository**:
-
    ```bash
    git clone https://github.com/yourusername/small-rss-reader.git
    cd small-rss-reader
-2. **Create a virtual environment (optional but recommended):
-
+2. **Create a virtual environment (optional but recommended):**
     ```bash 
     python -m venv venv
-3. **Activate the virtual environment:
-```bash
+3. **Activate the virtual environment:**
+   ```bash
     source venv/bin/activate
 4. **Install the dependencies**:
-
    ```bash
    pip install -r requirements.txt
 
-
 ---
 
-### **Part 5: Usage**
-
-```markdown
 ## Usage
 
-**Run the application**:
-
+1. **Run the application**:
    ```bash
-   python rss_reader.py
+   python mini_rss_reader.py
 
 ## Dependencies
 
