@@ -2,6 +2,9 @@
 
 A minimalistic RSS Reader application built with Python and PyQt5. This application allows you to subscribe to RSS feeds, view and search articles, and optionally fetch movie data from the OMDb API.
 
+<img width="512" alt="Screenshot at Oct 13 00-26-26" src="https://github.com/user-attachments/assets/eaa86896-86ed-4502-9da3-91eda418c076">
+
+
 ## Features
 
 - **Add and Remove Feeds**: Easily manage your RSS feeds by adding new ones or removing existing ones.
