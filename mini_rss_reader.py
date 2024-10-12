@@ -7,13 +7,14 @@ import datetime
 import signal
 import re
 import unicodedata
+import hashlib
 from omdbapi.movie_search import GetMovie
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QTreeWidget, QTreeWidgetItem, QSplitter, QMessageBox, QAction,
     QFileDialog, QMenu, QToolBar, QHeaderView, QDialog, QFormLayout,
-    QSizePolicy, QStyle, QSpinBox
+    QSizePolicy, QStyle, QSpinBox, QAbstractItemView
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize
@@ -61,19 +62,14 @@ class FetchMovieDataThread(QThread):
             movie_title = self.extract_movie_title(title)
             if movie_title in self.movie_data_cache:
                 movie_data = self.movie_data_cache[movie_title]
-                logging.debug(f"Cache hit for movie: {movie_title}")
             else:
                 movie_data = self.fetch_movie_data(movie_title)
                 self.movie_data_cache[movie_title] = movie_data
-                logging.debug(f"Fetched data for movie: {movie_title}")
             self.movie_data_fetched.emit(index, movie_data)
 
     def extract_movie_title(self, text):
         text = re.sub(r'^\[.*?\]\s*', '', text)
-        logging.debug(f"Title after removing leading tags: {text}")
-
         parts = text.split('/')
-        logging.debug(f"Title parts after splitting by '/': {parts}")
 
         def is_mostly_latin(s):
             try:
@@ -91,31 +87,23 @@ class FetchMovieDataThread(QThread):
                 break
 
         if not english_title:
-            logging.debug(f"No English title found. Using full title: {text}")
             english_title = text.strip()
         else:
-            logging.debug(f"Extracted English title: {english_title}")
+            pass
 
         english_title = re.split(r'[\(\[]', english_title)[0].strip()
-
-        logging.debug(f"Final English title after cleanup: {english_title}")
         return english_title
 
     def fetch_movie_data(self, movie_title):
         if not self.api_key:
-            logging.error("OMDb API key is not set.")
             return {}
         if movie_title in self.movie_data_cache:
-            logging.debug(f"Using cached data for movie: {movie_title}")
             return self.movie_data_cache[movie_title]
         try:
-            logging.debug(f"Fetching movie data for: {movie_title}")
             movie = GetMovie(api_key=self.api_key)
             movie_data = movie.get_movie(title=movie_title)
-            logging.debug(f"Movie data for '{movie_title}': {movie_data}")
             return movie_data
         except Exception as e:
-            logging.error(f"Error fetching data for {movie_title}: {e}")
             return {}
 
 class ArticleTreeWidgetItem(QTreeWidgetItem):
@@ -129,10 +117,6 @@ class ArticleTreeWidgetItem(QTreeWidgetItem):
         if data2 is None or data2 == '':
             data2 = other.text(column)
 
-        # Add logging to see when __lt__ is called during sorting
-        logging.debug(f"Comparing in __lt__: {data1} ({type(data1)}) < {data2} ({type(data2)})")
-
-        # Handle different data types
         if isinstance(data1, datetime.datetime) and isinstance(data2, datetime.datetime):
             return data1 < data2
         elif isinstance(data1, float) and isinstance(data2, float):
@@ -256,6 +240,9 @@ class RSSReader(QMainWindow):
         self.feeds_list.customContextMenuRequested.connect(self.feeds_context_menu)
         feeds_layout.addWidget(self.feeds_list)
 
+        self.feeds_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.feeds_list.model().rowsMoved.connect(self.on_feeds_reordered)
+
         feed_input_layout = QHBoxLayout()
         self.feed_url_input = QLineEdit()
         self.feed_url_input.setPlaceholderText("Enter feed URL")
@@ -371,6 +358,11 @@ class RSSReader(QMainWindow):
         force_refresh_action.triggered.connect(self.force_refresh_all_feeds)
         self.toolbar.addAction(force_refresh_action)
 
+        mark_unread_icon = self.style().standardIcon(QStyle.SP_DialogCancelButton)
+        mark_unread_action = QAction(mark_unread_icon, "Mark Feed Unread", self)
+        mark_unread_action.triggered.connect(self.mark_feed_unread)
+        self.toolbar.addAction(mark_unread_action)
+
         self.toolbar.setVisible(True)
 
     def open_settings_dialog(self):
@@ -432,7 +424,6 @@ class RSSReader(QMainWindow):
         self.feeds_list.addItem(item)
         self.feed_url_input.clear()
         self.statusBar().showMessage(f"Added feed: {feed_title}")
-        logging.info(f"Added feed: {feed_title}")
         self.save_feeds()
 
     def remove_feed(self):
@@ -448,7 +439,6 @@ class RSSReader(QMainWindow):
                 self.feeds_list.takeItem(self.feeds_list.row(item))
                 self.feeds = [feed for feed in self.feeds if feed['url'] != url]
                 self.statusBar().showMessage(f"Removed feed: {title}")
-                logging.info(f"Removed feed: {title}")
             self.save_feeds()
 
     def load_feeds(self):
@@ -488,16 +478,15 @@ class RSSReader(QMainWindow):
                             item.setText(feed_title)
                             break
                 except Exception as e:
-                    logging.error(f"Failed to update feed title for {feed['url']}: {e}")
+                    pass
         self.save_feeds()
 
     def save_feeds(self):
         try:
             with open('feeds.json', 'w') as f:
                 json.dump(self.feeds, f, indent=4)
-            logging.info("Feeds saved successfully.")
         except Exception as e:
-            logging.error(f"Failed to save feeds: {e}")
+            pass
 
     def load_articles(self):
         if not self.api_key:
@@ -508,16 +497,17 @@ class RSSReader(QMainWindow):
             return
         item = selected_items[0]
         url = item.data(Qt.UserRole)
-        self.statusBar().showMessage(f"Loading articles from {item.text()}")
-        thread = FetchFeedThread(url)
-        thread.feed_fetched.connect(self.on_feed_fetched)
-        self.threads.append(thread)
-        thread.finished.connect(lambda t=thread: self.remove_thread(t))
-        thread.start()
-
-    def remove_thread(self, thread):
-        if thread in self.threads:
-            self.threads.remove(thread)
+        feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
+        if feed_data and 'entries' in feed_data and feed_data['entries']:
+            self.current_entries = feed_data['entries']
+            self.populate_articles()
+        else:
+            self.statusBar().showMessage(f"Loading articles from {item.text()}")
+            thread = FetchFeedThread(url)
+            thread.feed_fetched.connect(self.on_feed_fetched)
+            self.threads.append(thread)
+            thread.finished.connect(lambda t=thread: self.remove_thread(t))
+            thread.start()
 
     def on_feed_fetched(self, url, feed):
         if feed is None:
@@ -528,8 +518,10 @@ class RSSReader(QMainWindow):
             if feed_data['url'] == url:
                 feed_data['entries'] = self.current_entries
                 break
+        self.populate_articles()
 
-        self.articles_tree.setSortingEnabled(False)  # Disable sorting before populating
+    def populate_articles(self):
+        self.articles_tree.setSortingEnabled(False)
         self.articles_tree.clear()
         for index, entry in enumerate(self.current_entries):
             title = entry.get('title', 'No Title')
@@ -545,32 +537,28 @@ class RSSReader(QMainWindow):
             genre_str = ''
             director_str = ''
 
-            article_id = entry.get('id')
-            if not article_id:
-                article_id = entry.get('link')
-            if not article_id:
-                article_id = f"{title}-{index}"
+            article_id = self.get_article_id(entry)
 
             item = ArticleTreeWidgetItem([title, date_formatted, rating_str, released_str, genre_str, director_str])
             item.setData(2, Qt.UserRole, 0.0)
             item.setData(3, Qt.UserRole, datetime.datetime.min)
+            item.setData(0, Qt.UserRole + 1, article_id)
 
             if article_id not in self.read_articles:
                 item.setIcon(0, self.get_unread_icon())
             self.articles_tree.addTopLevelItem(item)
-
-        self.articles_tree.setSortingEnabled(True)  # Re-enable sorting after populating
-        self.articles_tree.header().setSectionsClickable(True)
-        self.articles_tree.header().setSortIndicatorShown(True)
-
+        self.articles_tree.setSortingEnabled(True)
         self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
-        logging.info(f"Loaded {len(self.current_entries)} articles from {url}")
 
         movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
         movie_thread.movie_data_fetched.connect(self.update_movie_info)
         self.threads.append(movie_thread)
         movie_thread.finished.connect(lambda t=movie_thread: self.remove_thread(t))
         movie_thread.start()
+
+    def remove_thread(self, thread):
+        if thread in self.threads:
+            self.threads.remove(thread)
 
     def update_movie_info(self, index, movie_data):
         item = self.articles_tree.topLevelItem(index)
@@ -592,7 +580,6 @@ class RSSReader(QMainWindow):
 
             self.current_entries[index]['movie_data'] = movie_data
 
-            # Force re-sorting after updating data
             self.articles_tree.sortItems(self.articles_tree.sortColumn(), self.articles_tree.header().sortIndicatorOrder())
 
     def parse_rating(self, rating_str):
@@ -747,16 +734,11 @@ class RSSReader(QMainWindow):
         self.statusBar().showMessage(f"Displaying article: {title}")
         self.update_navigation_buttons()
 
-        article_id = entry.get('id')
-        if not article_id:
-            article_id = entry.get('link')
-        if not article_id:
-            article_id = f"{title}-{index}"
+        article_id = item.data(0, Qt.UserRole + 1)
         if article_id not in self.read_articles:
             self.read_articles.add(article_id)
             item.setIcon(0, QIcon())
             self.save_read_articles()
-            logging.debug(f"Marked article as read: {article_id}")
 
     def filter_articles(self, text):
         for i in range(self.articles_tree.topLevelItemCount()):
@@ -790,8 +772,6 @@ class RSSReader(QMainWindow):
         if not self.api_key:
             QMessageBox.warning(self, "API Key Missing", "Please set your OMDb API key in Settings.")
             return
-        logging.info("Force refreshing all feeds")
-        self.statusBar().showMessage("Force refreshing all feeds...")
         for feed_data in self.feeds:
             url = feed_data['url']
             thread = FetchFeedThread(url)
@@ -806,10 +786,6 @@ class RSSReader(QMainWindow):
                 if feed_data['url'] == url:
                     feed_data['entries'] = feed.entries
                     break
-            logging.info(f"Refreshed feed: {url}")
-        else:
-            logging.error(f"Failed to refresh feed: {url}")
-
         current_feed_item = self.feeds_list.currentItem()
         if current_feed_item and current_feed_item.data(Qt.UserRole) == url:
             self.on_feed_fetched(url, feed)
@@ -828,10 +804,8 @@ class RSSReader(QMainWindow):
                             self.feeds_list.addItem(item)
                 self.save_feeds()
                 self.statusBar().showMessage("Feeds imported")
-                logging.info("Feeds imported successfully.")
             except Exception as e:
                 QMessageBox.critical(self, "Import Error", f"Failed to import feeds: {e}")
-                logging.error(f"Failed to import feeds from {file_name}: {e}")
 
     def export_feeds(self):
         file_name, _ = QFileDialog.getSaveFileName(self, "Export Feeds", "", "JSON Files (*.json)")
@@ -840,20 +814,8 @@ class RSSReader(QMainWindow):
                 with open(file_name, 'w') as f:
                     json.dump(self.feeds, f, indent=4)
                 self.statusBar().showMessage("Feeds exported")
-                logging.info("Feeds exported successfully.")
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export feeds: {e}")
-                logging.error(f"Failed to export feeds to {file_name}: {e}")
-
-    def increase_font_size(self):
-        font = self.font()
-        font.setPointSize(font.pointSize() + 1)
-        self.setFont(font)
-
-    def decrease_font_size(self):
-        font = self.font()
-        font.setPointSize(font.pointSize() - 1)
-        self.setFont(font)
 
     def load_read_articles(self):
         settings = QSettings('YourOrganization', 'SmallRSSReader')
@@ -878,9 +840,8 @@ class RSSReader(QMainWindow):
         try:
             with open('movie_data_cache.json', 'w') as f:
                 json.dump(self.movie_data_cache, f, indent=4)
-            logging.info("Movie data cache saved successfully.")
         except Exception as e:
-            logging.error(f"Failed to save movie data cache: {e}")
+            pass
         self.save_read_articles()
         event.accept()
 
@@ -909,9 +870,7 @@ class RSSReader(QMainWindow):
             try:
                 with open('movie_data_cache.json', 'r') as f:
                     self.movie_data_cache = json.load(f)
-                logging.info("Movie data cache loaded successfully.")
             except Exception as e:
-                logging.error(f"Failed to load movie data cache: {e}")
                 self.movie_data_cache = {}
         else:
             self.movie_data_cache = {}
@@ -925,6 +884,43 @@ class RSSReader(QMainWindow):
         painter.drawEllipse(0, 0, 10, 10)
         painter.end()
         return QIcon(pixmap)
+
+    def get_article_id(self, entry):
+        unique_string = entry.get('id') or entry.get('link') or entry.get('title', '') + entry.get('published', '')
+        return hashlib.md5(unique_string.encode('utf-8')).hexdigest()
+
+    def mark_feed_unread(self):
+        selected_items = self.feeds_list.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "No Feed Selected", "Please select a feed to mark as unread.")
+            return
+        item = selected_items[0]
+        url = item.data(Qt.UserRole)
+        feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
+        if not feed_data or 'entries' not in feed_data:
+            QMessageBox.warning(self, "No Entries", "No articles found for the selected feed.")
+            return
+        reply = QMessageBox.question(self, 'Mark Feed Unread',
+                                     'Are you sure you want to mark all articles in this feed as unread?',
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            for entry in feed_data['entries']:
+                article_id = self.get_article_id(entry)
+                if article_id in self.read_articles:
+                    self.read_articles.remove(article_id)
+            self.save_read_articles()
+            self.load_articles()
+
+    def on_feeds_reordered(self, parent, start, end, destination, row):
+        new_order = []
+        for i in range(self.feeds_list.count()):
+            item = self.feeds_list.item(i)
+            url = item.data(Qt.UserRole)
+            feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
+            if feed_data:
+                new_order.append(feed_data)
+        self.feeds = new_order
+        self.save_feeds()
 
 def main():
     app = QApplication(sys.argv)
