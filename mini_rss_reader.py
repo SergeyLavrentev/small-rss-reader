@@ -197,7 +197,6 @@ class RSSReader(QMainWindow):
         self.movie_data_cache = {}
         self.read_articles = set()
         self.threads = []
-        self.article_id_to_item = {}  # Mapping from article_id to QTreeWidgetItem
         self.init_ui()
         self.load_feeds()
         self.load_settings()
@@ -583,7 +582,6 @@ class RSSReader(QMainWindow):
         """Populates the articles tree with the current entries."""
         self.articles_tree.setSortingEnabled(False)
         self.articles_tree.clear()
-        self.article_id_to_item = {}  # Reset the mapping
         for index, entry in enumerate(self.current_entries):
             title = entry.get('title', 'No Title')
             date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
@@ -604,9 +602,6 @@ class RSSReader(QMainWindow):
             item.setData(2, Qt.UserRole, 0.0)
             item.setData(3, Qt.UserRole, datetime.datetime.min)
             item.setData(0, Qt.UserRole + 1, article_id)
-            item.setData(0, Qt.UserRole, entry)  # Store the entry in the item
-
-            self.article_id_to_item[article_id] = item  # Map article_id to item
 
             if article_id not in self.read_articles:
                 item.setIcon(0, self.get_unread_icon())
@@ -633,9 +628,7 @@ class RSSReader(QMainWindow):
 
     def update_movie_info(self, index, movie_data):
         """Updates the article item with movie data."""
-        entry = self.current_entries[index]
-        article_id = self.get_article_id(entry)
-        item = self.article_id_to_item.get(article_id)
+        item = self.articles_tree.topLevelItem(index)
         if item:
             imdb_rating = movie_data.get('imdbrating', 'N/A')
             rating_value = self.parse_rating(imdb_rating)
@@ -652,11 +645,9 @@ class RSSReader(QMainWindow):
             item.setText(4, genre)
             item.setText(5, director)
 
-            # Update the entry with the fetched movie data
-            entry['movie_data'] = movie_data
+            self.current_entries[index]['movie_data'] = movie_data
 
-            # Optional: Re-sort the items if needed
-            # self.articles_tree.sortItems(self.articles_tree.sortColumn(), self.articles_tree.header().sortIndicatorOrder())
+            self.articles_tree.sortItems(self.articles_tree.sortColumn(), self.articles_tree.header().sortIndicatorOrder())
 
     def parse_rating(self, rating_str):
         """Parses the IMDb rating string to a float value."""
@@ -678,11 +669,8 @@ class RSSReader(QMainWindow):
         if not selected_items:
             return
         item = selected_items[0]
-
-        # Retrieve the entry directly from the item's data
-        entry = item.data(0, Qt.UserRole)
-        if not entry:
-            return
+        index = self.articles_tree.indexOfTopLevelItem(item)
+        entry = self.current_entries[index]
         title = entry.get('title', 'No Title')
         date_formatted = item.text(1)
 
