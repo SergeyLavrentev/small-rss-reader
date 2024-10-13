@@ -8,14 +8,14 @@ import signal
 import re
 import unicodedata
 import hashlib
+from urllib.parse import urlparse
 from omdbapi.movie_search import GetMovie
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QTreeWidget, QTreeWidgetItem, QSplitter, QMessageBox, QAction,
-    QFileDialog, QMenu, QToolBar, QHeaderView, QDialog, QFormLayout,
-    QSizePolicy, QStyle, QSpinBox, QAbstractItemView, QInputDialog,
-    QDialogButtonBox
+    QLabel, QLineEdit, QPushButton, QTreeWidget, QTreeWidgetItem,
+    QSplitter, QMessageBox, QAction, QFileDialog, QMenu, QToolBar,
+    QHeaderView, QDialog, QFormLayout, QSizePolicy, QStyle, QSpinBox,
+    QAbstractItemView, QInputDialog, QDialogButtonBox
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize
@@ -109,6 +109,7 @@ class FetchMovieDataThread(QThread):
             movie_data = movie.get_movie(title=movie_title)
             return movie_data
         except Exception as e:
+            logging.error(f"Failed to fetch movie data for {movie_title}: {e}")
             return {}
 
 class ArticleTreeWidgetItem(QTreeWidgetItem):
@@ -129,6 +130,22 @@ class ArticleTreeWidgetItem(QTreeWidgetItem):
             return data1 < data2
         else:
             return str(data1) < str(data2)
+
+class FeedsTreeWidget(QTreeWidget):
+    """Custom QTreeWidget to handle drag-and-drop within groups only."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def dropEvent(self, event):
+        source_item = self.currentItem()
+        target_item = self.itemAt(event.pos())
+        
+        # Prevent dropping a feed into a different group
+        if target_item and target_item.parent() != source_item.parent():
+            QMessageBox.warning(self, "Invalid Move", "Feeds can only be moved within their own groups.")
+            event.ignore()
+            return
+        super().dropEvent(event)
 
 class WebEnginePage(QWebEnginePage):
     """Custom QWebEnginePage to handle link clicks in the content view."""
@@ -224,12 +241,17 @@ class RSSReader(QMainWindow):
         self.read_articles = set()
         self.threads = []
         self.article_id_to_item = {}  # Mapping from article_id to QTreeWidgetItem
+        self.group_name_mapping = {}  # Mapping from domain to custom group name
         self.init_ui()
+        self.load_group_names()
         self.load_feeds()
         
-        # **Add these lines to select the first feed if available**
-        if self.feeds_list.count() > 0:
-            self.feeds_list.setCurrentRow(0)
+        # Automatically select the first feed if available
+        if self.feeds_list.topLevelItemCount() > 0:
+            first_group = self.feeds_list.topLevelItem(0)
+            if first_group.childCount() > 0:
+                first_feed = first_group.child(0)
+                self.feeds_list.setCurrentItem(first_feed)
         
         self.load_settings()
         self.load_read_articles()
@@ -285,26 +307,15 @@ class RSSReader(QMainWindow):
         feeds_label.setFont(QFont("Arial", 12, QFont.Bold))
         feeds_layout.addWidget(feeds_label)
 
-        self.feeds_list = QListWidget()
+        self.feeds_list = FeedsTreeWidget()
+        self.feeds_list.setHeaderHidden(True)  # Hide the header for a cleaner look
+        self.feeds_list.setIndentation(10)  # Reduced indentation
         self.feeds_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.feeds_list.itemSelectionChanged.connect(self.load_articles)
         self.feeds_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.feeds_list.customContextMenuRequested.connect(self.feeds_context_menu)
+        self.feeds_list.setDragDropMode(QAbstractItemView.InternalMove)  # Enable drag-and-drop
         feeds_layout.addWidget(self.feeds_list)
-
-        # Enable drag-and-drop reordering of feeds
-        self.feeds_list.setDragDropMode(QAbstractItemView.InternalMove)
-        self.feeds_list.model().rowsMoved.connect(self.on_feeds_reordered)
-
-        # Remove the existing add feed button from feeds panel
-        # feed_input_layout = QHBoxLayout()
-        # self.feed_url_input = QLineEdit()
-        # self.feed_url_input.setPlaceholderText("Enter feed URL")
-        # feed_input_layout.addWidget(self.feed_url_input)
-        # add_feed_button = QPushButton("Add")
-        # add_feed_button.clicked.connect(self.add_feed)
-        # feed_input_layout.addWidget(add_feed_button)
-        # feeds_layout.addLayout(feed_input_layout)
 
         self.feeds_panel.setMinimumWidth(200)
         self.feeds_panel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
@@ -502,22 +513,86 @@ class RSSReader(QMainWindow):
                 'sort_order': Qt.AscendingOrder
             }
             self.feeds.append(feed_data)
-            item = QListWidgetItem(feed_name)
-            item.setData(Qt.UserRole, feed_url)
-            self.feeds_list.addItem(item)
+            
+            parsed_url = urlparse(feed_url)
+            domain = parsed_url.netloc
+            if not domain:
+                domain = 'Unknown Domain'
+            
+            # Check if the domain group already exists
+            existing_group = None
+            for i in range(self.feeds_list.topLevelItemCount()):
+                group = self.feeds_list.topLevelItem(i)
+                if group.text(0) == self.group_name_mapping.get(domain, domain):
+                    existing_group = group
+                    break
+            
+            if not existing_group:
+                # Create a new group for the domain
+                group_name = self.group_name_mapping.get(domain, domain)
+                existing_group = QTreeWidgetItem(self.feeds_list)
+                existing_group.setText(0, group_name)
+                existing_group.setExpanded(False)  # Default to collapsed
+                existing_group.setFlags(existing_group.flags() & ~Qt.ItemIsSelectable)  # Group items aren't selectable
+            
+            # Add the feed as a child under the domain group
+            feed_item = QTreeWidgetItem(existing_group)
+            feed_item.setText(0, feed_name)
+            feed_item.setData(0, Qt.UserRole, feed_url)
+            feed_item.setFlags(feed_item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)  # Make feed items selectable and draggable
+            
+            self.feeds_list.expandItem(existing_group)  # Optional: Expand the group to show the new feed
+
             self.statusBar().showMessage(f"Added feed: {feed_name}")
             self.save_feeds()
 
     def feeds_context_menu(self, position):
         """Context menu for the feeds list."""
-        menu = QMenu()
-        rename_action = QAction("Rename Feed", self)
-        rename_action.triggered.connect(self.rename_feed)
-        remove_action = QAction("Remove Feed", self)
-        remove_action.triggered.connect(self.remove_feed)
-        menu.addAction(rename_action)
-        menu.addAction(remove_action)
-        menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
+        item = self.feeds_list.itemAt(position)
+        if not item:
+            return  # Clicked outside any item
+        
+        if item.parent() is None:
+            # It's a group, show context menu for group
+            menu = QMenu()
+            rename_group_action = QAction("Rename Group", self)
+            rename_group_action.triggered.connect(lambda: self.rename_group(item))
+            menu.addAction(rename_group_action)
+            menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
+        else:
+            # It's a feed, show context menu for feed
+            menu = QMenu()
+            rename_action = QAction("Rename Feed", self)
+            rename_action.triggered.connect(self.rename_feed)
+            remove_action = QAction("Remove Feed", self)
+            remove_action.triggered.connect(self.remove_feed)
+            menu.addAction(rename_action)
+            menu.addAction(remove_action)
+            menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
+
+    def rename_group(self, group_item):
+        """Renames the selected group."""
+        current_group_name = group_item.text(0)
+        new_group_name, ok = QInputDialog.getText(self, "Rename Group", "Enter new group name:", QLineEdit.Normal, current_group_name)
+        if ok and new_group_name:
+            # Find the domain associated with this group
+            domain = None
+            for domain_key, group_name in self.group_name_mapping.items():
+                if group_name == current_group_name:
+                    domain = domain_key
+                    break
+            if not domain:
+                # If the group was using the default domain name
+                domain = current_group_name
+
+            # Update the group name mapping
+            self.group_name_mapping[domain] = new_group_name
+            self.save_group_names()
+
+            # Update the group item's text
+            group_item.setText(0, new_group_name)
+
+            self.statusBar().showMessage(f"Renamed group to: {new_group_name}")
 
     def show_header_menu(self, position):
         """Context menu for the articles tree header."""
@@ -548,6 +623,9 @@ class RSSReader(QMainWindow):
             QMessageBox.information(self, "No Feed Selected", "Please select a feed to rename.")
             return
         item = selected_items[0]
+        if item.parent() is None:
+            QMessageBox.information(self, "Invalid Selection", "Please select a feed, not a group.")
+            return
         current_name = item.text()
         new_name, ok = QInputDialog.getText(self, "Rename Feed", "Enter new name:", QLineEdit.Normal, current_name)
         if ok and new_name:
@@ -556,13 +634,33 @@ class RSSReader(QMainWindow):
                 QMessageBox.warning(self, "Duplicate Name", "A feed with this name already exists.")
                 return
             # Update the feeds list
-            url = item.data(Qt.UserRole)
+            url = item.data(0, Qt.UserRole)
             feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
             if feed_data:
                 feed_data['title'] = new_name
-                item.setText(new_name)
+                item.setText(0, new_name)  # QTreeWidgetItem uses column 0
                 self.save_feeds()
                 self.statusBar().showMessage(f"Renamed feed to: {new_name}")
+
+    def load_group_names(self):
+        """Loads the group name mapping from settings."""
+        settings = QSettings('rocker', 'SmallRSSReader')
+        group_mapping = settings.value('group_name_mapping', {})
+        if isinstance(group_mapping, str):
+            # If stored as a JSON string
+            try:
+                self.group_name_mapping = json.loads(group_mapping)
+            except json.JSONDecodeError:
+                self.group_name_mapping = {}
+        elif isinstance(group_mapping, dict):
+            self.group_name_mapping = group_mapping
+        else:
+            self.group_name_mapping = {}
+
+    def save_group_names(self):
+        """Saves the group name mapping to settings."""
+        settings = QSettings('rocker', 'SmallRSSReader')
+        settings.setValue('group_name_mapping', json.dumps(self.group_name_mapping))
 
     def load_feeds(self):
         """Loads the feeds from the saved feeds.json file."""
@@ -586,12 +684,44 @@ class RSSReader(QMainWindow):
                 else:
                     self.feeds = []
                 for feed in self.feeds:
-                    item = QListWidgetItem(feed['title'])
-                    item.setData(Qt.UserRole, feed['url'])
-                    self.feeds_list.addItem(item)
+                    parsed_url = urlparse(feed['url'])
+                    domain = parsed_url.netloc
+                    if not domain:
+                        domain = 'Unknown Domain'
+                    
+                    # Get custom group name if exists
+                    group_name = self.group_name_mapping.get(domain, domain)
+                    
+                    # Check if the group already exists
+                    existing_group = None
+                    for i in range(self.feeds_list.topLevelItemCount()):
+                        group = self.feeds_list.topLevelItem(i)
+                        if group.text(0) == group_name:
+                            existing_group = group
+                            break
+                    
+                    if not existing_group:
+                        # Create a new group for the domain
+                        existing_group = QTreeWidgetItem(self.feeds_list)
+                        existing_group.setText(0, group_name)
+                        existing_group.setExpanded(False)  # Default to collapsed
+                        existing_group.setFlags(existing_group.flags() & ~Qt.ItemIsSelectable)  # Group items aren't selectable
+                    
+                    # Add the feed as a child under the domain group
+                    feed_item = QTreeWidgetItem(existing_group)
+                    feed_item.setText(0, feed['title'])
+                    feed_item.setData(0, Qt.UserRole, feed['url'])
+                    feed_item.setFlags(feed_item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)  # Make feed items selectable and draggable
             self.update_feed_titles()
         else:
             self.feeds = []
+        
+        # Automatically select the first feed if available
+        if self.feeds_list.topLevelItemCount() > 0:
+            first_group = self.feeds_list.topLevelItem(0)
+            if first_group.childCount() > 0:
+                first_feed = first_group.child(0)
+                self.feeds_list.setCurrentItem(first_feed)
 
     def update_feed_titles(self):
         """Updates the feed titles in case they were not set properly."""
@@ -603,13 +733,31 @@ class RSSReader(QMainWindow):
                         raise parsed_feed.bozo_exception
                     feed_title = parsed_feed.feed.get('title', feed['url'])
                     feed['title'] = feed_title
-                    for index in range(self.feeds_list.count()):
-                        item = self.feeds_list.item(index)
-                        if item.data(Qt.UserRole) == feed['url']:
-                            item.setText(feed_title)
+                    
+                    parsed_url = urlparse(feed['url'])
+                    domain = parsed_url.netloc
+                    if not domain:
+                        domain = 'Unknown Domain'
+                    
+                    group_name = self.group_name_mapping.get(domain, domain)
+                    
+                    # Find the group
+                    group = None
+                    for i in range(self.feeds_list.topLevelItemCount()):
+                        potential_group = self.feeds_list.topLevelItem(i)
+                        if potential_group.text(0) == group_name:
+                            group = potential_group
                             break
+                    
+                    if group:
+                        # Iterate through child items to find the feed
+                        for j in range(group.childCount()):
+                            child = group.child(j)
+                            if child.data(0, Qt.UserRole) == feed['url']:
+                                child.setText(0, feed_title)
+                                break
                 except Exception as e:
-                    pass
+                    logging.error(f"Error updating feed title for {feed['url']}: {e}")
         self.save_feeds()
 
     def save_feeds(self):
@@ -626,7 +774,9 @@ class RSSReader(QMainWindow):
         if not selected_items:
             return
         item = selected_items[0]
-        url = item.data(Qt.UserRole)
+        if item.parent() is None:
+            return  # Do not load articles if a group is selected
+        url = item.data(0, Qt.UserRole)  # Corrected line with column index
         feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
         if feed_data and 'entries' in feed_data and feed_data['entries']:
             self.current_entries = feed_data['entries']
@@ -638,18 +788,6 @@ class RSSReader(QMainWindow):
             self.threads.append(thread)
             thread.finished.connect(lambda t=thread: self.remove_thread(t))
             thread.start()
-
-    def on_feed_fetched(self, url, feed):
-        """Callback when a feed is fetched."""
-        if feed is None:
-            QMessageBox.critical(self, "Feed Error", f"Failed to load feed.")
-            return
-        self.current_entries = feed.entries
-        for feed_data in self.feeds:
-            if feed_data['url'] == url:
-                feed_data['entries'] = self.current_entries
-                break
-        self.populate_articles()
 
     def populate_articles(self):
         """Populates the articles tree with the current entries."""
@@ -701,13 +839,13 @@ class RSSReader(QMainWindow):
         # Apply the feed's sort preference
         selected_items = self.feeds_list.selectedItems()
         if selected_items:
-            current_feed = next((feed for feed in self.feeds if feed['url'] == selected_items[0].data(Qt.UserRole)), None)
+            current_feed = next((feed for feed in self.feeds if feed['url'] == selected_items[0].data(0, Qt.UserRole)), None)
             if current_feed:
                 sort_column = current_feed.get('sort_column', 1)
                 sort_order = current_feed.get('sort_order', Qt.AscendingOrder)
                 self.articles_tree.sortItems(sort_column, sort_order)
         
-        # **Add these lines to select the first article if available**
+        # Automatically select the first article if available
         if self.articles_tree.topLevelItemCount() > 0:
             first_item = self.articles_tree.topLevelItem(0)
             self.articles_tree.setCurrentItem(first_item)
@@ -892,23 +1030,18 @@ class RSSReader(QMainWindow):
 
         current_feed_item = self.feeds_list.currentItem()
         if current_feed_item:
-            feed_url = current_feed_item.data(Qt.UserRole)
+            feed_url = current_feed_item.data(0, Qt.UserRole)
         else:
             feed_url = QUrl()
         self.content_view.setHtml(html_content, baseUrl=QUrl(feed_url))
         self.statusBar().showMessage(f"Displaying article: {title}")
-        self.update_navigation_buttons()
+        # self.update_navigation_buttons()  # Removed or commented out
 
         article_id = item.data(0, Qt.UserRole + 1)
         if article_id not in self.read_articles:
             self.read_articles.add(article_id)
             item.setIcon(0, QIcon())
             self.save_read_articles()
-
-        # **Add these lines to select the first article if available**
-        if self.articles_tree.topLevelItemCount() > 0:
-            first_item = self.articles_tree.topLevelItem(0)
-            self.articles_tree.setCurrentItem(first_item)
 
     def filter_articles(self, text):
         """Filters the articles based on the search input."""
@@ -918,20 +1051,6 @@ class RSSReader(QMainWindow):
                 item.setHidden(False)
             else:
                 item.setHidden(True)
-
-    def go_back(self):
-        """Placeholder for back navigation."""
-        pass
-
-    def go_forward(self):
-        """Placeholder for forward navigation."""
-        pass
-
-    def update_navigation_buttons(self):
-        """Updates the state of navigation buttons."""
-        # Previously, this method managed back and forward buttons
-        # Since they are removed, we can leave this method empty or remove it
-        pass  # Back and Forward buttons have been removed
 
     def refresh_feed(self):
         """Refreshes the selected feed."""
@@ -955,7 +1074,7 @@ class RSSReader(QMainWindow):
                     feed_data['entries'] = feed.entries
                     break
         current_feed_item = self.feeds_list.currentItem()
-        if current_feed_item and current_feed_item.data(Qt.UserRole) == url:
+        if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
             self.on_feed_fetched(url, feed)
 
     def import_feeds(self):
@@ -973,9 +1092,35 @@ class RSSReader(QMainWindow):
                             if 'sort_order' not in feed:
                                 feed['sort_order'] = Qt.AscendingOrder
                             self.feeds.append(feed)
-                            item = QListWidgetItem(feed['title'])
-                            item.setData(Qt.UserRole, feed['url'])
-                            self.feeds_list.addItem(item)
+                            
+                            parsed_url = urlparse(feed['url'])
+                            domain = parsed_url.netloc
+                            if not domain:
+                                domain = 'Unknown Domain'
+                            
+                            # Get custom group name if exists
+                            group_name = self.group_name_mapping.get(domain, domain)
+                            
+                            # Check if the group already exists
+                            existing_group = None
+                            for i in range(self.feeds_list.topLevelItemCount()):
+                                group = self.feeds_list.topLevelItem(i)
+                                if group.text(0) == group_name:
+                                    existing_group = group
+                                    break
+                            
+                            if not existing_group:
+                                # Create a new group for the domain
+                                existing_group = QTreeWidgetItem(self.feeds_list)
+                                existing_group.setText(0, group_name)
+                                existing_group.setExpanded(False)  # Default to collapsed
+                                existing_group.setFlags(existing_group.flags() & ~Qt.ItemIsSelectable)  # Group items aren't selectable
+                            
+                            # Add the feed as a child under the domain group
+                            feed_item = QTreeWidgetItem(existing_group)
+                            feed_item.setText(0, feed['title'])
+                            feed_item.setData(0, Qt.UserRole, feed['url'])
+                            feed_item.setFlags(feed_item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)  # Make feed items selectable and draggable
                 self.save_feeds()
                 self.statusBar().showMessage("Feeds imported")
             except Exception as e:
@@ -1015,6 +1160,7 @@ class RSSReader(QMainWindow):
         settings.setValue('splitterState', self.main_splitter.saveState())
         settings.setValue('articlesTreeHeaderState', self.articles_tree.header().saveState())
         settings.setValue('refresh_interval', self.refresh_interval)
+        settings.setValue('group_name_mapping', json.dumps(self.group_name_mapping))
         try:
             with open('movie_data_cache.json', 'w') as f:
                 json.dump(self.movie_data_cache, f, indent=4)
@@ -1078,7 +1224,10 @@ class RSSReader(QMainWindow):
             QMessageBox.information(self, "No Feed Selected", "Please select a feed to mark as unread.")
             return
         item = selected_items[0]
-        url = item.data(Qt.UserRole)
+        if item.parent() is None:
+            QMessageBox.information(self, "Invalid Selection", "Please select a feed, not a group.")
+            return
+        url = item.data(0, Qt.UserRole)
         feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
         if not feed_data or 'entries' not in feed_data:
             QMessageBox.warning(self, "No Entries", "No articles found for the selected feed.")
@@ -1096,15 +1245,8 @@ class RSSReader(QMainWindow):
 
     def on_feeds_reordered(self, parent, start, end, destination, row):
         """Updates the internal feeds list when feeds are reordered."""
-        new_order = []
-        for i in range(self.feeds_list.count()):
-            item = self.feeds_list.item(i)
-            url = item.data(Qt.UserRole)
-            feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
-            if feed_data:
-                new_order.append(feed_data)
-        self.feeds = new_order
-        self.save_feeds()
+        # This method is no longer needed since QTreeWidget handles ordering
+        pass
 
     def on_sort_changed(self, column, order):
         """Handles sort changes and saves the preference."""
@@ -1112,7 +1254,9 @@ class RSSReader(QMainWindow):
         if not selected_items:
             return
         item = selected_items[0]
-        url = item.data(Qt.UserRole)
+        if item.parent() is None:
+            return  # Do not save sort preferences for groups
+        url = item.data(0, Qt.UserRole)
         feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
         if feed_data:
             feed_data['sort_column'] = column
@@ -1128,6 +1272,7 @@ def main():
     reader = RSSReader()
     reader.show()
 
+    # Ensure that Ctrl+C works on Unix-like systems
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     sys.exit(app.exec_())
