@@ -226,6 +226,11 @@ class RSSReader(QMainWindow):
         self.article_id_to_item = {}  # Mapping from article_id to QTreeWidgetItem
         self.init_ui()
         self.load_feeds()
+        
+        # **Add these lines to select the first feed if available**
+        if self.feeds_list.count() > 0:
+            self.feeds_list.setCurrentRow(0)
+        
         self.load_settings()
         self.load_read_articles()
 
@@ -701,6 +706,11 @@ class RSSReader(QMainWindow):
                 sort_column = current_feed.get('sort_column', 1)
                 sort_order = current_feed.get('sort_order', Qt.AscendingOrder)
                 self.articles_tree.sortItems(sort_column, sort_order)
+        
+        # **Add these lines to select the first article if available**
+        if self.articles_tree.topLevelItemCount() > 0:
+            first_item = self.articles_tree.topLevelItem(0)
+            self.articles_tree.setCurrentItem(first_item)
 
     def remove_thread(self, thread):
         """Removes a finished thread from the threads list."""
@@ -887,12 +897,18 @@ class RSSReader(QMainWindow):
             feed_url = QUrl()
         self.content_view.setHtml(html_content, baseUrl=QUrl(feed_url))
         self.statusBar().showMessage(f"Displaying article: {title}")
+        self.update_navigation_buttons()
 
         article_id = item.data(0, Qt.UserRole + 1)
         if article_id not in self.read_articles:
             self.read_articles.add(article_id)
             item.setIcon(0, QIcon())
             self.save_read_articles()
+
+        # **Add these lines to select the first article if available**
+        if self.articles_tree.topLevelItemCount() > 0:
+            first_item = self.articles_tree.topLevelItem(0)
+            self.articles_tree.setCurrentItem(first_item)
 
     def filter_articles(self, text):
         """Filters the articles based on the search input."""
@@ -903,7 +919,20 @@ class RSSReader(QMainWindow):
             else:
                 item.setHidden(True)
 
-    
+    def go_back(self):
+        """Placeholder for back navigation."""
+        pass
+
+    def go_forward(self):
+        """Placeholder for forward navigation."""
+        pass
+
+    def update_navigation_buttons(self):
+        """Updates the state of navigation buttons."""
+        # Previously, this method managed back and forward buttons
+        # Since they are removed, we can leave this method empty or remove it
+        pass  # Back and Forward buttons have been removed
+
     def refresh_feed(self):
         """Refreshes the selected feed."""
         self.load_articles()
