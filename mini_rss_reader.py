@@ -14,7 +14,8 @@ from PyQt5.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QTreeWidget, QTreeWidgetItem, QSplitter, QMessageBox, QAction,
     QFileDialog, QMenu, QToolBar, QHeaderView, QDialog, QFormLayout,
-    QSizePolicy, QStyle, QSpinBox, QAbstractItemView, QTextEdit, QInputDialog
+    QSizePolicy, QStyle, QSpinBox, QAbstractItemView, QInputDialog,
+    QDialogButtonBox
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize
@@ -136,6 +137,31 @@ class WebEnginePage(QWebEnginePage):
             QDesktopServices.openUrl(url)
             return False
         return True
+
+class AddFeedDialog(QDialog):
+    """Dialog to add a new feed with a custom name."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add New Feed")
+        self.setModal(True)
+        self.setFixedSize(400, 150)
+        layout = QFormLayout(self)
+
+        self.name_input = QLineEdit(self)
+        self.name_input.setPlaceholderText("Enter custom feed name")
+        layout.addRow("Feed Name:", self.name_input)
+
+        self.url_input = QLineEdit(self)
+        self.url_input.setPlaceholderText("Enter feed URL")
+        layout.addRow("Feed URL:", self.url_input)
+
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addRow(self.buttons)
+
+    def get_inputs(self):
+        return self.name_input.text().strip(), self.url_input.text().strip()
 
 class SettingsDialog(QDialog):
     """Dialog for application settings."""
@@ -265,14 +291,15 @@ class RSSReader(QMainWindow):
         self.feeds_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.feeds_list.model().rowsMoved.connect(self.on_feeds_reordered)
 
-        feed_input_layout = QHBoxLayout()
-        self.feed_url_input = QLineEdit()
-        self.feed_url_input.setPlaceholderText("Enter feed URL")
-        feed_input_layout.addWidget(self.feed_url_input)
-        add_feed_button = QPushButton("Add")
-        add_feed_button.clicked.connect(self.add_feed)
-        feed_input_layout.addWidget(add_feed_button)
-        feeds_layout.addLayout(feed_input_layout)
+        # Remove the existing add feed button from feeds panel
+        # feed_input_layout = QHBoxLayout()
+        # self.feed_url_input = QLineEdit()
+        # self.feed_url_input.setPlaceholderText("Enter feed URL")
+        # feed_input_layout.addWidget(self.feed_url_input)
+        # add_feed_button = QPushButton("Add")
+        # add_feed_button.clicked.connect(self.add_feed)
+        # feed_input_layout.addWidget(add_feed_button)
+        # feeds_layout.addLayout(feed_input_layout)
 
         self.feeds_panel.setMinimumWidth(200)
         self.feeds_panel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
@@ -301,7 +328,6 @@ class RSSReader(QMainWindow):
         self.articles_tree.header().setSortIndicatorShown(True)
         self.articles_tree.itemSelectionChanged.connect(self.display_content)
         self.articles_tree.header().sortIndicatorChanged.connect(self.on_sort_changed)
-
         articles_layout.addWidget(self.articles_tree)
 
         self.articles_tree.header().setContextMenuPolicy(Qt.CustomContextMenu)
@@ -385,32 +411,46 @@ class RSSReader(QMainWindow):
     def init_toolbar(self):
         """Initializes the toolbar."""
         self.toolbar = QToolBar("Main Toolbar")
-        self.toolbar.setIconSize(QSize(16, 16))
+        self.toolbar.setIconSize(QSize(24, 24))  # Increased icon size for better visibility
 
         self.addToolBar(self.toolbar)
 
-        back_icon = self.style().standardIcon(QStyle.SP_ArrowBack)
-        self.back_action = QAction(back_icon, "Back", self)
-        self.back_action.setEnabled(False)
-        self.back_action.triggered.connect(self.go_back)
-        self.toolbar.addAction(self.back_action)
+        # New Feed Button
+        new_feed_icon = self.style().standardIcon(QStyle.SP_FileDialogNewFolder)  # Choose an appropriate icon
+        self.new_feed_button = QPushButton("New Feed")
+        self.new_feed_button.setIcon(new_feed_icon)
+        self.new_feed_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50; /* Green */
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                text-align: center;
+                text-decoration: none;
+                font-size: 14px;
+                margin: 2px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.new_feed_button.clicked.connect(self.open_add_feed_dialog)
+        self.toolbar.addWidget(self.new_feed_button)
 
-        forward_icon = self.style().standardIcon(QStyle.SP_ArrowForward)
-        self.forward_action = QAction(forward_icon, "Forward", self)
-        self.forward_action.setEnabled(False)
-        self.forward_action.triggered.connect(self.go_forward)
-        self.toolbar.addAction(self.forward_action)
-
+        # Refresh Selected Feed Button
         refresh_icon = self.style().standardIcon(QStyle.SP_BrowserReload)
         refresh_action = QAction(refresh_icon, "Refresh Selected Feed", self)
         refresh_action.triggered.connect(self.refresh_feed)
         self.toolbar.addAction(refresh_action)
 
+        # Force Refresh All Feeds Button
         force_refresh_icon = self.style().standardIcon(QStyle.SP_DialogResetButton)
         force_refresh_action = QAction(force_refresh_icon, "Force Refresh All Feeds", self)
         force_refresh_action.triggered.connect(self.force_refresh_all_feeds)
         self.toolbar.addAction(force_refresh_action)
 
+        # Mark Feed Unread Button
         mark_unread_icon = self.style().standardIcon(QStyle.SP_DialogCancelButton)
         mark_unread_action = QAction(mark_unread_icon, "Mark Feed Unread", self)
         mark_unread_action.triggered.connect(self.mark_feed_unread)
@@ -422,6 +462,46 @@ class RSSReader(QMainWindow):
         """Opens the settings dialog."""
         dialog = SettingsDialog(self)
         dialog.exec_()
+
+    def open_add_feed_dialog(self):
+        """Opens the Add Feed dialog."""
+        dialog = AddFeedDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            feed_name, feed_url = dialog.get_inputs()
+            if not feed_name or not feed_url:
+                QMessageBox.warning(self, "Input Error", "Both Feed Name and Feed URL are required.")
+                return
+            if not feed_url.startswith(('http://', 'https://')):
+                feed_url = 'http://' + feed_url
+            if feed_url in [feed['url'] for feed in self.feeds]:
+                QMessageBox.information(self, "Duplicate Feed", "This feed URL is already added.")
+                return
+            if feed_name in [feed['title'] for feed in self.feeds]:
+                QMessageBox.warning(self, "Duplicate Name", "A feed with this name already exists.")
+                return
+            try:
+                feed = feedparser.parse(feed_url)
+                if feed.bozo and feed.bozo_exception:
+                    raise feed.bozo_exception
+                # Use the custom name provided by the user
+                # feed_title = feed.feed.get('title', feed_url)
+            except Exception as e:
+                QMessageBox.critical(self, "Feed Error", f"Failed to load feed: {e}")
+                return
+            # Initialize default sorting preferences
+            feed_data = {
+                'title': feed_name,
+                'url': feed_url,
+                'entries': [],
+                'sort_column': 1,  # Default to 'Date' column
+                'sort_order': Qt.AscendingOrder
+            }
+            self.feeds.append(feed_data)
+            item = QListWidgetItem(feed_name)
+            item.setData(Qt.UserRole, feed_url)
+            self.feeds_list.addItem(item)
+            self.statusBar().showMessage(f"Added feed: {feed_name}")
+            self.save_feeds()
 
     def feeds_context_menu(self, position):
         """Context menu for the feeds list."""
@@ -455,60 +535,6 @@ class RSSReader(QMainWindow):
             self.articles_tree.showColumn(index)
         else:
             self.articles_tree.hideColumn(index)
-
-    def add_feed(self):
-        """Adds a new feed to the feeds list."""
-        url = self.feed_url_input.text().strip()
-        if not url:
-            QMessageBox.warning(self, "Input Error", "Please enter a feed URL.")
-            return
-        if not url.startswith(('http://', 'https://')):
-            url = 'http://' + url
-        if url in [feed['url'] for feed in self.feeds]:
-            QMessageBox.information(self, "Duplicate Feed", "This feed is already added.")
-            return
-        try:
-            feed = feedparser.parse(url)
-            if feed.bozo and feed.bozo_exception:
-                raise feed.bozo_exception
-            feed_title = feed.feed.get('title', url)
-        except Exception as e:
-            QMessageBox.critical(self, "Feed Error", f"Failed to load feed: {e}")
-            return
-        if feed_title in [feed['title'] for feed in self.feeds]:
-            QMessageBox.information(self, "Duplicate Feed", "A feed with this title is already added.")
-            return
-        # Initialize default sorting preferences
-        feed_data = {
-            'title': feed_title,
-            'url': url,
-            'entries': [],
-            'sort_column': 1,  # Default to 'Date' column
-            'sort_order': Qt.AscendingOrder
-        }
-        self.feeds.append(feed_data)
-        item = QListWidgetItem(feed_title)
-        item.setData(Qt.UserRole, url)
-        self.feeds_list.addItem(item)
-        self.feed_url_input.clear()
-        self.statusBar().showMessage(f"Added feed: {feed_title}")
-        self.save_feeds()
-
-    def remove_feed(self):
-        """Removes the selected feed(s) from the feeds list."""
-        selected_items = self.feeds_list.selectedItems()
-        if not selected_items:
-            return
-        reply = QMessageBox.question(self, 'Remove Feed', 'Are you sure you want to remove the selected feed(s)?',
-                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            for item in selected_items:
-                title = item.text()
-                url = item.data(Qt.UserRole)
-                self.feeds_list.takeItem(self.feeds_list.row(item))
-                self.feeds = [feed for feed in self.feeds if feed['url'] != url]
-                self.statusBar().showMessage(f"Removed feed: {title}")
-            self.save_feeds()
 
     def rename_feed(self):
         """Renames the selected feed."""
@@ -587,7 +613,7 @@ class RSSReader(QMainWindow):
             with open('feeds.json', 'w') as f:
                 json.dump(self.feeds, f, indent=4)
         except Exception as e:
-            pass
+            logging.error(f"Failed to save feeds: {e}")
 
     def load_articles(self):
         """Loads the articles for the selected feed."""
@@ -705,9 +731,6 @@ class RSSReader(QMainWindow):
             # Update the entry with the fetched movie data
             entry['movie_data'] = movie_data
 
-            # Optional: Re-sort the items if needed
-            # self.articles_tree.sortItems(self.articles_tree.sortColumn(), self.articles_tree.header().sortIndicatorOrder())
-
     def parse_rating(self, rating_str):
         """Parses the IMDb rating string to a float value."""
         try:
@@ -802,7 +825,7 @@ class RSSReader(QMainWindow):
             color: #333;
             background-color: #f9f9f9;
         }
-        h1 {
+        h3 {
             font-size: 24px;
         }
         p {
@@ -864,7 +887,6 @@ class RSSReader(QMainWindow):
             feed_url = QUrl()
         self.content_view.setHtml(html_content, baseUrl=QUrl(feed_url))
         self.statusBar().showMessage(f"Displaying article: {title}")
-        self.update_navigation_buttons()
 
         article_id = item.data(0, Qt.UserRole + 1)
         if article_id not in self.read_articles:
@@ -881,19 +903,7 @@ class RSSReader(QMainWindow):
             else:
                 item.setHidden(True)
 
-    def go_back(self):
-        """Placeholder for back navigation."""
-        pass
-
-    def go_forward(self):
-        """Placeholder for forward navigation."""
-        pass
-
-    def update_navigation_buttons(self):
-        """Updates the state of navigation buttons."""
-        self.back_action.setEnabled(False)
-        self.forward_action.setEnabled(False)
-
+    
     def refresh_feed(self):
         """Refreshes the selected feed."""
         self.load_articles()
@@ -980,7 +990,7 @@ class RSSReader(QMainWindow):
             with open('movie_data_cache.json', 'w') as f:
                 json.dump(self.movie_data_cache, f, indent=4)
         except Exception as e:
-            pass
+            logging.error(f"Failed to save movie data cache: {e}")
         self.save_read_articles()
         event.accept()
 
@@ -1011,6 +1021,7 @@ class RSSReader(QMainWindow):
                 with open('movie_data_cache.json', 'r') as f:
                     self.movie_data_cache = json.load(f)
             except Exception as e:
+                logging.error(f"Failed to load movie data cache: {e}")
                 self.movie_data_cache = {}
         else:
             self.movie_data_cache = {}
