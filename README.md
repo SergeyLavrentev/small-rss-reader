@@ -72,4 +72,87 @@ To enable the movie data fetching feature, you need to obtain an API key from [O
 **Note**: If no API key is provided, the application will function without fetching movie data, and ratings will be displayed as "N/A".
 
 
+## 📄 JSON Files
+
+The application utilizes two primary JSON files to manage and persist data:
+
+### 1. `feeds.json`
+
+- **Purpose:**  
+  Stores all subscribed RSS feeds, including their titles, URLs, and fetched entries.
+
+- **Location:**  
+  Located in the application's working directory (same folder as the main script).
+
+- **Structure:**  
+  ```json
+  [
+      {
+          "title": "Feed Title",
+          "url": "https://example.com/rss",
+          "entries": [
+              {
+                  "title": "Article Title",
+                  "link": "https://example.com/article",
+                  "published": "2024-04-01T10:00:00Z",
+                  "summary": "Brief summary of the article."
+              }
+              // More entries...
+          ]
+      }
+      // More feeds...
+  ]
+
+### 2. `movie_data_cache.json`
+
+- **Purpose:**
+  Caches movie-related data fetched from the OMDb API to optimize performance and reduce redundant API calls.
+
+- **Location:**
+  Located in the application's working directory (same folder as the main script).
+
+- **Structure:**
+  ```json
+  {
+      "Inception": {
+          "Title": "Inception",
+          "Year": "2010",
+          "Rated": "PG-13",
+          "Released": "16 Jul 2010",
+          "Genre": "Action, Adventure, Sci-Fi",
+          "Director": "Christopher Nolan",
+          "Writer": "Christopher Nolan",
+          "Actors": "Leonardo DiCaprio, Joseph Gordon-Levitt, Ellen Page",
+          "Plot": "A thief who steals corporate secrets through use of dream-sharing technology...",
+          "Language": "English, Japanese, French",
+          "Country": "USA, UK",
+          "Awards": "Won 4 Oscars. Another 152 wins & 204 nominations.",
+          "Poster": "https://example.com/poster.jpg",
+          "Ratings": [
+              {
+                  "Source": "Internet Movie Database",
+                  "Value": "8.8/10"
+              },
+              {
+                  "Source": "Rotten Tomatoes",
+                  "Value": "87%"
+              },
+              {
+                  "Source": "Metacritic",
+                  "Value": "74/100"
+              }
+          ],
+          "Metascore": "74",
+          "imdbRating": "8.8",
+          "imdbVotes": "2,000,000",
+          "imdbID": "tt1375666",
+          "Type": "movie",
+          "DVD": "07 Dec 2010",
+          "BoxOffice": "$292,576,195",
+          "Production": "Syncopy, Warner Bros.",
+          "Website": "N/A"
+      }
+      // More cached movies...
+  }
+
 

@@ -1040,7 +1040,7 @@ class RSSReader(QMainWindow):
 def main():
     """Main function to start the application."""
     app = QApplication(sys.argv)
-    app.setOrganizationName("YourOrganization")
+    app.setOrganizationName("rocker")
     app.setApplicationName("Small RSS Reader")
     app.setApplicationDisplayName("Small RSS Reader")
     reader = RSSReader()
