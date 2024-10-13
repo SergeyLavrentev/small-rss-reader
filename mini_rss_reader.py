@@ -244,6 +244,8 @@ class RSSReader(QMainWindow):
         self.group_name_mapping = {}  # Mapping from domain to custom group name
         self.init_ui()
         self.load_group_names()
+        self.load_settings()        # Load settings first
+        self.load_read_articles()   # Load read articles before loading feeds
         self.load_feeds()
         
         # Automatically select the first feed if available
@@ -253,21 +255,36 @@ class RSSReader(QMainWindow):
                 first_feed = first_group.child(0)
                 self.feeds_list.setCurrentItem(first_feed)
         
-        self.load_settings()
-        self.load_read_articles()
+        self.load_read_articles()   # Remove this line if already called above
 
     def init_ui(self):
         """Initializes the main UI components."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)  # Remove main layout margins
+        main_layout.setSpacing(0)  # Remove main layout spacing
 
         # Main splitter divides the window vertically
         self.main_splitter = QSplitter(Qt.Vertical)
+        self.main_splitter.setHandleWidth(1)  # Thinner splitter handle
+        self.main_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #ccc;
+                width: 1px;
+            }
+        """)
         main_layout.addWidget(self.main_splitter)
 
         # Horizontal splitter divides the top part horizontally
         self.horizontal_splitter = QSplitter(Qt.Horizontal)
+        self.horizontal_splitter.setHandleWidth(1)  # Thinner splitter handle
+        self.horizontal_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #ccc;
+                width: 1px;
+            }
+        """)
         self.main_splitter.addWidget(self.horizontal_splitter)
 
         self.init_feeds_panel()
@@ -301,7 +318,8 @@ class RSSReader(QMainWindow):
         """Initializes the feeds panel."""
         self.feeds_panel = QWidget()
         feeds_layout = QVBoxLayout(self.feeds_panel)
-        feeds_layout.setContentsMargins(5, 5, 5, 5)
+        feeds_layout.setContentsMargins(2, 2, 2, 2)  # Reduced margins
+        feeds_layout.setSpacing(2)  # Reduced spacing
 
         feeds_label = QLabel("RSS Feeds")
         feeds_label.setFont(QFont("Arial", 12, QFont.Bold))
@@ -326,15 +344,11 @@ class RSSReader(QMainWindow):
         """Initializes the articles panel."""
         self.articles_panel = QWidget()
         articles_layout = QVBoxLayout(self.articles_panel)
-        articles_layout.setContentsMargins(5, 5, 5, 5)
+        articles_layout.setContentsMargins(2, 2, 2, 2)  # Reduced margins
+        articles_layout.setSpacing(2)  # Reduced spacing
 
-        search_layout = QHBoxLayout()
-        search_label = QLabel("Search:")
-        self.search_input = QLineEdit()
-        self.search_input.textChanged.connect(self.filter_articles)
-        search_layout.addWidget(search_label)
-        search_layout.addWidget(self.search_input)
-        articles_layout.addLayout(search_layout)
+        # Removed search_layout from articles_panel
+        # self.search_input will be moved to the toolbar
 
         self.articles_tree = QTreeWidget()
         self.articles_tree.setHeaderLabels(['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director'])
@@ -355,7 +369,8 @@ class RSSReader(QMainWindow):
         """Initializes the content panel."""
         self.content_panel = QWidget()
         content_layout = QVBoxLayout(self.content_panel)
-        content_layout.setContentsMargins(5, 5, 5, 5)
+        content_layout.setContentsMargins(2, 2, 2, 2)  # Reduced margins
+        content_layout.setSpacing(2)  # Reduced spacing
 
         self.content_view = QWebEngineView()
         self.content_view.settings().setAttribute(
@@ -472,6 +487,25 @@ class RSSReader(QMainWindow):
         mark_unread_action.triggered.connect(self.mark_feed_unread)
         self.toolbar.addAction(mark_unread_action)
 
+        # Spacer to push search to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.toolbar.addWidget(spacer)
+
+        # Search Widget
+        search_label = QLabel("Search:")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search articles...")
+        self.search_input.textChanged.connect(self.filter_articles)
+        search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(2)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.search_input)
+        search_widget = QWidget()
+        search_widget.setLayout(search_layout)
+        self.toolbar.addWidget(search_widget)
+
         self.toolbar.setVisible(True)
 
     def open_settings_dialog(self):
@@ -504,13 +538,14 @@ class RSSReader(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Feed Error", f"Failed to load feed: {e}")
                 return
-            # Initialize default sorting preferences
+            # Initialize default sorting preferences and visible_columns
             feed_data = {
                 'title': feed_name,
                 'url': feed_url,
                 'entries': [],
                 'sort_column': 1,  # Default to 'Date' column
-                'sort_order': Qt.AscendingOrder
+                'sort_order': Qt.AscendingOrder,
+                'visible_columns': [True] * 6  # All columns visible by default
             }
             self.feeds.append(feed_data)
             
@@ -520,16 +555,16 @@ class RSSReader(QMainWindow):
                 domain = 'Unknown Domain'
             
             # Check if the domain group already exists
+            group_name = self.group_name_mapping.get(domain, domain)
             existing_group = None
             for i in range(self.feeds_list.topLevelItemCount()):
                 group = self.feeds_list.topLevelItem(i)
-                if group.text(0) == self.group_name_mapping.get(domain, domain):
+                if group.text(0) == group_name:
                     existing_group = group
                     break
             
             if not existing_group:
                 # Create a new group for the domain
-                group_name = self.group_name_mapping.get(domain, domain)
                 existing_group = QTreeWidgetItem(self.feeds_list)
                 existing_group.setText(0, group_name)
                 existing_group.setExpanded(False)  # Default to collapsed
@@ -598,10 +633,16 @@ class RSSReader(QMainWindow):
         """Context menu for the articles tree header."""
         menu = QMenu()
         header = self.articles_tree.header()
+        current_feed = self.get_current_feed()
+        if not current_feed:
+            return
+
         for i in range(header.count()):
-            action = QAction(header.model().headerData(i, Qt.Horizontal), menu)
+            column_name = header.model().headerData(i, Qt.Horizontal)
+            action = QAction(column_name, menu)
             action.setCheckable(True)
-            action.setChecked(not header.isSectionHidden(i))
+            visible = current_feed['visible_columns'][i] if 'visible_columns' in current_feed and i < len(current_feed['visible_columns']) else True
+            action.setChecked(visible)
             action.setData(i)
             action.toggled.connect(self.toggle_column_visibility)
             menu.addAction(action)
@@ -615,6 +656,11 @@ class RSSReader(QMainWindow):
             self.articles_tree.showColumn(index)
         else:
             self.articles_tree.hideColumn(index)
+        # Update the current feed's visible_columns
+        current_feed = self.get_current_feed()
+        if current_feed and 'visible_columns' in current_feed and index < len(current_feed['visible_columns']):
+            current_feed['visible_columns'][index] = checked
+            self.save_feeds()
 
     def rename_feed(self):
         """Renames the selected feed."""
@@ -626,7 +672,7 @@ class RSSReader(QMainWindow):
         if item.parent() is None:
             QMessageBox.information(self, "Invalid Selection", "Please select a feed, not a group.")
             return
-        current_name = item.text()
+        current_name = item.text(0)
         new_name, ok = QInputDialog.getText(self, "Rename Feed", "Enter new name:", QLineEdit.Normal, current_name)
         if ok and new_name:
             # Check for duplicates
@@ -641,6 +687,36 @@ class RSSReader(QMainWindow):
                 item.setText(0, new_name)  # QTreeWidgetItem uses column 0
                 self.save_feeds()
                 self.statusBar().showMessage(f"Renamed feed to: {new_name}")
+
+    def remove_feed(self):
+        """Removes the selected feed."""
+        selected_items = self.feeds_list.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "No Feed Selected", "Please select a feed to remove.")
+            return
+        item = selected_items[0]
+        if item.parent() is None:
+            QMessageBox.information(self, "Invalid Selection", "Please select a feed, not a group.")
+            return
+        feed_name = item.text()
+        reply = QMessageBox.question(self, 'Remove Feed',
+                                     f"Are you sure you want to remove the feed '{feed_name}'?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            url = item.data(0, Qt.UserRole)
+            # Remove from feeds list
+            self.feeds = [feed for feed in self.feeds if feed['url'] != url]
+            # Remove from UI
+            parent_group = item.parent()
+            self.feeds_list.takeTopLevelItem(self.feeds_list.indexOfTopLevelItem(parent_group))
+            # Re-add the group if it still has other feeds
+            remaining_children = parent_group.childCount()
+            if remaining_children > 0:
+                self.feeds_list.addTopLevelItem(parent_group)
+            else:
+                self.feeds_list.takeTopLevelItem(self.feeds_list.indexOfTopLevelItem(parent_group))
+            self.save_feeds()
+            self.statusBar().showMessage(f"Removed feed: {feed_name}")
 
     def load_group_names(self):
         """Loads the group name mapping from settings."""
@@ -671,16 +747,25 @@ class RSSReader(QMainWindow):
                     self.feeds = []
                     for url in data.keys():
                         feed_title = url
-                        feed_data = {'title': feed_title, 'url': url, 'entries': data[url].get('entries', []), 'sort_column': 1, 'sort_order': Qt.AscendingOrder}
+                        feed_data = {
+                            'title': feed_title,
+                            'url': url,
+                            'entries': data[url].get('entries', []),
+                            'sort_column': 1,
+                            'sort_order': Qt.AscendingOrder,
+                            'visible_columns': [True] * 6  # All columns visible by default
+                        }
                         self.feeds.append(feed_data)
                 elif isinstance(data, list):
                     self.feeds = data
-                    # Ensure all feeds have sorting preferences
+                    # Ensure all feeds have sorting preferences and visible_columns
                     for feed in self.feeds:
                         if 'sort_column' not in feed:
                             feed['sort_column'] = 1  # Default to 'Date' column
                         if 'sort_order' not in feed:
                             feed['sort_order'] = Qt.AscendingOrder
+                        if 'visible_columns' not in feed:
+                            feed['visible_columns'] = [True] * 6  # All columns visible by default
                 else:
                     self.feeds = []
                 for feed in self.feeds:
@@ -845,6 +930,11 @@ class RSSReader(QMainWindow):
                 sort_order = current_feed.get('sort_order', Qt.AscendingOrder)
                 self.articles_tree.sortItems(sort_column, sort_order)
         
+        # Apply column visibility based on the current feed's settings
+        if current_feed and 'visible_columns' in current_feed:
+            for i, visible in enumerate(current_feed['visible_columns']):
+                self.articles_tree.setColumnHidden(i, not visible)
+
         # Automatically select the first article if available
         if self.articles_tree.topLevelItemCount() > 0:
             first_item = self.articles_tree.topLevelItem(0)
@@ -1043,6 +1133,18 @@ class RSSReader(QMainWindow):
             item.setIcon(0, QIcon())
             self.save_read_articles()
 
+    def get_current_feed(self):
+        """Returns the currently selected feed data."""
+        selected_items = self.feeds_list.selectedItems()
+        if not selected_items:
+            return None
+        item = selected_items[0]
+        if item.parent() is None:
+            return None  # A group is selected, not a feed
+        url = item.data(0, Qt.UserRole)
+        feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
+        return feed_data
+
     def filter_articles(self, text):
         """Filters the articles based on the search input."""
         for i in range(self.articles_tree.topLevelItemCount()):
@@ -1086,11 +1188,13 @@ class RSSReader(QMainWindow):
                     feeds = json.load(f)
                     for feed in feeds:
                         if feed['url'] not in [f['url'] for f in self.feeds]:
-                            # Ensure sorting preferences are set
+                            # Ensure sorting preferences and visible_columns are set
                             if 'sort_column' not in feed:
                                 feed['sort_column'] = 1  # Default to 'Date' column
                             if 'sort_order' not in feed:
                                 feed['sort_order'] = Qt.AscendingOrder
+                            if 'visible_columns' not in feed:
+                                feed['visible_columns'] = [True] * 6  # All columns visible by default
                             self.feeds.append(feed)
                             
                             parsed_url = urlparse(feed['url'])
@@ -1137,19 +1241,29 @@ class RSSReader(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export feeds: {e}")
 
-    def load_read_articles(self):
-        """Loads the set of read articles from settings."""
-        settings = QSettings('rocker', 'SmallRSSReader')
-        read_articles = settings.value('read_articles', [])
-        if read_articles:
-            self.read_articles = set(read_articles)
-        else:
-            self.read_articles = set()
-
     def save_read_articles(self):
         """Saves the set of read articles to settings."""
-        settings = QSettings('rocker', 'SmallRSSReader')
-        settings.setValue('read_articles', list(self.read_articles))
+        try:
+            settings = QSettings('rocker', 'SmallRSSReader')
+            settings.setValue('read_articles', list(self.read_articles))
+            logging.info(f"Saved read_articles: {self.read_articles}")
+        except Exception as e:
+            logging.error(f"Failed to save read_articles: {e}")
+
+    def load_read_articles(self):
+        """Loads the set of read articles from settings."""
+        try:
+            settings = QSettings('rocker', 'SmallRSSReader')
+            read_articles = settings.value('read_articles', [])
+            if read_articles:
+                self.read_articles = set(read_articles)
+                logging.info(f"Loaded read_articles: {self.read_articles}")
+            else:
+                self.read_articles = set()
+                logging.info("No read_articles found; initialized empty set.")
+        except Exception as e:
+            logging.error(f"Failed to load read_articles: {e}")
+            self.read_articles = set()
 
     def closeEvent(self, event):
         """Handles the window close event."""
@@ -1214,7 +1328,7 @@ class RSSReader(QMainWindow):
 
     def get_article_id(self, entry):
         """Generates a unique ID for an article."""
-        unique_string = entry.get('id') or entry.get('link') or (entry.get('title', '') + entry.get('published', ''))
+        unique_string = entry.get('id') or entry.get('guid') or entry.get('link') or (entry.get('title', '') + entry.get('published', ''))
         return hashlib.md5(unique_string.encode('utf-8')).hexdigest()
 
     def mark_feed_unread(self):
