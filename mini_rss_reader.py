@@ -178,7 +178,7 @@ class SettingsDialog(QDialog):
         refresh_interval = self.refresh_interval_input.value()
         self.parent().api_key = api_key
         self.parent().refresh_interval = refresh_interval
-        settings = QSettings('YourOrganization', 'SmallRSSReader')
+        settings = QSettings('rocker', 'SmallRSSReader')
         settings.setValue('omdb_api_key', api_key)
         settings.setValue('refresh_interval', refresh_interval)
         self.parent().update_refresh_timer()
@@ -300,6 +300,8 @@ class RSSReader(QMainWindow):
         self.articles_tree.header().setSectionsClickable(True)
         self.articles_tree.header().setSortIndicatorShown(True)
         self.articles_tree.itemSelectionChanged.connect(self.display_content)
+        self.articles_tree.header().sortIndicatorChanged.connect(self.on_sort_changed)
+
         articles_layout.addWidget(self.articles_tree)
 
         self.articles_tree.header().setContextMenuPolicy(Qt.CustomContextMenu)
@@ -476,7 +478,14 @@ class RSSReader(QMainWindow):
         if feed_title in [feed['title'] for feed in self.feeds]:
             QMessageBox.information(self, "Duplicate Feed", "A feed with this title is already added.")
             return
-        feed_data = {'title': feed_title, 'url': url, 'entries': []}
+        # Initialize default sorting preferences
+        feed_data = {
+            'title': feed_title,
+            'url': url,
+            'entries': [],
+            'sort_column': 1,  # Default to 'Date' column
+            'sort_order': Qt.AscendingOrder
+        }
         self.feeds.append(feed_data)
         item = QListWidgetItem(feed_title)
         item.setData(Qt.UserRole, url)
@@ -533,10 +542,16 @@ class RSSReader(QMainWindow):
                     self.feeds = []
                     for url in data.keys():
                         feed_title = url
-                        feed_data = {'title': feed_title, 'url': url, 'entries': data[url].get('entries', [])}
+                        feed_data = {'title': feed_title, 'url': url, 'entries': data[url].get('entries', []), 'sort_column': 1, 'sort_order': Qt.AscendingOrder}
                         self.feeds.append(feed_data)
                 elif isinstance(data, list):
                     self.feeds = data
+                    # Ensure all feeds have sorting preferences
+                    for feed in self.feeds:
+                        if 'sort_column' not in feed:
+                            feed['sort_column'] = 1  # Default to 'Date' column
+                        if 'sort_order' not in feed:
+                            feed['sort_order'] = Qt.AscendingOrder
                 else:
                     self.feeds = []
                 for feed in self.feeds:
@@ -651,6 +666,15 @@ class RSSReader(QMainWindow):
             movie_thread.start()
         else:
             logging.info("OMDb API key not provided; skipping movie data fetching.")
+
+        # Apply the feed's sort preference
+        selected_items = self.feeds_list.selectedItems()
+        if selected_items:
+            current_feed = next((feed for feed in self.feeds if feed['url'] == selected_items[0].data(Qt.UserRole)), None)
+            if current_feed:
+                sort_column = current_feed.get('sort_column', 1)
+                sort_order = current_feed.get('sort_order', Qt.AscendingOrder)
+                self.articles_tree.sortItems(sort_column, sort_order)
 
     def remove_thread(self, thread):
         """Removes a finished thread from the threads list."""
@@ -904,6 +928,11 @@ class RSSReader(QMainWindow):
                     feeds = json.load(f)
                     for feed in feeds:
                         if feed['url'] not in [f['url'] for f in self.feeds]:
+                            # Ensure sorting preferences are set
+                            if 'sort_column' not in feed:
+                                feed['sort_column'] = 1  # Default to 'Date' column
+                            if 'sort_order' not in feed:
+                                feed['sort_order'] = Qt.AscendingOrder
                             self.feeds.append(feed)
                             item = QListWidgetItem(feed['title'])
                             item.setData(Qt.UserRole, feed['url'])
@@ -926,7 +955,7 @@ class RSSReader(QMainWindow):
 
     def load_read_articles(self):
         """Loads the set of read articles from settings."""
-        settings = QSettings('YourOrganization', 'SmallRSSReader')
+        settings = QSettings('rocker', 'SmallRSSReader')
         read_articles = settings.value('read_articles', [])
         if read_articles:
             self.read_articles = set(read_articles)
@@ -935,13 +964,13 @@ class RSSReader(QMainWindow):
 
     def save_read_articles(self):
         """Saves the set of read articles to settings."""
-        settings = QSettings('YourOrganization', 'SmallRSSReader')
+        settings = QSettings('rocker', 'SmallRSSReader')
         settings.setValue('read_articles', list(self.read_articles))
 
     def closeEvent(self, event):
         """Handles the window close event."""
         self.save_feeds()
-        settings = QSettings('YourOrganization', 'SmallRSSReader')
+        settings = QSettings('rocker', 'SmallRSSReader')
         settings.setValue('geometry', self.saveGeometry())
         settings.setValue('windowState', self.saveState())
         settings.setValue('splitterState', self.main_splitter.saveState())
@@ -957,7 +986,7 @@ class RSSReader(QMainWindow):
 
     def load_settings(self):
         """Loads application settings."""
-        settings = QSettings('YourOrganization', 'SmallRSSReader')
+        settings = QSettings('rocker', 'SmallRSSReader')
         geometry = settings.value('geometry')
         if geometry:
             self.restoreGeometry(geometry)
@@ -1037,11 +1066,24 @@ class RSSReader(QMainWindow):
         self.feeds = new_order
         self.save_feeds()
 
+    def on_sort_changed(self, column, order):
+        """Handles sort changes and saves the preference."""
+        selected_items = self.feeds_list.selectedItems()
+        if not selected_items:
+            return
+        item = selected_items[0]
+        url = item.data(Qt.UserRole)
+        feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
+        if feed_data:
+            feed_data['sort_column'] = column
+            feed_data['sort_order'] = order
+            self.save_feeds()
+
 def main():
     """Main function to start the application."""
     app = QApplication(sys.argv)
     app.setOrganizationName("rocker")
-    app.setApplicationName("Small RSS Reader")
+    app.setApplicationName("SmallRSSReader")
     app.setApplicationDisplayName("Small RSS Reader")
     reader = RSSReader()
     reader.show()
