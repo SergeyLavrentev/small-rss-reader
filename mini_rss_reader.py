@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QTreeWidget, QTreeWidgetItem, QSplitter, QMessageBox, QAction,
     QFileDialog, QMenu, QToolBar, QHeaderView, QDialog, QFormLayout,
-    QSizePolicy, QStyle, QSpinBox, QAbstractItemView, QTextEdit
+    QSizePolicy, QStyle, QSpinBox, QAbstractItemView, QTextEdit, QInputDialog
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize
@@ -424,8 +424,11 @@ class RSSReader(QMainWindow):
     def feeds_context_menu(self, position):
         """Context menu for the feeds list."""
         menu = QMenu()
+        rename_action = QAction("Rename Feed", self)
+        rename_action.triggered.connect(self.rename_feed)
         remove_action = QAction("Remove Feed", self)
         remove_action.triggered.connect(self.remove_feed)
+        menu.addAction(rename_action)
         menu.addAction(remove_action)
         menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
 
@@ -497,6 +500,29 @@ class RSSReader(QMainWindow):
                 self.feeds = [feed for feed in self.feeds if feed['url'] != url]
                 self.statusBar().showMessage(f"Removed feed: {title}")
             self.save_feeds()
+
+    def rename_feed(self):
+        """Renames the selected feed."""
+        selected_items = self.feeds_list.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "No Feed Selected", "Please select a feed to rename.")
+            return
+        item = selected_items[0]
+        current_name = item.text()
+        new_name, ok = QInputDialog.getText(self, "Rename Feed", "Enter new name:", QLineEdit.Normal, current_name)
+        if ok and new_name:
+            # Check for duplicates
+            if new_name in [feed['title'] for feed in self.feeds]:
+                QMessageBox.warning(self, "Duplicate Name", "A feed with this name already exists.")
+                return
+            # Update the feeds list
+            url = item.data(Qt.UserRole)
+            feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
+            if feed_data:
+                feed_data['title'] = new_name
+                item.setText(new_name)
+                self.save_feeds()
+                self.statusBar().showMessage(f"Renamed feed to: {new_name}")
 
     def load_feeds(self):
         """Loads the feeds from the saved feeds.json file."""
