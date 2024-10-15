@@ -304,6 +304,8 @@ class RSSReader(QMainWindow):
         self.icon_rotation_timer.timeout.connect(self.rotate_refresh_icon)
         self.auto_refresh_timer = QTimer()
         self.force_refresh_icon_pixmap = None  # To store the icon pixmap
+        self.search_mode = False  # Flag to indicate if search mode is active
+        self.updating_columns = False  # Flag to prevent signal emission during programmatic resize
 
     def init_ui(self):
         """Initializes the main UI components."""
@@ -366,7 +368,7 @@ class RSSReader(QMainWindow):
         self.feeds_list.setHeaderHidden(True)
         self.feeds_list.setIndentation(10)
         self.feeds_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.feeds_list.itemSelectionChanged.connect(self.load_articles)
+        self.feeds_list.itemSelectionChanged.connect(self.on_feed_selection_changed)
         self.feeds_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.feeds_list.customContextMenuRequested.connect(self.feeds_context_menu)
         self.feeds_list.setDragDropMode(QAbstractItemView.InternalMove)
@@ -386,7 +388,7 @@ class RSSReader(QMainWindow):
 
         self.articles_tree = QTreeWidget()
         self.articles_tree.setHeaderLabels(['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director'])
-        self.articles_tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.articles_tree.header().setSectionResizeMode(QHeaderView.Interactive)
         self.articles_tree.setSortingEnabled(True)
         self.articles_tree.header().setSectionsClickable(True)
         self.articles_tree.header().setSortIndicatorShown(True)
@@ -530,9 +532,9 @@ class RSSReader(QMainWindow):
 
     def add_search_widget(self):
         """Adds the search widget to the toolbar."""
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.toolbar.addWidget(spacer)
+        spacer_left = QWidget()
+        spacer_left.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.toolbar.addWidget(spacer_left)
 
         search_label = QLabel("Search:")
         self.search_input = QLineEdit()
@@ -546,6 +548,10 @@ class RSSReader(QMainWindow):
         search_widget = QWidget()
         search_widget.setLayout(search_layout)
         self.toolbar.addWidget(search_widget)
+
+        spacer_right = QWidget()
+        spacer_right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.toolbar.addWidget(spacer_right)
 
     def update_refresh_timer(self):
         """Updates the refresh timer based on the refresh interval."""
@@ -575,9 +581,7 @@ class RSSReader(QMainWindow):
         splitterState = settings.value('splitterState')
         if splitterState:
             self.main_splitter.restoreState(splitterState)
-        headerState = settings.value('articlesTreeHeaderState')
-        if headerState:
-            self.articles_tree.header().restoreState(headerState)
+        # Removed global headerState restoration
 
     def load_api_key_and_refresh_interval(self, settings):
         """Loads the API key and refresh interval."""
@@ -659,7 +663,7 @@ class RSSReader(QMainWindow):
         settings.setValue('geometry', self.saveGeometry())
         settings.setValue('windowState', self.saveState())
         settings.setValue('splitterState', self.main_splitter.saveState())
-        settings.setValue('articlesTreeHeaderState', self.articles_tree.header().saveState())
+        # Removed global headerState saving
         settings.setValue('refresh_interval', self.refresh_interval)
         settings.setValue('group_name_mapping', json.dumps(self.group_name_mapping))
 
@@ -674,6 +678,7 @@ class RSSReader(QMainWindow):
         try:
             with open('movie_data_cache.json', 'w') as f:
                 json.dump(self.movie_data_cache, f, indent=4)
+            logging.info("Movie data cache saved successfully.")
         except Exception as e:
             logging.error(f"Failed to save movie data cache: {e}")
 
@@ -763,7 +768,8 @@ class RSSReader(QMainWindow):
             'entries': [],
             'sort_column': 1,
             'sort_order': Qt.AscendingOrder,
-            'visible_columns': [True] * 6
+            'visible_columns': [True] * 6,
+            'column_widths': [100] * 6  # Default column widths
         }
         self.feeds.append(feed_data)
         self.add_feed_to_ui(feed_data)
@@ -1029,7 +1035,8 @@ class RSSReader(QMainWindow):
                             'entries': data[url].get('entries', []),
                             'sort_column': 1,
                             'sort_order': Qt.AscendingOrder,
-                            'visible_columns': [True] * 6
+                            'visible_columns': [True] * 6,
+                            'column_widths': [100] * 6  # Default column widths
                         }
                         self.feeds.append(feed_data)
                 elif isinstance(data, list):
@@ -1041,6 +1048,8 @@ class RSSReader(QMainWindow):
                             feed['sort_order'] = Qt.AscendingOrder
                         if 'visible_columns' not in feed:
                             feed['visible_columns'] = [True] * 6
+                        if 'column_widths' not in feed:
+                            feed['column_widths'] = [100] * 6  # Default column widths
                 else:
                     self.feeds = []
                 for feed in self.feeds:
@@ -1088,13 +1097,22 @@ class RSSReader(QMainWindow):
         except Exception as e:
             logging.error(f"Failed to save feeds: {e}")
 
+    def on_feed_selection_changed(self):
+        """Handles feed selection changes."""
+        if not self.search_mode:
+            self.load_articles()
+
     def load_articles(self):
         """Loads the articles for the selected feed."""
         selected_items = self.feeds_list.selectedItems()
         if not selected_items:
+            self.current_entries = []
+            self.articles_tree.clear()
             return
         item = selected_items[0]
         if item.parent() is None:
+            self.current_entries = []
+            self.articles_tree.clear()
             return  # Do not load articles if a group is selected
         url = item.data(0, Qt.UserRole)
         feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
@@ -1177,15 +1195,40 @@ class RSSReader(QMainWindow):
             sort_order = current_feed.get('sort_order', Qt.AscendingOrder)
             self.articles_tree.sortItems(sort_column, sort_order)
 
-        # Apply column visibility based on the current feed's settings
-        if current_feed and 'visible_columns' in current_feed:
-            for i, visible in enumerate(current_feed['visible_columns']):
-                self.articles_tree.setColumnHidden(i, not visible)
+            # Apply column visibility based on the current feed's settings
+            if 'visible_columns' in current_feed:
+                for i, visible in enumerate(current_feed['visible_columns']):
+                    self.articles_tree.setColumnHidden(i, not visible)
+
+            # Apply column widths based on the current feed's settings
+            if 'column_widths' in current_feed:
+                header = self.articles_tree.header()
+                self.updating_columns = True  # Prevent signal emission
+                header.blockSignals(True)
+                for i, width in enumerate(current_feed['column_widths']):
+                    header.resizeSection(i, width)
+                header.blockSignals(False)
+                self.updating_columns = False
+            else:
+                current_feed['column_widths'] = [self.articles_tree.header().sectionSize(i) for i in range(self.articles_tree.columnCount())]
+
+            # Connect signal to save column widths
+            # Signal is connected in __init__, no need to reconnect here
 
         # Automatically select the first article if available
         if self.articles_tree.topLevelItemCount() > 0:
             first_item = self.articles_tree.topLevelItem(0)
             self.articles_tree.setCurrentItem(first_item)
+
+    def save_column_widths(self, index, old_size, new_size):
+        """Saves the column widths for the current feed."""
+        if self.updating_columns:
+            return  # Skip saving during programmatic changes
+        current_feed = self.get_current_feed()
+        if current_feed:
+            current_feed['column_widths'][index] = new_size
+            self.save_feeds()
+            logging.debug(f"Column widths updated for feed '{current_feed['title']}': {current_feed['column_widths']}.")
 
     def get_current_feed(self):
         """Returns the currently selected feed data."""
@@ -1206,6 +1249,8 @@ class RSSReader(QMainWindow):
 
     def update_movie_info(self, index, movie_data):
         """Updates the article item with movie data."""
+        if self.search_mode:
+            return  # Skip updating movie info during search mode
         entry = self.current_entries[index]
         article_id = self.get_article_id(entry)
         item = self.article_id_to_item.get(article_id)
@@ -1436,12 +1481,60 @@ class RSSReader(QMainWindow):
 
     def filter_articles(self, text):
         """Filters the articles based on the search input."""
-        for i in range(self.articles_tree.topLevelItemCount()):
-            item = self.articles_tree.topLevelItem(i)
-            if text.lower() in item.text(0).lower():
-                item.setHidden(False)
+        if text.strip() == '':
+            # If search text is empty, show articles from the selected feed
+            self.search_mode = False
+            self.load_articles()
+        else:
+            # Search across all feeds
+            self.search_mode = True
+            self.current_entries = []
+            for feed in self.feeds:
+                self.current_entries.extend(feed.get('entries', []))
+            self.display_search_results(text)
+
+    def display_search_results(self, search_text):
+        """Displays search results in the articles tree."""
+        self.articles_tree.setSortingEnabled(False)
+        self.articles_tree.clear()
+        self.article_id_to_item = {}
+        search_text_lower = search_text.lower()
+
+        for entry in self.current_entries:
+            title = entry.get('title', 'No Title')
+            if search_text_lower not in title.lower():
+                continue
+            date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
+            if date_struct:
+                date_obj = datetime.datetime(*date_struct[:6])
+                date_formatted = date_obj.strftime('%d-%m-%Y')
             else:
-                item.setHidden(True)
+                date_obj = datetime.datetime.min
+                date_formatted = 'No Date'
+
+            article_id = self.get_article_id(entry)
+
+            item = ArticleTreeWidgetItem([title, date_formatted, '', '', '', ''])
+            item.setData(1, Qt.UserRole, date_obj)
+            item.setData(0, Qt.UserRole + 1, article_id)
+            item.setData(0, Qt.UserRole, entry)
+
+            if article_id not in self.read_articles:
+                item.setIcon(0, self.get_unread_icon())
+            else:
+                item.setIcon(0, QIcon())
+            self.articles_tree.addTopLevelItem(item)
+        self.articles_tree.setSortingEnabled(True)
+        self.statusBar().showMessage(f"Found {self.articles_tree.topLevelItemCount()} articles matching '{search_text}'")
+
+        # Apply default column widths
+        header = self.articles_tree.header()
+        self.updating_columns = True  # Prevent signal emission
+        header.blockSignals(True)
+        for i in range(self.articles_tree.columnCount()):
+            header.resizeSection(i, 100)
+        header.blockSignals(False)
+        self.updating_columns = False
 
     def refresh_feed(self):
         """Refreshes the selected feed."""
@@ -1483,9 +1576,10 @@ class RSSReader(QMainWindow):
                 if feed_data['url'] == url:
                     feed_data['entries'] = feed.entries
                     break
-            current_feed_item = self.feeds_list.currentItem()
-            if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
-                self.populate_articles()
+            if not self.search_mode:
+                current_feed_item = self.feeds_list.currentItem()
+                if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
+                    self.populate_articles()
             logging.info(f"Feed fetched: {url}")
         else:
             logging.warning(f"Failed to fetch feed: {url}")
@@ -1497,9 +1591,10 @@ class RSSReader(QMainWindow):
                 if feed_data['url'] == url:
                     feed_data['entries'] = feed.entries
                     break
-        current_feed_item = self.feeds_list.currentItem()
-        if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
-            self.on_feed_fetched(url, feed)
+        if not self.search_mode:
+            current_feed_item = self.feeds_list.currentItem()
+            if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
+                self.on_feed_fetched(url, feed)
 
     def import_feeds(self):
         """Imports feeds from a JSON file."""
@@ -1516,6 +1611,8 @@ class RSSReader(QMainWindow):
                                 feed['sort_order'] = Qt.AscendingOrder
                             if 'visible_columns' not in feed:
                                 feed['visible_columns'] = [True] * 6
+                            if 'column_widths' not in feed:
+                                feed['column_widths'] = [100] * 6
                             self.feeds.append(feed)
                             parsed_url = urlparse(feed['url'])
                             domain = parsed_url.netloc or 'Unknown Domain'
@@ -1594,6 +1691,9 @@ class RSSReader(QMainWindow):
             if first_group.childCount() > 0:
                 first_feed = first_group.child(0)
                 self.feeds_list.setCurrentItem(first_feed)
+
+        # Connect the sectionResized signal after the initial setup
+        self.articles_tree.header().sectionResized.connect(self.save_column_widths)
 
 ### Main Function ###
 
