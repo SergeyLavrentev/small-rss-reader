@@ -393,6 +393,10 @@ class RSSReader(QMainWindow):
         self.articles_tree.header().setSortIndicatorShown(True)
         self.articles_tree.itemSelectionChanged.connect(self.display_content)
         self.articles_tree.header().sortIndicatorChanged.connect(self.on_sort_changed)
+        
+        # **New Connection Added Below**
+        self.articles_tree.itemDoubleClicked.connect(self.open_article_url)
+        
         articles_layout.addWidget(self.articles_tree)
 
         self.articles_tree.header().setContextMenuPolicy(Qt.CustomContextMenu)
@@ -426,6 +430,35 @@ class RSSReader(QMainWindow):
         # View menu
         view_menu = menu.addMenu("View")
         self.add_view_menu_actions(view_menu)
+
+    def open_article_url(self, item, column):
+        """
+        Opens the article's URL in the default web browser when an article is double-clicked.
+        
+        Parameters:
+            item (QTreeWidgetItem): The article item that was double-clicked.
+            column (int): The column that was double-clicked.
+        """
+        # Retrieve the entry associated with the item
+        entry = item.data(0, Qt.UserRole)
+        if not entry:
+            QMessageBox.warning(self, "No Entry Data", "No data available for the selected article.")
+            return
+        
+        # Get the link from the entry
+        url = entry.get('link', '')
+        if not url:
+            QMessageBox.warning(self, "No URL", "No URL found for the selected article.")
+            return
+        
+        # Validate the URL
+        parsed_url = urlparse(url)
+        if not parsed_url.scheme.startswith('http'):
+            QMessageBox.warning(self, "Invalid URL", "The URL is invalid or unsupported.")
+            return
+        
+        # Open the URL in the default web browser
+        QDesktopServices.openUrl(QUrl(url))
 
     def add_file_menu_actions(self, file_menu):
         """Adds actions to the File menu."""
