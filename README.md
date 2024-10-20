@@ -38,15 +38,21 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
 4. **Install the dependencies**:
    ```bash
    pip install -r requirements.txt
-
+5. ** Build the application**:
+   ```bash
+   make build
+6. ** Copy the bundle app to Application dir:
+   ```bash
+   cp -a dist/Small\ RSS\ Reader.app ~/Applications
 ---
 
 ## Usage
 
-1. **Run the application**:
+1. **Run the application** in the terminal:
    ```bash
    python mini_rss_reader.py
-
+2. Run the application via Spotlight:
+   
 ## Dependencies
 
 - **PyQt5**: Provides the core Qt widgets and classes.
