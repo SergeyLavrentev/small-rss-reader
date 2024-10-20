@@ -8,3 +8,7 @@ movie_data_cache.json
 feeds.json
 settings.json
 read_articles.json
+# Ignore virtual environments
+venv/
+ENV/
+env/

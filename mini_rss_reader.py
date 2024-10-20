@@ -16,7 +16,8 @@ from PyQt5.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTreeWidget, QTreeWidgetItem,
     QSplitter, QMessageBox, QAction, QFileDialog, QMenu, QToolBar,
     QHeaderView, QDialog, QFormLayout, QSizePolicy, QStyle, QSpinBox,
-    QAbstractItemView, QInputDialog, QDialogButtonBox, QCheckBox
+    QAbstractItemView, QInputDialog, QDialogButtonBox, QCheckBox,
+    QSplashScreen
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import (
@@ -25,6 +26,32 @@ from PyQt5.QtCore import (
 from PyQt5.QtGui import (
     QDesktopServices, QFont, QIcon, QPixmap, QPainter, QBrush, QColor, QTransform
 )
+from pathlib import Path
+
+### Helper Functions ###
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+def get_user_data_path(filename):
+    """Get path to user data directory for the application."""
+    if getattr(sys, 'frozen', False):
+        # Running in a bundle
+        if sys.platform == "darwin":
+            return os.path.join(Path.home(), "Library", "Application Support", "SmallRSSReader", filename)
+        elif sys.platform == "win32":
+            return os.path.join(os.getenv('APPDATA'), "SmallRSSReader", filename)
+        else:
+            return os.path.join(Path.home(), ".smallrssreader", filename)
+    else:
+        # Running in development
+        return os.path.join(os.path.abspath("."), filename)
 
 ### Helper Classes ###
 
@@ -58,15 +85,19 @@ class FetchMovieDataThread(QThread):
 
     def run(self):
         if not self.api_key:
+            logging.warning("OMDb API key not provided. Skipping movie data fetching.")
             return
         for index, entry in enumerate(self.entries):
             title = entry.get('title', 'No Title')
             movie_title = self.extract_movie_title(title)
             if movie_title in self.movie_data_cache:
                 movie_data = self.movie_data_cache[movie_title]
+                logging.debug(f"Retrieved cached movie data for '{movie_title}'.")
             else:
                 movie_data = self.fetch_movie_data(movie_title)
-                self.movie_data_cache[movie_title] = movie_data
+                if movie_data:
+                    self.movie_data_cache[movie_title] = movie_data
+                    logging.debug(f"Fetched and cached movie data for '{movie_title}'.")
             self.movie_data_fetched.emit(index, movie_data)
 
     @staticmethod
@@ -96,14 +127,14 @@ class FetchMovieDataThread(QThread):
 
     def fetch_movie_data(self, movie_title):
         """Fetches movie data from OMDb API."""
-        if not self.api_key:
-            return {}
         try:
             movie = GetMovie(api_key=self.api_key)
             movie_data = movie.get_movie(title=movie_title)
+            if not movie_data:
+                logging.warning(f"No data returned from OMDb for '{movie_title}'.")
             return movie_data
         except Exception as e:
-            logging.error(f"Failed to fetch movie data for {movie_title}: {e}")
+            logging.error(f"Failed to fetch movie data for '{movie_title}': {e}")
             return {}
 
 class ArticleTreeWidgetItem(QTreeWidgetItem):
@@ -230,6 +261,7 @@ class SettingsDialog(QDialog):
         settings.setValue('omdb_api_key', api_key)
         settings.setValue('refresh_interval', refresh_interval)
         self.parent.update_refresh_timer()
+        self.update_api_key_notice()
         self.accept()
 
 ### Main Application Class ###
@@ -251,7 +283,8 @@ class RSSReader(QMainWindow):
         self.load_settings()
         self.load_read_articles()
         self.load_feeds()
-        self.force_refresh_all_feeds()
+        # Start refresh after event loop starts to prevent blocking UI
+        QTimer.singleShot(0, self.force_refresh_all_feeds)
         self.select_first_feed()
 
     def initialize_variables(self):
@@ -573,42 +606,70 @@ class RSSReader(QMainWindow):
 
     def load_movie_data_cache(self):
         """Loads the movie data cache."""
-        if os.path.exists('movie_data_cache.json'):
+        cache_path = get_user_data_path('movie_data_cache.json')
+        if os.path.exists(cache_path):
             try:
-                with open('movie_data_cache.json', 'r') as f:
+                with open(cache_path, 'r') as f:
                     self.movie_data_cache = json.load(f)
+                    logging.info(f"Loaded movie data cache with {len(self.movie_data_cache)} entries.")
+            except json.JSONDecodeError:
+                QMessageBox.critical(self, "Load Error", "Failed to parse movie_data_cache.json. The file may be corrupted.")
+                logging.error("Failed to parse movie_data_cache.json.")
+                self.movie_data_cache = {}
             except Exception as e:
-                logging.error(f"Failed to load movie data cache: {e}")
+                QMessageBox.critical(self, "Load Error", f"An unexpected error occurred while loading movie data cache: {e}")
+                logging.error(f"Unexpected error while loading movie data cache: {e}")
                 self.movie_data_cache = {}
         else:
+            # Initialize with an empty cache
             self.movie_data_cache = {}
+            self.save_movie_data_cache()
+            logging.info("Created empty movie_data_cache.json.")
 
     def load_group_settings(self, settings):
-        """Loads group-specific settings."""
-        group_settings = settings.value('group_settings', {})
-        if isinstance(group_settings, str):
+        """Loads group-specific settings from group_settings.json."""
+        group_settings_path = get_user_data_path('group_settings.json')
+        if os.path.exists(group_settings_path):
             try:
-                self.group_settings = json.loads(group_settings)
+                with open(group_settings_path, 'r') as f:
+                    group_settings = json.load(f)
+                    self.group_settings = group_settings
+                    logging.info(f"Loaded group settings with {len(self.group_settings)} groups.")
             except json.JSONDecodeError:
+                QMessageBox.critical(self, "Load Error", "Failed to parse group_settings.json. The file may be corrupted.")
+                logging.error("Failed to parse group_settings.json.")
                 self.group_settings = {}
-        elif isinstance(group_settings, dict):
-            self.group_settings = group_settings
+            except Exception as e:
+                QMessageBox.critical(self, "Load Error", f"An unexpected error occurred while loading group settings: {e}")
+                logging.error(f"Unexpected error while loading group settings: {e}")
+                self.group_settings = {}
         else:
+            # Initialize with an empty dictionary
             self.group_settings = {}
+            self.save_group_settings(settings)
+            logging.info("Created empty group_settings.json.")
 
     def load_read_articles(self):
-        """Loads the set of read articles from settings."""
+        """Loads the set of read articles from read_articles.json."""
         try:
-            settings = QSettings('rocker', 'SmallRSSReader')
-            read_articles = settings.value('read_articles', [])
-            if read_articles:
-                self.read_articles = set(read_articles)
-                logging.info(f"Loaded {len(self.read_articles)} read articles.")
+            read_articles_path = get_user_data_path('read_articles.json')
+            if os.path.exists(read_articles_path):
+                with open(read_articles_path, 'r') as f:
+                    read_articles = json.load(f)
+                    self.read_articles = set(read_articles)
+                    logging.info(f"Loaded {len(self.read_articles)} read articles.")
             else:
+                # Initialize with an empty set
                 self.read_articles = set()
-                logging.info("No read articles found; initialized empty set.")
+                self.save_read_articles()
+                logging.info("Created empty read_articles.json.")
+        except json.JSONDecodeError:
+            QMessageBox.critical(self, "Load Error", "Failed to parse read_articles.json. The file may be corrupted.")
+            logging.error("Failed to parse read_articles.json.")
+            self.read_articles = set()
         except Exception as e:
-            logging.error(f"Failed to load read articles: {e}")
+            QMessageBox.critical(self, "Load Error", f"An unexpected error occurred while loading read articles: {e}")
+            logging.error(f"Unexpected error while loading read articles: {e}")
             self.read_articles = set()
 
     def closeEvent(self, event):
@@ -620,6 +681,12 @@ class RSSReader(QMainWindow):
         self.save_movie_data_cache()
         self.save_group_settings(settings)
         self.save_read_articles()
+
+        # Gracefully terminate all threads
+        for thread in self.threads:
+            thread.terminate()
+            thread.wait()
+        logging.info("All threads terminated.")
         event.accept()
 
     def save_geometry_and_state(self, settings):
@@ -640,20 +707,32 @@ class RSSReader(QMainWindow):
     def save_movie_data_cache(self):
         """Saves the movie data cache."""
         try:
-            with open('movie_data_cache.json', 'w') as f:
+            cache_path = get_user_data_path('movie_data_cache.json')
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            with open(cache_path, 'w') as f:
                 json.dump(self.movie_data_cache, f, indent=4)
+            logging.info("Movie data cache saved successfully.")
         except Exception as e:
             logging.error(f"Failed to save movie data cache: {e}")
 
     def save_group_settings(self, settings):
-        """Saves group-specific settings."""
-        settings.setValue('group_settings', json.dumps(self.group_settings))
+        """Saves group-specific settings to group_settings.json."""
+        try:
+            group_settings_path = get_user_data_path('group_settings.json')
+            os.makedirs(os.path.dirname(group_settings_path), exist_ok=True)
+            with open(group_settings_path, 'w') as f:
+                json.dump(self.group_settings, f, indent=4)
+            logging.info("Group settings saved successfully.")
+        except Exception as e:
+            logging.error(f"Failed to save group settings: {e}")
 
     def save_read_articles(self):
-        """Saves the set of read articles to settings."""
+        """Saves the set of read articles to read_articles.json."""
         try:
-            settings = QSettings('rocker', 'SmallRSSReader')
-            settings.setValue('read_articles', list(self.read_articles))
+            read_articles_path = get_user_data_path('read_articles.json')
+            os.makedirs(os.path.dirname(read_articles_path), exist_ok=True)
+            with open(read_articles_path, 'w') as f:
+                json.dump(list(self.read_articles), f, indent=4)
             logging.info(f"Saved {len(self.read_articles)} read articles.")
         except Exception as e:
             logging.error(f"Failed to save read articles: {e}")
@@ -930,33 +1009,21 @@ class RSSReader(QMainWindow):
 
     def load_feeds(self):
         """Loads the feeds from the saved feeds.json file."""
-        if os.path.exists('feeds.json'):
-            with open('feeds.json', 'r') as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    self.feeds = []
-                    for url in data.keys():
-                        feed_title = url
-                        feed_data = {
-                            'title': feed_title,
-                            'url': url,
-                            'entries': data[url].get('entries', []),
-                            'sort_column': 1,
-                            'sort_order': Qt.AscendingOrder,
-                            'visible_columns': [True] * 6
-                        }
-                        self.feeds.append(feed_data)
-                elif isinstance(data, list):
-                    self.feeds = data
-                    for feed in self.feeds:
-                        if 'sort_column' not in feed:
-                            feed['sort_column'] = 1
-                        if 'sort_order' not in feed:
-                            feed['sort_order'] = Qt.AscendingOrder
-                        if 'visible_columns' not in feed:
-                            feed['visible_columns'] = [True] * 6
-                else:
-                    self.feeds = []
+        feeds_path = get_user_data_path('feeds.json')
+        if os.path.exists(feeds_path):
+            try:
+                with open(feeds_path, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self.feeds = []
+                        for feed in data.get('feeds', []):
+                            self.feeds.append(feed)
+                    elif isinstance(data, list):
+                        self.feeds = data
+                    else:
+                        self.feeds = []
+                # Populate feeds in the UI
+                self.feeds_list.clear()
                 for feed in self.feeds:
                     parsed_url = urlparse(feed['url'])
                     domain = parsed_url.netloc or 'Unknown Domain'
@@ -966,9 +1033,49 @@ class RSSReader(QMainWindow):
                     feed_item.setText(0, feed['title'])
                     feed_item.setData(0, Qt.UserRole, feed['url'])
                     feed_item.setFlags(feed_item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)
-            self.update_feed_titles()
+                logging.info(f"Loaded {len(self.feeds)} feeds.")
+            except json.JSONDecodeError:
+                QMessageBox.critical(self, "Load Error", "Failed to parse feeds.json. The file may be corrupted.")
+                logging.error("Failed to parse feeds.json.")
+                self.feeds = []
+            except Exception as e:
+                QMessageBox.critical(self, "Load Error", f"An unexpected error occurred while loading feeds: {e}")
+                logging.error(f"Unexpected error while loading feeds: {e}")
+                self.feeds = []
         else:
-            self.feeds = []
+            # Create default feeds.json with default or empty feeds
+            self.feeds = [
+                {
+                    'title': 'BBC News',
+                    'url': 'http://feeds.bbci.co.uk/news/rss.xml',
+                    'entries': [],
+                    'sort_column': 1,
+                    'sort_order': Qt.AscendingOrder,
+                    'visible_columns': [True] * 6
+                },
+                {
+                    'title': 'CNN Top Stories',
+                    'url': 'http://rss.cnn.com/rss/edition.rss',
+                    'entries': [],
+                    'sort_column': 1,
+                    'sort_order': Qt.AscendingOrder,
+                    'visible_columns': [True] * 6
+                }
+                # Add more default feeds as desired
+            ]
+            self.save_feeds()
+            logging.info("Created default feeds.json with initial feeds.")
+
+    def save_feeds(self):
+        """Saves the feeds to feeds.json file."""
+        try:
+            feeds_path = get_user_data_path('feeds.json')
+            os.makedirs(os.path.dirname(feeds_path), exist_ok=True)
+            with open(feeds_path, 'w') as f:
+                json.dump(self.feeds, f, indent=4)
+            logging.info("Feeds saved successfully.")
+        except Exception as e:
+            logging.error(f"Failed to save feeds: {e}")
 
     def update_feed_titles(self):
         """Updates the feed titles in case they were not set properly."""
@@ -992,15 +1099,6 @@ class RSSReader(QMainWindow):
                 except Exception as e:
                     logging.error(f"Error updating feed title for {feed['url']}: {e}")
         self.save_feeds()
-
-    def save_feeds(self):
-        """Saves the feeds to feeds.json file."""
-        try:
-            with open('feeds.json', 'w') as f:
-                json.dump(self.feeds, f, indent=4)
-            logging.info("Feeds saved successfully.")
-        except Exception as e:
-            logging.error(f"Failed to save feeds: {e}")
 
     def load_articles(self):
         """Loads the articles for the selected feed."""
@@ -1120,27 +1218,32 @@ class RSSReader(QMainWindow):
 
     def update_movie_info(self, index, movie_data):
         """Updates the article item with movie data."""
+        if index < 0 or index >= len(self.current_entries):
+            logging.error(f"update_movie_info called with out-of-range index: {index}. Current entries count: {len(self.current_entries)}.")
+            return  # Safely exit the function to prevent the crash
         entry = self.current_entries[index]
         article_id = self.get_article_id(entry)
         item = self.article_id_to_item.get(article_id)
         if item:
-            imdb_rating = movie_data.get('imdbrating', 'N/A')
+            imdb_rating = movie_data.get('imdbRating', 'N/A')  # Corrected key
             rating_value = self.parse_rating(imdb_rating)
             item.setData(2, Qt.UserRole, rating_value)
             item.setText(2, imdb_rating)
 
-            released = movie_data.get('released', '')
+            released = movie_data.get('Released', '')
             release_date = self.parse_release_date(released)
             item.setData(3, Qt.UserRole, release_date)
             item.setText(3, release_date.strftime('%d %b %Y') if release_date != datetime.datetime.min else '')
 
-            genre = movie_data.get('genre', '')
-            director = movie_data.get('director', '')
+            genre = movie_data.get('Genre', '')
+            director = movie_data.get('Director', '')
             item.setText(4, genre)
             item.setText(5, director)
 
             # Update the entry with the fetched movie data
             entry['movie_data'] = movie_data
+        else:
+            logging.warning(f"No QTreeWidgetItem found for article ID: {article_id}")
 
     def parse_rating(self, rating_str):
         """Parses the IMDb rating string to a float value."""
@@ -1200,23 +1303,23 @@ class RSSReader(QMainWindow):
         movie_data = entry.get('movie_data', {})
         movie_info_html = ''
         if movie_data:
-            poster_url = movie_data.get('poster', '')
+            poster_url = movie_data.get('Poster', '')
             if poster_url and poster_url != 'N/A':
                 movie_info_html += f'<img src="{poster_url}" alt="Poster" style="max-width:200px;" /><br/>'
             details = [
-                ('Plot', movie_data.get('plot', '')),
-                ('Writer', movie_data.get('writer', '')),
-                ('Actors', movie_data.get('actors', '')),
-                ('Language', movie_data.get('language', '')),
-                ('Country', movie_data.get('country', '')),
-                ('Awards', movie_data.get('awards', '')),
-                ('DVD Release', movie_data.get('dvd', '')),
-                ('Box Office', movie_data.get('boxoffice', '')),
+                ('Plot', movie_data.get('Plot', '')),
+                ('Writer', movie_data.get('Writer', '')),
+                ('Actors', movie_data.get('Actors', '')),
+                ('Language', movie_data.get('Language', '')),
+                ('Country', movie_data.get('Country', '')),
+                ('Awards', movie_data.get('Awards', '')),
+                ('DVD Release', movie_data.get('DVD', '')),
+                ('Box Office', movie_data.get('BoxOffice', '')),
             ]
             for label, value in details:
                 if value and value != 'N/A':
                     movie_info_html += f'<p><strong>{label}:</strong> {value}</p>'
-            ratings = movie_data.get('ratings', [])
+            ratings = movie_data.get('Ratings', [])
             if ratings:
                 ratings_html = '<ul>'
                 for rating in ratings:
@@ -1365,6 +1468,7 @@ class RSSReader(QMainWindow):
     def force_refresh_all_feeds(self):
         """Forces a refresh of all feeds."""
         if self.is_refreshing:
+            QMessageBox.information(self, "Refresh In Progress", "A refresh operation is already in progress.")
             return  # Prevent multiple refreshes at the same time
         self.is_refreshing = True
         self.refresh_icon_angle = 0
@@ -1410,7 +1514,10 @@ class RSSReader(QMainWindow):
             for feed_data in self.feeds:
                 if feed_data['url'] == url:
                     feed_data['entries'] = feed.entries
+                    logging.debug(f"Updated entries for feed '{feed_data['title']}'.")
                     break
+        else:
+            logging.warning(f"Failed to fetch feed during force refresh: {url}")
         current_feed_item = self.feeds_list.currentItem()
         if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
             self.on_feed_fetched(url, feed)
@@ -1519,11 +1626,13 @@ def main():
 
     # Configure logging based on the debug flag
     logging_level = logging.DEBUG if args.debug else logging.INFO
+    log_path = get_user_data_path('rss_reader.log')
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
     logging.basicConfig(
         level=logging_level,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler('rss_reader.log'),
+            logging.FileHandler(log_path),
             logging.StreamHandler(sys.stdout)
         ]
     )
@@ -1532,8 +1641,39 @@ def main():
     app.setOrganizationName("rocker")
     app.setApplicationName("SmallRSSReader")
     app.setApplicationDisplayName("Small RSS Reader")
+    # Set the global application icon
+    app.setWindowIcon(QIcon(resource_path('icons/rss_icon.png')))
+    
+    # Create and show the splash screen
+    splash_pix = QPixmap(resource_path('icons/splash.png'))
+    splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
+    splash.setMask(splash_pix.mask())
+    splash.showMessage("Initializing...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
+    splash.show()
+    QApplication.processEvents()
+
+    # Initialize the main window
     reader = RSSReader()
     reader.show()
+
+    # Update splash screen message
+    splash.showMessage("Loading settings...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
+    QApplication.processEvents()
+    reader.load_settings()
+
+    splash.showMessage("Loading feeds...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
+    QApplication.processEvents()
+    reader.load_feeds()
+
+    splash.showMessage("Refreshing feeds...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
+    QApplication.processEvents()
+    
+
+    splash.showMessage("Finalizing...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
+    QApplication.processEvents()
+    
+    # Finish splash screen
+    splash.finish(reader)
 
     # Ensure that Ctrl+C works on Unix-like systems
     signal.signal(signal.SIGINT, signal.SIG_DFL)
