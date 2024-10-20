@@ -1225,7 +1225,7 @@ class RSSReader(QMainWindow):
         article_id = self.get_article_id(entry)
         item = self.article_id_to_item.get(article_id)
         if item:
-            imdb_rating = movie_data.get('imdbRating', 'N/A')  # Corrected key
+            imdb_rating = movie_data.get('imdbrating', 'N/A')  # Corrected key
             rating_value = self.parse_rating(imdb_rating)
             item.setData(2, Qt.UserRole, rating_value)
             item.setText(2, imdb_rating)
