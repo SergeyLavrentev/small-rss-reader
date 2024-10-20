@@ -4,7 +4,7 @@
 
 # Build the application using PyInstaller and the spec file
 build:
-	pyinstaller mini_rss_reader.spec
+	pyinstaller --clean --noconfirm mini_rss_reader.spec
 
 # Clean up build artifacts created by PyInstaller
 clean:

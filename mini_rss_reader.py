@@ -1034,6 +1034,8 @@ class RSSReader(QMainWindow):
                     feed_item.setData(0, Qt.UserRole, feed['url'])
                     feed_item.setFlags(feed_item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)
                 logging.info(f"Loaded {len(self.feeds)} feeds.")
+                # **Add this line to expand all feed groups**
+                self.feeds_list.expandAll()
             except json.JSONDecodeError:
                 QMessageBox.critical(self, "Load Error", "Failed to parse feeds.json. The file may be corrupted.")
                 logging.error("Failed to parse feeds.json.")
