@@ -1,6 +1,6 @@
 # Makefile
 
-.PHONY: build clean run rebuild
+.PHONY: build clean run rebuild install
 
 # Build the application using PyInstaller and the spec file
 build:
@@ -17,3 +17,6 @@ run:
 
 # Rebuild the application: clean then build
 rebuild: clean build
+
+install:
+	cp -a dist/Small\ RSS\ Reader.app /Applications/

@@ -1310,6 +1310,7 @@ class RSSReader(QMainWindow):
             if poster_url and poster_url != 'N/A':
                 movie_info_html += f'<img src="{poster_url}" alt="Poster" style="max-width:200px;" /><br/>'
             details = [
+                ('Released', movie_data.get('released', '')),
                 ('Plot', movie_data.get('plot', '')),
                 ('Writer', movie_data.get('writer', '')),
                 ('Actors', movie_data.get('actors', '')),
@@ -1390,7 +1391,6 @@ class RSSReader(QMainWindow):
         html_content = f"""
         {styles}
         <h3>{title}</h3>
-        <p><em>{date_formatted}</em></p>
         {images_html}
         {content}
         {movie_info_html}
