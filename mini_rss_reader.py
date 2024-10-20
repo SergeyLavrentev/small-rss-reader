@@ -1232,13 +1232,13 @@ class RSSReader(QMainWindow):
             item.setData(2, Qt.UserRole, rating_value)
             item.setText(2, imdb_rating)
 
-            released = movie_data.get('Released', '')
+            released = movie_data.get('released', '')
             release_date = self.parse_release_date(released)
             item.setData(3, Qt.UserRole, release_date)
             item.setText(3, release_date.strftime('%d %b %Y') if release_date != datetime.datetime.min else '')
 
-            genre = movie_data.get('Genre', '')
-            director = movie_data.get('Director', '')
+            genre = movie_data.get('genre', '')
+            director = movie_data.get('director', '')
             item.setText(4, genre)
             item.setText(5, director)
 
@@ -1280,7 +1280,8 @@ class RSSReader(QMainWindow):
         elif 'summary' in entry:
             content = entry.get('summary', 'No Content')
         else:
-            content = 'No Content Available.'
+            #content = 'No Content Available.'
+            content = ''
 
         images_html = ''
         if 'media_content' in entry:
@@ -1305,23 +1306,23 @@ class RSSReader(QMainWindow):
         movie_data = entry.get('movie_data', {})
         movie_info_html = ''
         if movie_data:
-            poster_url = movie_data.get('Poster', '')
+            poster_url = movie_data.get('poster', '')
             if poster_url and poster_url != 'N/A':
                 movie_info_html += f'<img src="{poster_url}" alt="Poster" style="max-width:200px;" /><br/>'
             details = [
-                ('Plot', movie_data.get('Plot', '')),
-                ('Writer', movie_data.get('Writer', '')),
-                ('Actors', movie_data.get('Actors', '')),
-                ('Language', movie_data.get('Language', '')),
-                ('Country', movie_data.get('Country', '')),
-                ('Awards', movie_data.get('Awards', '')),
-                ('DVD Release', movie_data.get('DVD', '')),
-                ('Box Office', movie_data.get('BoxOffice', '')),
+                ('Plot', movie_data.get('plot', '')),
+                ('Writer', movie_data.get('writer', '')),
+                ('Actors', movie_data.get('actors', '')),
+                ('Language', movie_data.get('language', '')),
+                ('Country', movie_data.get('country', '')),
+                ('Awards', movie_data.get('awards', '')),
+                ('DVD Release', movie_data.get('dvd', '')),
+                ('Box Office', movie_data.get('boxoffice', '')),
             ]
             for label, value in details:
                 if value and value != 'N/A':
                     movie_info_html += f'<p><strong>{label}:</strong> {value}</p>'
-            ratings = movie_data.get('Ratings', [])
+            ratings = movie_data.get('ratings', [])
             if ratings:
                 ratings_html = '<ul>'
                 for rating in ratings:
@@ -1334,7 +1335,7 @@ class RSSReader(QMainWindow):
         body {
             max-width: 800px;
             margin: auto;
-            padding: 20px;
+            padding: 5px;
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             font-size: 16px;
             line-height: 1.6;
@@ -1342,16 +1343,16 @@ class RSSReader(QMainWindow):
             background-color: #f9f9f9;
         }
         h3 {
-            font-size: 24px;
+            font-size: 18px;
         }
         p {
-            margin: 0 0 10px;
+            margin: 0 0 5px;
         }
         img {
             max-width: 100%;
             height: auto;
             display: block;
-            margin: 10px 0;
+            margin: 5px 0;
         }
         a {
             color: #1e90ff;
@@ -1361,8 +1362,8 @@ class RSSReader(QMainWindow):
             text-decoration: underline;
         }
         blockquote {
-            margin: 20px 0;
-            padding: 10px 20px;
+            margin: 5px 0;
+            padding: 5px 20px;
             background-color: #f0f0f0;
             border-left: 5px solid #ccc;
         }
