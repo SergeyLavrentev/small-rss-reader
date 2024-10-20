@@ -2,3 +2,8 @@ PyQt5>=5.12
 PyQtWebEngine>=5.12
 feedparser>=6.0.0
 omdbapi>=0.5.0
+setuptools
+py2app
+jaraco.text>=4.0.0
+jaraco.context>=6.0.1
+jaraco.functools>=4.1.0
