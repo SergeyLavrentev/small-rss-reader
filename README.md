@@ -20,9 +20,6 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
 - **Import/Export Feeds**: Import and export feeds to/from a JSON file.
 - **Auto Refresh**: Automatically refresh feeds at a specified interval.
 
-## Prerequisites
-- Python 3.6 or newer
-
 ## Installation
 
 1. **Clone the repository**:
@@ -38,7 +35,7 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
 4. **Install the dependencies**:
    ```bash
    pip install -r requirements.txt
-5. ** Build the application**:
+5. **Build the application**:
    ```bash
    make build
 6. ** Copy the bundle app to Application dir:
