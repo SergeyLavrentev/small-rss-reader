@@ -531,22 +531,24 @@ class RSSReader(QMainWindow):
 
     def add_search_widget(self):
         """Adds the search widget to the toolbar."""
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.toolbar.addWidget(spacer)
-
         search_label = QLabel("Search:")
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search articles...")
+        self.search_input.setFixedWidth(300)  # Set the width of the search input
         self.search_input.textChanged.connect(self.filter_articles)
         search_layout = QHBoxLayout()
         search_layout.setContentsMargins(0, 0, 0, 0)
-        search_layout.setSpacing(2)
+        search_layout.setSpacing(0)  # Remove spacing
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.search_input)
+        search_layout.addStretch()  # Add stretch to align to the left
         search_widget = QWidget()
         search_widget.setLayout(search_layout)
         self.toolbar.addWidget(search_widget)
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.toolbar.addWidget(spacer)
 
     def update_refresh_timer(self):
         """Updates the refresh timer based on the refresh interval."""
