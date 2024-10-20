@@ -1,5 +1,7 @@
 # Ignore logs directory
 logs/
+dist
+build
 
 # Ignore all .log files
 *.log
