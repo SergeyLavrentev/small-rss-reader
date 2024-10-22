@@ -9,8 +9,11 @@ import re
 import unicodedata
 import hashlib
 import argparse
+import pync
 from urllib.parse import urlparse
 from omdbapi.movie_search import GetMovie
+from pync import Notifier
+from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTreeWidget, QTreeWidgetItem,
@@ -236,14 +239,17 @@ class SettingsDialog(QDialog):
         self.refresh_interval_input.setValue(self.parent.refresh_interval)
         layout.addRow("Refresh Interval (minutes):", self.refresh_interval_input)
 
-        buttons_layout = QHBoxLayout()
-        save_button = QPushButton("Save")
-        save_button.clicked.connect(self.save_settings)
-        cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
-        buttons_layout.addWidget(save_button)
-        buttons_layout.addWidget(cancel_button)
-        layout.addRow(buttons_layout)
+        # **Add Global Notifications Checkbox**
+        self.global_notifications_checkbox = QCheckBox("Enable Notifications", self)
+        settings = QSettings('rocker', 'SmallRSSReader')
+        global_notifications = settings.value('notifications_enabled', True, type=bool)
+        self.global_notifications_checkbox.setChecked(global_notifications)
+        layout.addRow("Global Notifications:", self.global_notifications_checkbox)
+
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addRow(self.buttons)
 
     def update_api_key_notice(self):
         if not self.parent.api_key:
@@ -253,13 +259,20 @@ class SettingsDialog(QDialog):
 
     def save_settings(self):
         """Saves the settings when the user clicks 'Save'."""
+        # Save existing settings
         api_key = self.api_key_input.text().strip()
         refresh_interval = self.refresh_interval_input.value()
         self.parent.api_key = api_key
         self.parent.refresh_interval = refresh_interval
+
+        # Save Global Notifications Setting
+        notifications_enabled = self.global_notifications_checkbox.isChecked()
+
         settings = QSettings('rocker', 'SmallRSSReader')
         settings.setValue('omdb_api_key', api_key)
         settings.setValue('refresh_interval', refresh_interval)
+        settings.setValue('notifications_enabled', notifications_enabled)
+
         self.parent.update_refresh_timer()
         self.update_api_key_notice()
         self.accept()
@@ -300,11 +313,113 @@ class RSSReader(QMainWindow):
         self.group_name_mapping = {}  # Mapping from domain to custom group name
         self.group_settings = {}  # Group-specific settings
         self.is_refreshing = False
+        self.is_quitting = False  # Flag to indicate if the app is quitting
         self.refresh_icon_angle = 0
         self.icon_rotation_timer = QTimer()
         self.icon_rotation_timer.timeout.connect(self.rotate_refresh_icon)
         self.auto_refresh_timer = QTimer()
         self.force_refresh_icon_pixmap = None  # To store the icon pixmap
+
+        # **Font Size Variables**
+        self.default_font_size = 16  # Default font size
+        settings = QSettings('rocker', 'SmallRSSReader')
+        self.current_font_size = settings.value('font_size', self.default_font_size, type=int)
+        # **Initialize System Tray Icon**
+        self.init_tray_icon()
+
+    def quit_app(self):
+        """Handles the quitting of the application."""
+        self.is_quitting = True
+        self.close()
+
+    def save_font_size(self):
+        """Saves the current font size to settings."""
+        settings = QSettings('rocker', 'SmallRSSReader')
+        settings.setValue('font_size', self.current_font_size)
+
+    def apply_font_size(self):
+        """Applies the current font size to relevant widgets."""
+        font = QFont()
+        font.setPointSize(self.current_font_size)
+        self.articles_tree.setFont(font)
+        self.content_view.setFont(font)
+
+        # Optionally, apply to other widgets like feed list, toolbar, etc.
+        # self.feeds_list.setFont(font)
+        # self.toolbar.setFont(font)
+
+        # **Update Status Bar with Current Font Size**
+        self.statusBar().showMessage(f"Font Size: {self.current_font_size}")
+
+    def increase_font_size(self):
+        """Increases the font size."""
+        if self.current_font_size < 30:  # Maximum font size limit
+            self.current_font_size += 1
+            self.apply_font_size()
+            self.save_font_size()
+            logging.info(f"Increased font size to {self.current_font_size}.")
+
+    def decrease_font_size(self):
+        """Decreases the font size."""
+        if self.current_font_size > 8:  # Minimum font size limit
+            self.current_font_size -= 1
+            self.apply_font_size()
+            self.save_font_size()
+            logging.info(f"Decreased font size to {self.current_font_size}.")
+
+    def reset_font_size(self):
+        """Resets the font size to default."""
+        self.current_font_size = self.default_font_size
+        self.apply_font_size()
+        self.save_font_size()
+        logging.info(f"Reset font size to default ({self.default_font_size}).")
+
+    def send_notification(self, feed_title, entry):
+        """Sends a macOS notification for a new article."""
+        group_name = self.get_group_name_for_feed(entry.get('link', ''))
+        group_settings = self.group_settings.get(group_name, {'notifications_enabled': True})
+        notifications_enabled = group_settings.get('notifications_enabled', True)
+
+        # Check global notification setting
+        settings = QSettings('rocker', 'SmallRSSReader')
+        global_notifications = settings.value('notifications_enabled', True, type=bool)
+
+        if global_notifications and notifications_enabled:
+            title = f"New Article in {feed_title}"
+            subtitle = entry.get('title', 'No Title')
+            Notifier.notify(
+                entry.get('summary', 'No summary available.'),
+                title=title,
+                subtitle=subtitle,
+                open=entry.get('link', ''),
+                execute='open'  # Opens the link when the notification is clicked
+            )
+            logging.info(f"Sent notification for new article: {entry.get('title', 'No Title')}")
+
+    def init_tray_icon(self):
+        """Initializes the system tray icon."""
+        self.tray_icon = QSystemTrayIcon(self)
+        tray_icon_pixmap = QPixmap(resource_path('icons/rss_tray_icon.png'))  # Ensure you have this icon
+        self.tray_icon.setIcon(QIcon(tray_icon_pixmap))
+        self.tray_icon.setToolTip("Small RSS Reader")
+
+        # Create tray menu
+        tray_menu = QMenu()
+
+        show_action = QAction("Show", self)
+        show_action.triggered.connect(self.show)
+        tray_menu.addAction(show_action)
+
+        refresh_action = QAction("Refresh All Feeds", self)
+        refresh_action.triggered.connect(self.force_refresh_all_feeds)
+        tray_menu.addAction(refresh_action)
+
+        exit_action = QAction("Exit", self)
+        exit_action.triggered.connect(self.close)
+        tray_menu.addAction(exit_action)
+
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.show()
 
     def init_ui(self):
         """Initializes the main UI components."""
@@ -443,6 +558,31 @@ class RSSReader(QMainWindow):
         # View menu
         view_menu = menu.addMenu("View")
         self.add_view_menu_actions(view_menu)
+
+        # Add Font Size Submenu
+        font_size_menu = view_menu.addMenu("Font Size")
+
+        increase_font_action = QAction("Increase Font Size", self)
+        increase_font_action.setShortcut("Cmd++" if sys.platform == 'darwin' else "Ctrl++")
+        increase_font_action.triggered.connect(self.increase_font_size)
+        font_size_menu.addAction(increase_font_action)
+
+        decrease_font_action = QAction("Decrease Font Size", self)
+        decrease_font_action.setShortcut("Cmd+-" if sys.platform == 'darwin' else "Ctrl+-")
+        decrease_font_action.triggered.connect(self.decrease_font_size)
+        font_size_menu.addAction(decrease_font_action)
+
+        reset_font_action = QAction("Reset Font Size", self)
+        reset_font_action.setShortcut("Cmd+0" if sys.platform == 'darwin' else "Ctrl+0")
+        reset_font_action.triggered.connect(self.reset_font_size)
+        font_size_menu.addAction(reset_font_action)
+
+        # **Add Quit Action with Cmd+Q Shortcut**
+        quit_action = QAction("Quit", self)
+        quit_action.setShortcut("Cmd+Q" if sys.platform == 'darwin' else "Ctrl+Q")
+        quit_action.triggered.connect(self.quit_app)
+        file_menu.addAction(quit_action)
+
 
     def open_article_url(self, item, column):
         """
@@ -612,6 +752,16 @@ class RSSReader(QMainWindow):
         self.load_ui_visibility_settings(settings)
         self.load_movie_data_cache()
         self.load_group_settings(settings)
+        self.load_read_articles()
+        self.load_feeds()
+        self.apply_font_size()  # Apply font size after loading settings
+
+        # Start refresh after event loop starts to prevent blocking UI
+        QTimer.singleShot(0, self.force_refresh_all_feeds)
+
+        self.select_first_feed()
+
+
 
     def restore_geometry_and_state(self, settings):
         """Restores the window geometry and state."""
@@ -731,22 +881,81 @@ class RSSReader(QMainWindow):
             logging.error(f"Unexpected error while loading read articles: {e}")
             self.read_articles = set()
 
+    def keyPressEvent(self, event):
+        """Handles key press events."""
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Q:
+            self.quit_app()
+        else:
+            super().keyPressEvent(event)
+
     def closeEvent(self, event):
         """Handles the window close event."""
-        self.save_feeds()
-        settings = QSettings('rocker', 'SmallRSSReader')
-        self.save_geometry_and_state(settings)
-        self.save_ui_visibility_settings(settings)
-        self.save_movie_data_cache()
-        self.save_group_settings(settings)
-        self.save_read_articles()
+        if self.is_quitting:
+            # Perform cleanup before quitting
+            self.save_feeds()
+            settings = QSettings('rocker', 'SmallRSSReader')
+            self.save_geometry_and_state(settings)
+            self.save_ui_visibility_settings(settings)
+            self.save_movie_data_cache()
+            self.save_group_settings(settings)
+            self.save_read_articles()
+            self.save_font_size()
+        
+            # Gracefully terminate all threads
+            for thread in self.threads:
+                thread.terminate()
+                thread.wait()
+            logging.info("All threads terminated.")
+        
+            # Accept the event to allow the application to quit
+            event.accept()
+        else:
+            # Minimize to tray instead of closing
+            event.ignore()
+            self.hide()
+            self.tray_icon.showMessage(
+                "Small RSS Reader",
+                "Application minimized to tray. Double-click the tray icon to restore.",
+                QSystemTrayIcon.Information,
+                2000
+            )
 
-        # Gracefully terminate all threads
-        for thread in self.threads:
-            thread.terminate()
-            thread.wait()
-        logging.info("All threads terminated.")
-        event.accept()
+
+    def init_tray_icon(self):
+        """Initializes the system tray icon."""
+        self.tray_icon = QSystemTrayIcon(self)
+        tray_icon_pixmap = QPixmap(resource_path('icons/rss_tray_icon.png'))  # Ensure you have this icon
+        self.tray_icon.setIcon(QIcon(tray_icon_pixmap))
+        self.tray_icon.setToolTip("Small RSS Reader")
+
+        # Create tray menu
+        tray_menu = QMenu()
+
+        show_action = QAction("Show", self)
+        show_action.triggered.connect(self.show)
+        tray_menu.addAction(show_action)
+
+        refresh_action = QAction("Refresh All Feeds", self)
+        refresh_action.triggered.connect(self.force_refresh_all_feeds)
+        tray_menu.addAction(refresh_action)
+
+        exit_action = QAction("Exit", self)
+        exit_action.triggered.connect(self.quit_app)  # Connect to quit_app instead of self.close
+        tray_menu.addAction(exit_action)
+
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.show()
+
+        # Restore window on double-click
+        self.tray_icon.activated.connect(self.on_tray_icon_activated)
+
+
+    def on_tray_icon_activated(self, reason):
+        """Handles tray icon activation (e.g., double-click)."""
+        if reason == QSystemTrayIcon.DoubleClick:
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
 
     def save_geometry_and_state(self, settings):
         """Saves the window geometry and state."""
@@ -919,41 +1128,44 @@ class RSSReader(QMainWindow):
         menu.addAction(settings_action)
         menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
 
-    def show_feed_context_menu(self, feed_item, position):
-        """Shows the context menu for a feed."""
-        menu = QMenu()
-        rename_action = QAction("Rename Feed", self)
-        rename_action.triggered.connect(self.rename_feed)
-        remove_action = QAction("Remove Feed", self)
-        remove_action.triggered.connect(self.remove_feed)
-        menu.addAction(rename_action)
-        menu.addAction(remove_action)
-        menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
-
     def group_settings_dialog(self, group_item):
         """Opens the settings dialog for a group."""
         group_name = group_item.text(0)
-        settings = self.group_settings.get(group_name, {'omdb_enabled': True})
+        settings = self.group_settings.get(group_name, {'omdb_enabled': True, 'notifications_enabled': True})
         omdb_enabled = settings.get('omdb_enabled', True)
+        notifications_enabled = settings.get('notifications_enabled', True)
+
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Settings for {group_name}")
         layout = QVBoxLayout(dialog)
-        checkbox = QCheckBox("Enable OMDb Feature", dialog)
-        checkbox.setChecked(omdb_enabled)
-        layout.addWidget(checkbox)
+
+        # OMDb Feature Checkbox
+        omdb_checkbox = QCheckBox("Enable OMDb Feature", dialog)
+        omdb_checkbox.setChecked(omdb_enabled)
+        layout.addWidget(omdb_checkbox)
+
+        # **Add Group Notifications Checkbox**
+        notifications_checkbox = QCheckBox("Enable Notifications", dialog)
+        notifications_checkbox.setChecked(notifications_enabled)
+        layout.addWidget(notifications_checkbox)
+
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         layout.addWidget(button_box)
         button_box.accepted.connect(dialog.accept)
         button_box.rejected.connect(dialog.reject)
-        if dialog.exec_() == QDialog.Accepted:
-            self.save_group_setting(group_name, checkbox.isChecked())
 
-    def save_group_setting(self, group_name, omdb_enabled):
-        """Saves the OMDb setting for a group."""
-        self.group_settings[group_name] = {'omdb_enabled': omdb_enabled}
+        if dialog.exec_() == QDialog.Accepted:
+            self.save_group_setting(group_name, omdb_checkbox.isChecked(), notifications_checkbox.isChecked())
+
+    def save_group_setting(self, group_name, omdb_enabled, notifications_enabled):
+        """Saves the OMDb and Notification settings for a group."""
+        self.group_settings[group_name] = {
+            'omdb_enabled': omdb_enabled,
+            'notifications_enabled': notifications_enabled
+        }
         self.save_group_settings(QSettings('rocker', 'SmallRSSReader'))
         self.statusBar().showMessage(f"Updated settings for group: {group_name}")
-        logging.info(f"Updated OMDb setting for group '{group_name}' to {'enabled' if omdb_enabled else 'disabled'}.")
+        logging.info(f"Updated settings for group '{group_name}': OMDb {'enabled' if omdb_enabled else 'disabled'}, Notifications {'enabled' if notifications_enabled else 'disabled'}.")
         current_feed = self.get_current_feed()
         if current_feed:
             current_group_name = self.get_group_name_for_feed(current_feed['url'])
@@ -1183,6 +1395,7 @@ class RSSReader(QMainWindow):
             self.threads.append(thread)
             thread.finished.connect(lambda t=thread: self.remove_thread(t))
             thread.start()
+
     def display_content(self):
         """Displays the content of the selected article."""
         selected_items = self.articles_tree.selectedItems()
@@ -1450,6 +1663,12 @@ class RSSReader(QMainWindow):
         if self.articles_tree.topLevelItemCount() > 0:
             first_item = self.articles_tree.topLevelItem(0)
             self.articles_tree.setCurrentItem(first_item)
+        
+        self.apply_font_size()
+        # Automatically Select the First Article if Available
+        if self.articles_tree.topLevelItemCount() > 0:
+            first_item = self.articles_tree.topLevelItem(0)
+            self.articles_tree.setCurrentItem(first_item)
 
     def get_current_feed(self):
         """Returns the currently selected feed data."""
@@ -1569,15 +1788,22 @@ class RSSReader(QMainWindow):
         logging.info("Refreshed selected feed.")
 
     def force_refresh_all_feeds(self):
-        """Forces a refresh of all feeds."""
+        """Forces a refresh of all feeds without showing any warnings."""
         if self.is_refreshing:
-            QMessageBox.information(self, "Refresh In Progress", "A refresh operation is already in progress.")
+            # Silently ignore the refresh request since one is already in progress
+            logging.debug("Refresh attempt ignored: already in progress.")
             return  # Prevent multiple refreshes at the same time
+
+        if not self.feeds:
+            logging.warning("No feeds to refresh.")
+            return
+
         self.is_refreshing = True
         self.refresh_icon_angle = 0
         self.icon_rotation_timer.start(50)  # Rotate every 50ms
         self.active_feed_threads = len(self.feeds)
         logging.info("Starting force refresh of all feeds.")
+
         for feed_data in self.feeds:
             url = feed_data['url']
             thread = FetchFeedThread(url)
@@ -1588,26 +1814,37 @@ class RSSReader(QMainWindow):
 
     def on_feed_thread_finished(self, thread):
         """Called when a feed fetching thread has finished."""
-        self.remove_thread(thread)
+        if thread in self.threads:
+            self.threads.remove(thread)
+
         self.active_feed_threads -= 1
         logging.debug(f"Feed thread finished. Remaining threads: {self.active_feed_threads}")
+
         if self.active_feed_threads == 0:
-            self.is_refreshing = False
+            self.is_refreshing = False  # Reset the flag
             self.icon_rotation_timer.stop()
             self.force_refresh_action.setIcon(QIcon(self.force_refresh_icon_pixmap))
             logging.info("Completed force refresh of all feeds.")
 
     def on_feed_fetched(self, url, feed):
-        """Handles the feed fetched signal, updating the feed with new data."""
+        """Handles the feed fetched signal, updating the feed with new data and sending notifications."""
         if feed is not None:
             for feed_data in self.feeds:
                 if feed_data['url'] == url:
+                    new_entries = []
+                    for entry in feed.entries:
+                        article_id = self.get_article_id(entry)
+                        if article_id not in self.read_articles:
+                            new_entries.append(entry)
+                            self.read_articles.add(article_id)
+                            self.send_notification(feed_data['title'], entry)
                     feed_data['entries'] = feed.entries
                     break
             current_feed_item = self.feeds_list.currentItem()
             if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
                 self.populate_articles()
-            logging.info(f"Feed fetched: {url}")
+            self.save_read_articles()
+            logging.info(f"Feed fetched: {url} with {len(new_entries)} new articles.")
         else:
             logging.warning(f"Failed to fetch feed: {url}")
 
@@ -1616,14 +1853,22 @@ class RSSReader(QMainWindow):
         if feed is not None:
             for feed_data in self.feeds:
                 if feed_data['url'] == url:
+                    new_entries = []
+                    for entry in feed.entries:
+                        article_id = self.get_article_id(entry)
+                        if article_id not in self.read_articles:
+                            new_entries.append(entry)
+                            self.read_articles.add(article_id)
+                            self.send_notification(feed_data['title'], entry)
                     feed_data['entries'] = feed.entries
-                    logging.debug(f"Updated entries for feed '{feed_data['title']}'.")
                     break
         else:
             logging.warning(f"Failed to fetch feed during force refresh: {url}")
         current_feed_item = self.feeds_list.currentItem()
         if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
             self.on_feed_fetched(url, feed)
+        self.save_read_articles()
+
 
     def import_feeds(self):
         """Imports feeds from a JSON file."""

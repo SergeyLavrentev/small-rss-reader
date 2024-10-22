@@ -4,21 +4,19 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
 
 <img width="512" alt="Screenshot at Oct 13 00-26-26" src="https://github.com/user-attachments/assets/eaa86896-86ed-4502-9da3-91eda418c076">
 
-
 ## Features
 
-- **Add and Remove Feeds**: Easily manage your RSS feeds by adding new ones or removing existing ones.
-- **Feed Reordering**: Drag and drop feeds to reorder them in the list.
-- **Article List View**: Displays articles with details such as Title, Date, Rating, Released Date, Genre, and Director.
-- **Article Search**: Search through articles using keywords.
-- **Unread Article Indicator**: Unread articles are marked with a blue dot.
-- **Mark Feed as Unread**: Reset the read status of all articles in a feed.
-- **Content Display**: View the content of articles with support for images and links.
-- **Movie Data Integration**: Fetches movie data from the OMDb API if an API key is provided.
-- **Customizable Interface**: Toggle the visibility of the toolbar, status bar, and menu bar.
-- **Settings**: Configure the OMDb API key and refresh interval.
-- **Import/Export Feeds**: Import and export feeds to/from a JSON file.
-- **Auto Refresh**: Automatically refresh feeds at a specified interval.
+- **Manage Feeds**: Add, remove, and reorder RSS feeds.
+- **Article Viewing**: Browse articles with titles, dates, and summaries.
+- **Search**: Quickly find articles using keywords.
+- **Unread Indicators**: Easily spot unread articles.
+- **Content Display**: View articles with images and links.
+- **OMDb Integration**: Optionally fetch movie data.
+- **Customizable Interface**: Toggle toolbar, status bar, and menu bar.
+- **Settings**: Configure OMDb API key and refresh intervals.
+- **Import/Export**: Backup and restore feeds via JSON files.
+- **Auto Refresh**: Automatically update feeds at set intervals.
+- **System Tray Integration**: Minimize to tray for a clutter-free experience.
 
 ## Installation
 
@@ -37,10 +35,16 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
    pip install -r requirements.txt
 5. **Build the application**:
    ```bash
-   make build
-6. ** Copy the bundle app to Application dir:
+   make clean build install
+
+## Native macOS Notifications
+
+Stay updated with native macOS notifications for new articles.
+
+1. **Install `pync` Module**
    ```bash
-   cp -a dist/Small\ RSS\ Reader.app ~/Applications
+   python3.13 -m pip install pync
+
 ---
 
 ## Usage
@@ -52,10 +56,11 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
    
 ## Dependencies
 
-- **PyQt5**: Provides the core Qt widgets and classes.
-- **PyQtWebEngine**: Required for displaying web content within the application (`QWebEngineView`).
-- **feedparser**: Used for parsing RSS feed data.
-- **omdbapi**: Used for fetching movie data from the OMDb API.
+- **PyQt5**: Core GUI components.
+- **PyQtWebEngine**: Display web content within the app.
+- **feedparser**: Parse RSS feed data.
+- **pync**: Send native macOS notifications.
+- **omdbapi**: Fetch movie data from the OMDb API.
 
 ## OMDb API Key (Optional)
 
@@ -75,87 +80,18 @@ To enable the movie data fetching feature, you need to obtain an API key from [O
 **Note**: If no API key is provided, the application will function without fetching movie data, and ratings will be displayed as "N/A".
 
 
-## 📄 JSON Files
+## Data Management
 
-The application utilizes two primary JSON files to manage and persist data:
+### JSON Files
 
-### 1. `feeds.json`
+The application uses JSON files to store and manage data.
 
-- **Purpose:**  
-  Stores all subscribed RSS feeds, including their titles, URLs, and fetched entries.
+- **`feeds.json`**
+  - **Purpose:** Stores your subscribed RSS feeds and their articles.
+  - **Location:** Application's working directory.
 
-- **Location:**  
-  Located in the application's working directory (same folder as the main script).
+- **`movie_data_cache.json`**
+  - **Purpose:** Caches movie data fetched from the OMDb API to optimize performance.
+  - **Location:** Application's working directory.
 
-- **Structure:**  
-  ```json
-  [
-      {
-          "title": "Feed Title",
-          "url": "https://example.com/rss",
-          "entries": [
-              {
-                  "title": "Article Title",
-                  "link": "https://example.com/article",
-                  "published": "2024-04-01T10:00:00Z",
-                  "summary": "Brief summary of the article."
-              }
-              // More entries...
-          ]
-      }
-      // More feeds...
-  ]
-
-### 2. `movie_data_cache.json`
-
-- **Purpose:**
-  Caches movie-related data fetched from the OMDb API to optimize performance and reduce redundant API calls.
-
-- **Location:**
-  Located in the application's working directory (same folder as the main script).
-
-- **Structure:**
-  ```json
-  {
-      "Inception": {
-          "Title": "Inception",
-          "Year": "2010",
-          "Rated": "PG-13",
-          "Released": "16 Jul 2010",
-          "Genre": "Action, Adventure, Sci-Fi",
-          "Director": "Christopher Nolan",
-          "Writer": "Christopher Nolan",
-          "Actors": "Leonardo DiCaprio, Joseph Gordon-Levitt, Ellen Page",
-          "Plot": "A thief who steals corporate secrets through use of dream-sharing technology...",
-          "Language": "English, Japanese, French",
-          "Country": "USA, UK",
-          "Awards": "Won 4 Oscars. Another 152 wins & 204 nominations.",
-          "Poster": "https://example.com/poster.jpg",
-          "Ratings": [
-              {
-                  "Source": "Internet Movie Database",
-                  "Value": "8.8/10"
-              },
-              {
-                  "Source": "Rotten Tomatoes",
-                  "Value": "87%"
-              },
-              {
-                  "Source": "Metacritic",
-                  "Value": "74/100"
-              }
-          ],
-          "Metascore": "74",
-          "imdbRating": "8.8",
-          "imdbVotes": "2,000,000",
-          "imdbID": "tt1375666",
-          "Type": "movie",
-          "DVD": "07 Dec 2010",
-          "BoxOffice": "$292,576,195",
-          "Production": "Syncopy, Warner Bros.",
-          "Website": "N/A"
-      }
-      // More cached movies...
-  }
-
-
+*These files are managed automatically. Avoid manual edits to prevent data corruption.*
