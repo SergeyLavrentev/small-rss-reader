@@ -387,22 +387,35 @@ class RSSReader(QMainWindow):
 
         self.articles_tree = QTreeWidget()
         self.articles_tree.setHeaderLabels(['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director'])
-        self.articles_tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)
+
+        # Set all columns to Interactive to allow manual resizing
+        header = self.articles_tree.header()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+
+        # **Set Default Column Widths**
+        self.articles_tree.setColumnWidth(0, 200)  # Title column
+        self.articles_tree.setColumnWidth(1, 100)  # Date column
+        self.articles_tree.setColumnWidth(2, 80)   # Rating column
+        self.articles_tree.setColumnWidth(3, 100)  # Released column
+        self.articles_tree.setColumnWidth(4, 100)  # Genre column
+        self.articles_tree.setColumnWidth(5, 150)  # Director column
+
         self.articles_tree.setSortingEnabled(True)
         self.articles_tree.header().setSectionsClickable(True)
         self.articles_tree.header().setSortIndicatorShown(True)
         self.articles_tree.itemSelectionChanged.connect(self.display_content)
         self.articles_tree.header().sortIndicatorChanged.connect(self.on_sort_changed)
-        
+
         # **New Connection Added Below**
         self.articles_tree.itemDoubleClicked.connect(self.open_article_url)
-        
+
         articles_layout.addWidget(self.articles_tree)
 
         self.articles_tree.header().setContextMenuPolicy(Qt.CustomContextMenu)
         self.articles_tree.header().customContextMenuRequested.connect(self.show_header_menu)
 
         self.horizontal_splitter.addWidget(self.articles_panel)
+
 
     def init_content_panel(self):
         """Initializes the content panel."""
@@ -605,15 +618,26 @@ class RSSReader(QMainWindow):
         geometry = settings.value('geometry')
         if geometry:
             self.restoreGeometry(geometry)
+            logging.debug("Restored window geometry.")
         windowState = settings.value('windowState')
         if windowState:
             self.restoreState(windowState)
+            logging.debug("Restored window state.")
         splitterState = settings.value('splitterState')
         if splitterState:
             self.main_splitter.restoreState(splitterState)
+            logging.debug("Restored splitter state.")
         headerState = settings.value('articlesTreeHeaderState')
         if headerState:
             self.articles_tree.header().restoreState(headerState)
+            logging.debug("Restored articlesTreeHeaderState.")
+        
+        # Re-apply Interactive Resize Mode After Restoring Header State
+        header = self.articles_tree.header()
+        for i in range(header.count()):
+            header.setSectionResizeMode(i, QHeaderView.Interactive)
+            logging.debug(f"Set column {i} resize mode to Interactive.")
+
 
     def load_api_key_and_refresh_interval(self, settings):
         """Loads the API key and refresh interval."""
@@ -732,6 +756,8 @@ class RSSReader(QMainWindow):
         settings.setValue('articlesTreeHeaderState', self.articles_tree.header().saveState())
         settings.setValue('refresh_interval', self.refresh_interval)
         settings.setValue('group_name_mapping', json.dumps(self.group_name_mapping))
+        logging.debug("Saved geometry and state, including articlesTreeHeaderState.")
+
 
     def save_ui_visibility_settings(self, settings):
         """Saves UI element visibility settings."""
@@ -1157,145 +1183,6 @@ class RSSReader(QMainWindow):
             self.threads.append(thread)
             thread.finished.connect(lambda t=thread: self.remove_thread(t))
             thread.start()
-
-    def populate_articles(self):
-        """Populates the articles tree with the current entries."""
-        self.articles_tree.setSortingEnabled(False)
-        self.articles_tree.clear()
-        self.article_id_to_item = {}  # Reset the mapping
-        current_feed = self.get_current_feed()
-        if current_feed:
-            group_name = self.get_group_name_for_feed(current_feed['url'])
-            group_settings = self.group_settings.get(group_name, {'omdb_enabled': True})
-            omdb_enabled = group_settings.get('omdb_enabled', True)
-        else:
-            omdb_enabled = True  # Default to True if no feed is selected
-
-        for index, entry in enumerate(self.current_entries):
-            title = entry.get('title', 'No Title')
-            date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
-            if date_struct:
-                date_obj = datetime.datetime(*date_struct[:6])
-                date_formatted = date_obj.strftime('%d-%m-%Y')
-            else:
-                date_obj = datetime.datetime.min
-                date_formatted = 'No Date'
-
-            if not omdb_enabled or not self.api_key:
-                rating_str = 'N/A'
-                released_str = ''
-                genre_str = ''
-                director_str = ''
-            else:
-                rating_str = 'Loading...'
-                released_str = ''
-                genre_str = ''
-                director_str = ''
-
-            article_id = self.get_article_id(entry)
-
-            item = ArticleTreeWidgetItem([title, date_formatted, rating_str, released_str, genre_str, director_str])
-            item.setData(1, Qt.UserRole, date_obj)
-            item.setData(2, Qt.UserRole, 0.0)
-            item.setData(3, Qt.UserRole, datetime.datetime.min)
-            item.setData(0, Qt.UserRole + 1, article_id)
-            item.setData(0, Qt.UserRole, entry)
-
-            self.article_id_to_item[article_id] = item
-
-            if article_id not in self.read_articles:
-                item.setIcon(0, self.get_unread_icon())
-            else:
-                item.setIcon(0, QIcon())
-            self.articles_tree.addTopLevelItem(item)
-        self.articles_tree.setSortingEnabled(True)
-        self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
-
-        if omdb_enabled and self.api_key:
-            movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
-            movie_thread.movie_data_fetched.connect(self.update_movie_info)
-            self.threads.append(movie_thread)
-            movie_thread.finished.connect(lambda t=movie_thread: self.remove_thread(t))
-            movie_thread.start()
-        else:
-            logging.info(f"OMDb feature disabled for group '{group_name}' or API key not provided; skipping movie data fetching.")
-
-        # Apply the feed's sort preference
-        if current_feed:
-            sort_column = current_feed.get('sort_column', 1)
-            sort_order = current_feed.get('sort_order', Qt.AscendingOrder)
-            self.articles_tree.sortItems(sort_column, sort_order)
-
-        # Apply column visibility based on the current feed's settings
-        if current_feed and 'visible_columns' in current_feed:
-            for i, visible in enumerate(current_feed['visible_columns']):
-                self.articles_tree.setColumnHidden(i, not visible)
-
-        # Automatically select the first article if available
-        if self.articles_tree.topLevelItemCount() > 0:
-            first_item = self.articles_tree.topLevelItem(0)
-            self.articles_tree.setCurrentItem(first_item)
-
-    def get_current_feed(self):
-        """Returns the currently selected feed data."""
-        selected_items = self.feeds_list.selectedItems()
-        if not selected_items:
-            return None
-        item = selected_items[0]
-        if item.parent() is None:
-            return None  # A group is selected, not a feed
-        url = item.data(0, Qt.UserRole)
-        feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
-        return feed_data
-
-    def remove_thread(self, thread):
-        """Removes a finished thread from the threads list."""
-        if thread in self.threads:
-            self.threads.remove(thread)
-
-    def update_movie_info(self, index, movie_data):
-        """Updates the article item with movie data."""
-        if index < 0 or index >= len(self.current_entries):
-            logging.error(f"update_movie_info called with out-of-range index: {index}. Current entries count: {len(self.current_entries)}.")
-            return  # Safely exit the function to prevent the crash
-        entry = self.current_entries[index]
-        article_id = self.get_article_id(entry)
-        item = self.article_id_to_item.get(article_id)
-        if item:
-            imdb_rating = movie_data.get('imdbrating', 'N/A')  # Corrected key
-            rating_value = self.parse_rating(imdb_rating)
-            item.setData(2, Qt.UserRole, rating_value)
-            item.setText(2, imdb_rating)
-
-            released = movie_data.get('released', '')
-            release_date = self.parse_release_date(released)
-            item.setData(3, Qt.UserRole, release_date)
-            item.setText(3, release_date.strftime('%d %b %Y') if release_date != datetime.datetime.min else '')
-
-            genre = movie_data.get('genre', '')
-            director = movie_data.get('director', '')
-            item.setText(4, genre)
-            item.setText(5, director)
-
-            # Update the entry with the fetched movie data
-            entry['movie_data'] = movie_data
-        else:
-            logging.warning(f"No QTreeWidgetItem found for article ID: {article_id}")
-
-    def parse_rating(self, rating_str):
-        """Parses the IMDb rating string to a float value."""
-        try:
-            return float(rating_str.split('/')[0])
-        except (ValueError, IndexError):
-            return 0.0
-
-    def parse_release_date(self, released_str):
-        """Parses the release date string to a datetime object."""
-        try:
-            return datetime.datetime.strptime(released_str, '%d %b %Y')
-        except (ValueError, TypeError):
-            return datetime.datetime.min
-
     def display_content(self):
         """Displays the content of the selected article."""
         selected_items = self.articles_tree.selectedItems()
@@ -1445,6 +1332,184 @@ class RSSReader(QMainWindow):
             self.read_articles.add(article_id)
             item.setIcon(0, QIcon())
             self.save_read_articles()
+
+    def populate_articles(self):
+        """Populates the articles tree with the current entries."""
+        self.articles_tree.setSortingEnabled(False)
+        self.articles_tree.clear()
+        self.article_id_to_item = {}  # Reset the mapping
+
+        current_feed = self.get_current_feed()
+
+        if current_feed:
+            group_name = self.get_group_name_for_feed(current_feed['url'])
+            group_settings = self.group_settings.get(group_name, {'omdb_enabled': True})
+            omdb_enabled = group_settings.get('omdb_enabled', True)
+
+            # **Update Column Visibility Based on OMDb Setting**
+            if not omdb_enabled:
+                # Show only Title and Date
+                current_feed['visible_columns'] = [True, True, False, False, False, False]
+                self.save_feeds()
+            elif 'visible_columns' not in current_feed:
+                # If visible_columns not set, default to all columns visible
+                current_feed['visible_columns'] = [True] * 6
+                self.save_feeds()
+        else:
+            omdb_enabled = True  # Default to True if no feed is selected
+
+        for index, entry in enumerate(self.current_entries):
+            title = entry.get('title', 'No Title')
+
+            # **Remove Title Truncation (Optional)**
+            # If you still want to truncate titles, you can keep this block.
+            # Otherwise, remove it to display full titles.
+            """
+            # **Truncate Title if Longer Than 50 Characters**
+            if len(title) > 50:
+                truncated_title = title[:50] + '...'
+                full_title = title  # Keep the full title for tooltip
+                title = truncated_title
+            else:
+                full_title = title
+
+            # Set full title as tooltip
+            """
+
+            # **Create the Article Item with Full Title**
+            item = ArticleTreeWidgetItem([title, '', '', '', '', ''])  # Temporarily set empty strings
+            item.setToolTip(0, title)  # Set full title as tooltip
+
+            # **Set Date**
+            date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
+            if date_struct:
+                date_obj = datetime.datetime(*date_struct[:6])
+                date_formatted = date_obj.strftime('%d-%m-%Y')
+            else:
+                date_obj = datetime.datetime.min
+                date_formatted = 'No Date'
+            item.setText(1, date_formatted)
+            item.setData(1, Qt.UserRole, date_obj)
+
+            # **Set Default Values for Other Columns**
+            if not omdb_enabled or not self.api_key:
+                rating_str = 'N/A'
+                released_str = ''
+                genre_str = ''
+                director_str = ''
+            else:
+                rating_str = 'Loading...'
+                released_str = ''
+                genre_str = ''
+                director_str = ''
+
+            item.setText(2, rating_str)
+            item.setText(3, released_str)
+            item.setText(4, genre_str)
+            item.setText(5, director_str)
+
+            # **Store Article Data**
+            article_id = self.get_article_id(entry)
+            item.setData(0, Qt.UserRole + 1, article_id)
+            item.setData(0, Qt.UserRole, entry)
+
+            self.article_id_to_item[article_id] = item
+
+            # **Set Unread Icon if Applicable**
+            if article_id not in self.read_articles:
+                item.setIcon(0, self.get_unread_icon())
+            else:
+                item.setIcon(0, QIcon())
+
+            self.articles_tree.addTopLevelItem(item)
+
+        self.articles_tree.setSortingEnabled(True)
+        self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
+
+        if omdb_enabled and self.api_key:
+            movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
+            movie_thread.movie_data_fetched.connect(self.update_movie_info)
+            self.threads.append(movie_thread)
+            movie_thread.finished.connect(lambda t=movie_thread: self.remove_thread(t))
+            movie_thread.start()
+        else:
+            logging.info(f"OMDb feature disabled for group '{group_name}' or API key not provided; skipping movie data fetching.")
+
+        # **Apply the Feed's Sort Preference**
+        if current_feed:
+            sort_column = current_feed.get('sort_column', 1)
+            sort_order = current_feed.get('sort_order', Qt.AscendingOrder)
+            self.articles_tree.sortItems(sort_column, sort_order)
+
+        # **Apply Column Visibility Based on the Current Feed's Settings**
+        if current_feed and 'visible_columns' in current_feed:
+            for i, visible in enumerate(current_feed['visible_columns']):
+                self.articles_tree.setColumnHidden(i, not visible)
+
+        # **Automatically Select the First Article if Available**
+        if self.articles_tree.topLevelItemCount() > 0:
+            first_item = self.articles_tree.topLevelItem(0)
+            self.articles_tree.setCurrentItem(first_item)
+
+    def get_current_feed(self):
+        """Returns the currently selected feed data."""
+        selected_items = self.feeds_list.selectedItems()
+        if not selected_items:
+            return None
+        item = selected_items[0]
+        if item.parent() is None:
+            return None  # A group is selected, not a feed
+        url = item.data(0, Qt.UserRole)
+        feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
+        return feed_data
+
+    def remove_thread(self, thread):
+        """Removes a finished thread from the threads list."""
+        if thread in self.threads:
+            self.threads.remove(thread)
+
+    def update_movie_info(self, index, movie_data):
+        """Updates the article item with movie data."""
+        if index < 0 or index >= len(self.current_entries):
+            logging.error(f"update_movie_info called with out-of-range index: {index}. Current entries count: {len(self.current_entries)}.")
+            return  # Safely exit the function to prevent the crash
+        entry = self.current_entries[index]
+        article_id = self.get_article_id(entry)
+        item = self.article_id_to_item.get(article_id)
+        if item:
+            imdb_rating = movie_data.get('imdbrating', 'N/A')  # Corrected key
+            rating_value = self.parse_rating(imdb_rating)
+            item.setData(2, Qt.UserRole, rating_value)
+            item.setText(2, imdb_rating)
+
+            released = movie_data.get('released', '')
+            release_date = self.parse_release_date(released)
+            item.setData(3, Qt.UserRole, release_date)
+            item.setText(3, release_date.strftime('%d %b %Y') if release_date != datetime.datetime.min else '')
+
+            genre = movie_data.get('genre', '')
+            director = movie_data.get('director', '')
+            item.setText(4, genre)
+            item.setText(5, director)
+
+            # Update the entry with the fetched movie data
+            entry['movie_data'] = movie_data
+        else:
+            logging.warning(f"No QTreeWidgetItem found for article ID: {article_id}")
+
+    def parse_rating(self, rating_str):
+        """Parses the IMDb rating string to a float value."""
+        try:
+            return float(rating_str.split('/')[0])
+        except (ValueError, IndexError):
+            return 0.0
+
+    def parse_release_date(self, released_str):
+        """Parses the release date string to a datetime object."""
+        try:
+            return datetime.datetime.strptime(released_str, '%d %b %Y')
+        except (ValueError, TypeError):
+            return datetime.datetime.min
 
     def get_unread_icon(self):
         """Returns the icon used for unread articles."""
@@ -1612,6 +1677,10 @@ class RSSReader(QMainWindow):
         if not current_feed:
             return
 
+        group_name = self.get_group_name_for_feed(current_feed['url'])
+        group_settings = self.group_settings.get(group_name, {'omdb_enabled': True})
+        omdb_enabled = group_settings.get('omdb_enabled', True)
+
         for i in range(header.count()):
             column_name = header.model().headerData(i, Qt.Horizontal)
             action = QAction(column_name, menu)
@@ -1619,6 +1688,11 @@ class RSSReader(QMainWindow):
             visible = current_feed['visible_columns'][i] if 'visible_columns' in current_feed and i < len(current_feed['visible_columns']) else True
             action.setChecked(visible)
             action.setData(i)
+
+            if not omdb_enabled and i > 1:
+                # Disable toggling for columns beyond Title and Date
+                action.setEnabled(False)
+
             action.toggled.connect(self.toggle_column_visibility)
             menu.addAction(action)
         menu.exec_(header.mapToGlobal(position))
