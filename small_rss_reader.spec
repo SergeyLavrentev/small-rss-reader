@@ -1,12 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+datas = [
+    ('icons/splash.png', 'icons'),
+    ('icons/rss_icon.png', 'icons'),
+    ('icons/rss_tray_icon.png', 'icons'),
+    ('icons/rss_icon.icns', 'icons'),  # Ensure the .icns file is included
+]
 
 a = Analysis(
-    ['mini_rss_reader.py'],
+    ['small_rss_reader.py'],
     pathex=[],
     binaries=[],
-    datas=[('icons/splash.png', 'icons'), ('icons/rss_icon.png', 'icons')],
-    hiddenimports=['PyQt5.QtWebEngineWidgets'],
+    datas=datas,
+    hiddenimports=['PyQt5.QtWebEngineWidgets','PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -14,6 +20,7 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -21,7 +28,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Small RSS Reader',
+    name='SmallRSSReader',  # Renamed to remove spaces
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -34,6 +41,7 @@ exe = EXE(
     entitlements_file=None,
     icon=['icons/rss_icon.icns'],
 )
+
 coll = COLLECT(
     exe,
     a.binaries,
@@ -41,11 +49,12 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='Small RSS Reader',
+    name='SmallRSSReader',
 )
+
 app = BUNDLE(
     coll,
-    name='Small RSS Reader.app',
+    name='SmallRSSReader.app',  # Changed to remove spaces
     icon='icons/rss_icon.icns',
-    bundle_identifier=None,
+    bundle_identifier='com.rocker.SmallRSSReader',  # Set correctly
 )

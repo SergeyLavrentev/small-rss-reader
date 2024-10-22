@@ -51,7 +51,7 @@ Stay updated with native macOS notifications for new articles.
 
 1. **Run the application** in the terminal:
    ```bash
-   python mini_rss_reader.py
+   python small_rss_reader.py
 2. Run the application via Spotlight:
    
 ## Dependencies

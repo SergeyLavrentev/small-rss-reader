@@ -39,8 +39,15 @@ def resource_path(relative_path):
         # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except AttributeError:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+        # When not frozen, use the directory of the script
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    full_path = os.path.join(base_path, relative_path)
+    if not os.path.exists(full_path):
+        logging.error(f"Resource not found: {full_path}")
+        QMessageBox.critical(None, "Resource Error", f"Required resource not found: {full_path}")
+        sys.exit(1)
+    return full_path
+
 
 def get_user_data_path(filename):
     """Get path to user data directory for the application."""
@@ -395,31 +402,6 @@ class RSSReader(QMainWindow):
                 execute='open'  # Opens the link when the notification is clicked
             )
             logging.info(f"Sent notification for new article: {entry.get('title', 'No Title')}")
-
-    def init_tray_icon(self):
-        """Initializes the system tray icon."""
-        self.tray_icon = QSystemTrayIcon(self)
-        tray_icon_pixmap = QPixmap(resource_path('icons/rss_tray_icon.png'))  # Ensure you have this icon
-        self.tray_icon.setIcon(QIcon(tray_icon_pixmap))
-        self.tray_icon.setToolTip("Small RSS Reader")
-
-        # Create tray menu
-        tray_menu = QMenu()
-
-        show_action = QAction("Show", self)
-        show_action.triggered.connect(self.show)
-        tray_menu.addAction(show_action)
-
-        refresh_action = QAction("Refresh All Feeds", self)
-        refresh_action.triggered.connect(self.force_refresh_all_feeds)
-        tray_menu.addAction(refresh_action)
-
-        exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(self.close)
-        tray_menu.addAction(exit_action)
-
-        self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.show()
 
     def init_ui(self):
         """Initializes the main UI components."""
@@ -919,7 +901,6 @@ class RSSReader(QMainWindow):
                 QSystemTrayIcon.Information,
                 2000
             )
-
 
     def init_tray_icon(self):
         """Initializes the system tray icon."""
@@ -1836,7 +1817,6 @@ class RSSReader(QMainWindow):
                         article_id = self.get_article_id(entry)
                         if article_id not in self.read_articles:
                             new_entries.append(entry)
-                            self.read_articles.add(article_id)
                             self.send_notification(feed_data['title'], entry)
                     feed_data['entries'] = feed.entries
                     break
@@ -1858,7 +1838,6 @@ class RSSReader(QMainWindow):
                         article_id = self.get_article_id(entry)
                         if article_id not in self.read_articles:
                             new_entries.append(entry)
-                            self.read_articles.add(article_id)
                             self.send_notification(feed_data['title'], entry)
                     feed_data['entries'] = feed.entries
                     break
@@ -1980,6 +1959,13 @@ def main():
     parser = argparse.ArgumentParser(description="Small RSS Reader")
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     args = parser.parse_args()
+
+    # Set the working directory to the script's directory
+    if getattr(sys, 'frozen', False):
+        application_path = os.path.dirname(sys.executable)
+    else:
+        application_path = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(application_path)
 
     # Configure logging based on the debug flag
     logging_level = logging.DEBUG if args.debug else logging.INFO
