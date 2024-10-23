@@ -589,12 +589,26 @@ class RSSReader(QMainWindow):
         self.feeds_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.feeds_list.customContextMenuRequested.connect(self.feeds_context_menu)
         self.feeds_list.setDragDropMode(QAbstractItemView.InternalMove)
+
+        # **Allow Group Items to be Selectable**
+        self.feeds_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.feeds_list.itemClicked.connect(self.on_feed_item_clicked)
+
         feeds_layout.addWidget(self.feeds_list)
 
         self.feeds_panel.setMinimumWidth(200)
         self.feeds_panel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
 
         self.horizontal_splitter.addWidget(self.feeds_panel)
+
+    def on_feed_item_clicked(self, item, column):
+        """Handles the click event on feed or group items."""
+        if item.parent() is None:
+            # Group item clicked
+            self.handle_group_selection(item)
+        else:
+            # Feed item clicked
+            self.handle_feed_selection(item)
 
     def init_articles_panel(self):
         """Initializes the articles panel."""
@@ -1228,6 +1242,24 @@ class RSSReader(QMainWindow):
 
         self.feeds_list.expandItem(existing_group)
 
+    def handle_group_selection(self, group_item):
+        """Handles selection of a group item."""
+        self.feeds_list.setCurrentItem(group_item)
+        self.statusBar().showMessage(f"Selected group: {group_item.text(0)}")
+        logging.info(f"Selected group: {group_item.text(0)}")
+
+        # Select the first feed in the group
+        if group_item.childCount() > 0:
+            first_feed_item = group_item.child(0)
+            self.feeds_list.setCurrentItem(first_feed_item)
+            self.load_articles()
+            logging.debug(f"Auto-selected first feed in group '{group_item.text(0)}'")
+
+    def handle_feed_selection(self, feed_item):
+        """Handles selection of a feed item."""
+        self.feeds_list.setCurrentItem(feed_item)
+        self.load_articles()
+        logging.info(f"Selected feed: {feed_item.text(0)}")
 
     def find_or_create_group(self, group_name, domain):
         """Finds or creates a group in the feeds list with bold font."""
@@ -1517,13 +1549,15 @@ class RSSReader(QMainWindow):
         self.save_feeds()
 
     def load_articles(self):
-        """Loads the articles for the selected feed."""
+        """Loads the articles for the selected feed or handles group selection."""
         selected_items = self.feeds_list.selectedItems()
         if not selected_items:
             return
         item = selected_items[0]
         if item.parent() is None:
-            return  # Do not load articles if a group is selected
+            # Group selected: auto-select first feed in the group
+            self.handle_group_selection(item)
+            return
         url = item.data(0, Qt.UserRole)
         feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
         if feed_data and 'entries' in feed_data and feed_data['entries']:
