@@ -32,6 +32,9 @@ OPTIONS = {
         'CFBundleIdentifier': 'com.rocker.SmallRSSReader',
         'CFBundleIconFile': 'rss_icon.icns',
         'LSUIElement': True,
+        'CFBundleVersion': '4.1.0',
+        'LSUIElement': False,  # Set to False so that the app appears in the Dock
+        'NSPrincipalClass': 'NSApplication'
     },
     'verbose': True,
     'compressed': True

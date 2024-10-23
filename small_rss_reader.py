@@ -10,6 +10,8 @@ import unicodedata
 import hashlib
 import argparse
 import pync
+import ctypes
+
 from urllib.parse import urlparse
 from omdbapi.movie_search import GetMovie
 from pync import Notifier
@@ -22,9 +24,11 @@ from PyQt5.QtWidgets import (
     QAbstractItemView, QInputDialog, QDialogButtonBox, QCheckBox,
     QSplashScreen
 )
+from PyQt5.QtGui import QCursor
+
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import (
-    Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize, QEvent
+    Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize, QEvent, QObject, QRunnable, QThreadPool, pyqtSlot
 )
 from PyQt5.QtGui import (
     QDesktopServices, QFont, QIcon, QPixmap, QPainter, QBrush, QColor, QTransform
@@ -219,6 +223,10 @@ class AddFeedDialog(QDialog):
     def get_inputs(self):
         return self.name_input.text().strip(), self.url_input.text().strip()
 
+    def accept(self):
+        """Override accept to save settings before closing the dialog."""
+        super().accept()
+
 class SettingsDialog(QDialog):
     """Dialog for application settings."""
 
@@ -282,7 +290,33 @@ class SettingsDialog(QDialog):
 
         self.parent.update_refresh_timer()
         self.update_api_key_notice()
-        self.accept()
+
+    def accept(self):
+        """Override accept to save settings before closing the dialog."""
+        self.save_settings()
+        super().accept()
+
+### Worker Classes for QThreadPool ###
+
+class Worker(QObject):
+    feed_fetched = pyqtSignal(str, object)  # Emits (url, feed)
+
+class FetchFeedRunnable(QRunnable):
+    def __init__(self, url, worker):
+        super().__init__()
+        self.url = url
+        self.worker = worker
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            feed = feedparser.parse(self.url)
+            if feed.bozo and feed.bozo_exception:
+                raise feed.bozo_exception
+            self.worker.feed_fetched.emit(self.url, feed)
+        except Exception as e:
+            logging.error(f"Failed to fetch feed {self.url}: {e}")
+            self.worker.feed_fetched.emit(self.url, None)
 
 ### Main Application Class ###
 
@@ -328,11 +362,16 @@ class RSSReader(QMainWindow):
         self.force_refresh_icon_pixmap = None  # To store the icon pixmap
 
         # **Font Size Variables**
-        self.default_font_size = 16  # Default font size
+        self.default_font_size = 14  # Default font size
+        self.default_font = QFont("Arial", self.default_font_size)
         settings = QSettings('rocker', 'SmallRSSReader')
         self.current_font_size = settings.value('font_size', self.default_font_size, type=int)
         # **Initialize System Tray Icon**
         self.init_tray_icon()
+
+        # **Initialize Thread Pool**
+        self.thread_pool = QThreadPool.globalInstance()
+        self.thread_pool.setMaxThreadCount(4)  # Limit to 4 concurrent threads
 
     def quit_app(self):
         """Handles the quitting of the application."""
@@ -346,7 +385,7 @@ class RSSReader(QMainWindow):
 
     def apply_font_size(self):
         """Applies the current font size to relevant widgets."""
-        font = QFont()
+        font = self.default_font
         font.setPointSize(self.current_font_size)
         self.articles_tree.setFont(font)
         self.content_view.setFont(font)
@@ -457,7 +496,7 @@ class RSSReader(QMainWindow):
         feeds_layout.setSpacing(2)
 
         feeds_label = QLabel("RSS Feeds")
-        feeds_label.setFont(QFont("Arial", 12, QFont.Bold))
+        feeds_label.setFont(QFont("Arial", 12))
         feeds_layout.addWidget(feeds_label)
 
         self.feeds_list = FeedsTreeWidget()
@@ -569,7 +608,7 @@ class RSSReader(QMainWindow):
     def open_article_url(self, item, column):
         """
         Opens the article's URL in the default web browser when an article is double-clicked.
-        
+
         Parameters:
             item (QTreeWidgetItem): The article item that was double-clicked.
             column (int): The column that was double-clicked.
@@ -579,19 +618,19 @@ class RSSReader(QMainWindow):
         if not entry:
             QMessageBox.warning(self, "No Entry Data", "No data available for the selected article.")
             return
-        
+
         # Get the link from the entry
         url = entry.get('link', '')
         if not url:
             QMessageBox.warning(self, "No URL", "No URL found for the selected article.")
             return
-        
+
         # Validate the URL
         parsed_url = urlparse(url)
         if not parsed_url.scheme.startswith('http'):
             QMessageBox.warning(self, "Invalid URL", "The URL is invalid or unsupported.")
             return
-        
+
         # Open the URL in the default web browser
         QDesktopServices.openUrl(QUrl(url))
 
@@ -913,7 +952,7 @@ class RSSReader(QMainWindow):
         tray_menu = QMenu()
 
         show_action = QAction("Show", self)
-        show_action.triggered.connect(self.show)
+        show_action.triggered.connect(self.show_window)  # Connect to show_window method
         tray_menu.addAction(show_action)
 
         refresh_action = QAction("Refresh All Feeds", self)
@@ -927,16 +966,27 @@ class RSSReader(QMainWindow):
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.show()
 
-        # Restore window on double-click
+        # Restore window on single left-click, differentiate between left and right-click
         self.tray_icon.activated.connect(self.on_tray_icon_activated)
 
-
     def on_tray_icon_activated(self, reason):
-        """Handles tray icon activation (e.g., double-click)."""
-        if reason == QSystemTrayIcon.DoubleClick:
-            self.showNormal()
-            self.raise_()
-            self.activateWindow()
+        """Handles tray icon activation (e.g., single or double-click)."""
+        if reason == QSystemTrayIcon.Trigger:
+             # Left-click: Show or raise the application window, but do not show the context menu
+            if not self.tray_icon.isVisible():
+                self.show_window()
+        elif reason == QSystemTrayIcon.Context:
+            # Right-click: Show the context menu
+            #self.tray_icon.contextMenu().popup(QCursor.pos())
+            pass
+
+    def show_window(self):
+        """Shows and raises the application window."""
+        if self.isHidden() or not self.isVisible():
+            self.showNormal()  # Show the window normally if it's hidden
+        self.raise_()  # Bring the window to the front
+        self.activateWindow()  # Ensure it gets focus
+        self.setWindowState(self.windowState() & ~Qt.WindowMinimized)  # Unminimize if minimized
 
     def save_geometry_and_state(self, settings):
         """Saves the window geometry and state."""
@@ -947,7 +997,6 @@ class RSSReader(QMainWindow):
         settings.setValue('refresh_interval', self.refresh_interval)
         settings.setValue('group_name_mapping', json.dumps(self.group_name_mapping))
         logging.debug("Saved geometry and state, including articlesTreeHeaderState.")
-
 
     def save_ui_visibility_settings(self, settings):
         """Saves UI element visibility settings."""
@@ -1524,7 +1573,7 @@ class RSSReader(QMainWindow):
         article_id = item.data(0, Qt.UserRole + 1)
         if article_id not in self.read_articles:
             self.read_articles.add(article_id)
-            item.setIcon(0, QIcon())
+            item.setIcon(0, self.get_unread_icon())
             self.save_read_articles()
 
     def populate_articles(self):
@@ -1554,21 +1603,6 @@ class RSSReader(QMainWindow):
 
         for index, entry in enumerate(self.current_entries):
             title = entry.get('title', 'No Title')
-
-            # **Remove Title Truncation (Optional)**
-            # If you still want to truncate titles, you can keep this block.
-            # Otherwise, remove it to display full titles.
-            """
-            # **Truncate Title if Longer Than 50 Characters**
-            if len(title) > 50:
-                truncated_title = title[:50] + '...'
-                full_title = title  # Keep the full title for tooltip
-                title = truncated_title
-            else:
-                full_title = title
-
-            # Set full title as tooltip
-            """
 
             # **Create the Article Item with Full Title**
             item = ArticleTreeWidgetItem([title, '', '', '', '', ''])  # Temporarily set empty strings
@@ -1644,7 +1678,7 @@ class RSSReader(QMainWindow):
         if self.articles_tree.topLevelItemCount() > 0:
             first_item = self.articles_tree.topLevelItem(0)
             self.articles_tree.setCurrentItem(first_item)
-        
+
         self.apply_font_size()
         # Automatically Select the First Article if Available
         if self.articles_tree.topLevelItemCount() > 0:
@@ -1677,18 +1711,18 @@ class RSSReader(QMainWindow):
         article_id = self.get_article_id(entry)
         item = self.article_id_to_item.get(article_id)
         if item:
-            imdb_rating = movie_data.get('imdbrating', 'N/A')  # Corrected key
+            imdb_rating = movie_data.get('imdbRating', 'N/A')  # Corrected key
             rating_value = self.parse_rating(imdb_rating)
             item.setData(2, Qt.UserRole, rating_value)
             item.setText(2, imdb_rating)
 
-            released = movie_data.get('released', '')
+            released = movie_data.get('Released', '')
             release_date = self.parse_release_date(released)
             item.setData(3, Qt.UserRole, release_date)
             item.setText(3, release_date.strftime('%d %b %Y') if release_date != datetime.datetime.min else '')
 
-            genre = movie_data.get('genre', '')
-            director = movie_data.get('director', '')
+            genre = movie_data.get('Genre', '')
+            director = movie_data.get('Director', '')
             item.setText(4, genre)
             item.setText(5, director)
 
@@ -1785,21 +1819,39 @@ class RSSReader(QMainWindow):
         self.active_feed_threads = len(self.feeds)
         logging.info("Starting force refresh of all feeds.")
 
+        self.feed_fetch_workers = []  # Keep references to Worker instances
+
         for feed_data in self.feeds:
             url = feed_data['url']
-            thread = FetchFeedThread(url)
-            thread.feed_fetched.connect(self.on_feed_fetched_force_refresh)
-            self.threads.append(thread)
-            thread.finished.connect(lambda t=thread: self.on_feed_thread_finished(t))
-            thread.start()
+            worker = Worker()
+            worker.feed_fetched.connect(self.on_feed_fetched_force_refresh)
+            runnable = FetchFeedRunnable(url, worker)
+            self.feed_fetch_workers.append(worker)  # Prevent garbage collection
+            self.thread_pool.start(runnable)
 
-    def on_feed_thread_finished(self, thread):
-        """Called when a feed fetching thread has finished."""
-        if thread in self.threads:
-            self.threads.remove(thread)
+    def on_feed_fetched_force_refresh(self, url, feed):
+        """Callback when a feed is forcefully refreshed."""
+        if feed is not None:
+            for feed_data in self.feeds:
+                if feed_data['url'] == url:
+                    new_entries = []
+                    for entry in feed.entries:
+                        article_id = self.get_article_id(entry)
+                        if article_id not in self.read_articles:
+                            new_entries.append(entry)
+                            self.send_notification(feed_data['title'], entry)
+                    feed_data['entries'] = feed.entries
+                    break
+        else:
+            logging.warning(f"Failed to fetch feed during force refresh: {url}")
+
+        current_feed_item = self.feeds_list.currentItem()
+        if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
+            self.on_feed_fetched(url, feed)
+        self.save_read_articles()
 
         self.active_feed_threads -= 1
-        logging.debug(f"Feed thread finished. Remaining threads: {self.active_feed_threads}")
+        logging.debug(f"Feed fetched: {url}. Remaining: {self.active_feed_threads}")
 
         if self.active_feed_threads == 0:
             self.is_refreshing = False  # Reset the flag
@@ -1827,27 +1879,6 @@ class RSSReader(QMainWindow):
             logging.info(f"Feed fetched: {url} with {len(new_entries)} new articles.")
         else:
             logging.warning(f"Failed to fetch feed: {url}")
-
-    def on_feed_fetched_force_refresh(self, url, feed):
-        """Callback when a feed is forcefully refreshed."""
-        if feed is not None:
-            for feed_data in self.feeds:
-                if feed_data['url'] == url:
-                    new_entries = []
-                    for entry in feed.entries:
-                        article_id = self.get_article_id(entry)
-                        if article_id not in self.read_articles:
-                            new_entries.append(entry)
-                            self.send_notification(feed_data['title'], entry)
-                    feed_data['entries'] = feed.entries
-                    break
-        else:
-            logging.warning(f"Failed to fetch feed during force refresh: {url}")
-        current_feed_item = self.feeds_list.currentItem()
-        if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
-            self.on_feed_fetched(url, feed)
-        self.save_read_articles()
-
 
     def import_feeds(self):
         """Imports feeds from a JSON file."""
@@ -1986,7 +2017,12 @@ def main():
     app.setApplicationDisplayName("Small RSS Reader")
     # Set the global application icon
     app.setWindowIcon(QIcon(resource_path('icons/rss_icon.png')))
-    
+    # This is a step to ensure your application behaves more like a regular windowed application on macOS.
+    app.setAttribute(Qt.AA_DontShowIconsInMenus, False)
+    app.setAttribute(Qt.AA_UseHighDpiPixmaps)
+    app.setQuitOnLastWindowClosed(True)
+
+
     # Create and show the splash screen
     splash_pix = QPixmap(resource_path('icons/splash.png'))
     splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
@@ -1998,6 +2034,8 @@ def main():
     # Initialize the main window
     reader = RSSReader()
     reader.show()
+    reader.raise_()
+    reader.activateWindow()  # Ensure that it gets focus
 
     # Update splash screen message
     splash.showMessage("Loading settings...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
