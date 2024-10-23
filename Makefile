@@ -25,6 +25,7 @@ build:
 clean:
 	rm -rf $(BUILD_DIR)/
 	rm -rf $(DIST_DIR)/
+	rm -fr .eggs
 
 # Run the application directly using Python (for development/testing)
 run:
