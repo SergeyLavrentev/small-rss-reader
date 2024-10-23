@@ -2,7 +2,7 @@
 
 A minimalistic RSS Reader application built with Python and PyQt5. This application allows you to subscribe to RSS feeds, view and search articles, and optionally fetch movie data from the OMDb API.
 
-<img width="512" alt="Screenshot at Oct 13 00-26-26" src="https://github.com/user-attachments/assets/eaa86896-86ed-4502-9da3-91eda418c076">
+<img width="1070" alt="SCR-20241023-pbzy" src="https://github.com/user-attachments/assets/a994e306-210b-447f-8702-698779b9bc83">
 
 ## Features
 
@@ -38,10 +38,8 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
    make clean build install
 
 ## Native macOS Notifications
-
 Stay updated with native macOS notifications for new articles.
-
-2. Please enable notifications for the App in System Preferences > Security & Privacy > Privacy > Notifications.
+Please enable notifications for the App in System Preferences > Security & Privacy > Privacy > Notifications.
 
 ---
 
@@ -57,7 +55,6 @@ Stay updated with native macOS notifications for new articles.
 - **PyQt5**: Core GUI components.
 - **PyQtWebEngine**: Display web content within the app.
 - **feedparser**: Parse RSS feed data.
-- **pync**: Send native macOS notifications.
 - **omdbapi**: Fetch movie data from the OMDb API.
 
 ## OMDb API Key (Optional)
@@ -76,7 +73,6 @@ To enable the movie data fetching feature, you need to obtain an API key from [O
   - Click **Save**.
 
 **Note**: If no API key is provided, the application will function without fetching movie data, and ratings will be displayed as "N/A".
-
 
 ## Data Management
 
