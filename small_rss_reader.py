@@ -71,18 +71,20 @@ def get_user_data_path(filename):
 
 class FetchFeedThread(QThread):
     """Thread for fetching RSS feed data asynchronously."""
-    feed_fetched = pyqtSignal(object, object)
+    feed_fetched = pyqtSignal(object, object)  # Emits (url, feed)
 
     def __init__(self, url):
         super().__init__()
-        self.url = url
+        self.url = url  # Ensure self.url is defined
 
     def run(self):
+        logging.debug(f"Fetching feed: {self.url}")
         try:
             feed = feedparser.parse(self.url)
             if feed.bozo and feed.bozo_exception:
                 raise feed.bozo_exception
             self.feed_fetched.emit(self.url, feed)
+            logging.debug(f"Successfully fetched feed: {self.url}")
         except Exception as e:
             logging.error(f"Failed to fetch feed {self.url}: {e}")
             self.feed_fetched.emit(self.url, None)
@@ -327,6 +329,9 @@ class RSSReader(QMainWindow):
     REFRESH_SELECTED_ICON = QStyle.SP_BrowserReload
     REFRESH_ALL_ICON = QStyle.SP_DialogResetButton  # Use a different standard icon
 
+    # Define a new signal for notifications
+    notify_signal = pyqtSignal(str, str, str, str)  # title, subtitle, message, link
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Small RSS Reader")
@@ -340,6 +345,10 @@ class RSSReader(QMainWindow):
         # Start refresh after event loop starts to prevent blocking UI
         QTimer.singleShot(0, self.force_refresh_all_feeds)
         self.select_first_feed()
+        self.active_feed_threads = 0 
+
+        # Connect the notification signal to the slot
+        self.notify_signal.connect(self.show_notification)
 
     def initialize_variables(self):
         """Initializes all variables."""
@@ -371,7 +380,7 @@ class RSSReader(QMainWindow):
 
         # **Initialize Thread Pool**
         self.thread_pool = QThreadPool.globalInstance()
-        self.thread_pool.setMaxThreadCount(4)  # Limit to 4 concurrent threads
+        self.thread_pool.setMaxThreadCount(8)  # Limit to 8 concurrent threads
 
     def quit_app(self):
         """Handles the quitting of the application."""
@@ -420,8 +429,19 @@ class RSSReader(QMainWindow):
         self.save_font_size()
         logging.info(f"Reset font size to default ({self.default_font_size}).")
 
+    def show_notification(self, title, subtitle, message, link):
+        """Slot to display macOS notifications using pync."""
+        logging.debug(f"Displaying notification: Title={title}, Subtitle={subtitle}, Message={message}, Link={link}")
+        Notifier.notify(
+            message,
+            title=title,
+            subtitle=subtitle,
+            open=link,
+            execute='open'  # Opens the link when the notification is clicked
+        )
+
     def send_notification(self, feed_title, entry):
-        """Sends a macOS notification for a new article."""
+        """Emit a signal to show a macOS notification for a new article."""
         group_name = self.get_group_name_for_feed(entry.get('link', ''))
         group_settings = self.group_settings.get(group_name, {'notifications_enabled': True})
         notifications_enabled = group_settings.get('notifications_enabled', True)
@@ -433,13 +453,10 @@ class RSSReader(QMainWindow):
         if global_notifications and notifications_enabled:
             title = f"New Article in {feed_title}"
             subtitle = entry.get('title', 'No Title')
-            Notifier.notify(
-                entry.get('summary', 'No summary available.'),
-                title=title,
-                subtitle=subtitle,
-                open=entry.get('link', ''),
-                execute='open'  # Opens the link when the notification is clicked
-            )
+            message = entry.get('summary', 'No summary available.')
+            link = entry.get('link', '')
+            # Emit the notification signal
+            self.notify_signal.emit(title, subtitle, message, link)
             logging.info(f"Sent notification for new article: {entry.get('title', 'No Title')}")
 
     def init_ui(self):
@@ -1701,6 +1718,10 @@ class RSSReader(QMainWindow):
         """Removes a finished thread from the threads list."""
         if thread in self.threads:
             self.threads.remove(thread)
+            if hasattr(thread, 'url'):
+                logging.debug(f"Removed thread for feed: {thread.url}")
+            else:
+                logging.debug("Removed a thread without a URL attribute.")
 
     def update_movie_info(self, index, movie_data):
         """Updates the article item with movie data."""
@@ -1819,45 +1840,14 @@ class RSSReader(QMainWindow):
         self.active_feed_threads = len(self.feeds)
         logging.info("Starting force refresh of all feeds.")
 
-        self.feed_fetch_workers = []  # Keep references to Worker instances
-
         for feed_data in self.feeds:
             url = feed_data['url']
-            worker = Worker()
-            worker.feed_fetched.connect(self.on_feed_fetched_force_refresh)
-            runnable = FetchFeedRunnable(url, worker)
-            self.feed_fetch_workers.append(worker)  # Prevent garbage collection
-            self.thread_pool.start(runnable)
-
-    def on_feed_fetched_force_refresh(self, url, feed):
-        """Callback when a feed is forcefully refreshed."""
-        if feed is not None:
-            for feed_data in self.feeds:
-                if feed_data['url'] == url:
-                    new_entries = []
-                    for entry in feed.entries:
-                        article_id = self.get_article_id(entry)
-                        if article_id not in self.read_articles:
-                            new_entries.append(entry)
-                            self.send_notification(feed_data['title'], entry)
-                    feed_data['entries'] = feed.entries
-                    break
-        else:
-            logging.warning(f"Failed to fetch feed during force refresh: {url}")
-
-        current_feed_item = self.feeds_list.currentItem()
-        if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
-            self.on_feed_fetched(url, feed)
-        self.save_read_articles()
-
-        self.active_feed_threads -= 1
-        logging.debug(f"Feed fetched: {url}. Remaining: {self.active_feed_threads}")
-
-        if self.active_feed_threads == 0:
-            self.is_refreshing = False  # Reset the flag
-            self.icon_rotation_timer.stop()
-            self.force_refresh_action.setIcon(QIcon(self.force_refresh_icon_pixmap))
-            logging.info("Completed force refresh of all feeds.")
+            thread = FetchFeedThread(url)
+            thread.feed_fetched.connect(self.on_feed_fetched_force_refresh)
+            self.threads.append(thread)
+            thread.finished.connect(lambda t=thread: self.remove_thread(t))
+            thread.start()
+            logging.debug(f"Started thread for feed: {url}")
 
     def on_feed_fetched(self, url, feed):
         """Handles the feed fetched signal, updating the feed with new data and sending notifications."""
@@ -1865,12 +1855,13 @@ class RSSReader(QMainWindow):
             for feed_data in self.feeds:
                 if feed_data['url'] == url:
                     new_entries = []
+                    existing_ids = {self.get_article_id(e) for e in feed_data.get('entries', [])}
                     for entry in feed.entries:
                         article_id = self.get_article_id(entry)
-                        if article_id not in self.read_articles:
+                        if article_id not in existing_ids:
+                            feed_data['entries'].append(entry)
                             new_entries.append(entry)
                             self.send_notification(feed_data['title'], entry)
-                    feed_data['entries'] = feed.entries
                     break
             current_feed_item = self.feeds_list.currentItem()
             if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
@@ -1879,6 +1870,35 @@ class RSSReader(QMainWindow):
             logging.info(f"Feed fetched: {url} with {len(new_entries)} new articles.")
         else:
             logging.warning(f"Failed to fetch feed: {url}")
+
+    def on_feed_fetched_force_refresh(self, url, feed):
+        """Callback when a feed is forcefully refreshed."""
+        logging.debug(f"on_feed_fetched_force_refresh called for feed: {url}")
+        if feed is not None:
+            for feed_data in self.feeds:
+                if feed_data['url'] == url:
+                    new_entries = []
+                    existing_ids = {self.get_article_id(e) for e in feed_data.get('entries', [])}
+                    for entry in feed.entries:
+                        article_id = self.get_article_id(entry)
+                        if article_id not in existing_ids:
+                            feed_data['entries'].append(entry)
+                            new_entries.append(entry)
+                            self.send_notification(feed_data['title'], entry)
+                    break
+        else:
+            logging.warning(f"Failed to fetch feed during force refresh: {url}")
+        
+        # Decrement active_feed_threads
+        self.active_feed_threads -= 1
+        logging.debug(f"Feed thread finished. Remaining threads: {self.active_feed_threads}")
+        
+        # Check if all feeds have been refreshed
+        if self.active_feed_threads == 0:
+            self.is_refreshing = False  # Reset the flag
+            self.icon_rotation_timer.stop()
+            self.force_refresh_action.setIcon(QIcon(self.force_refresh_icon_pixmap))
+            logging.info("Completed force refresh of all feeds.")
 
     def import_feeds(self):
         """Imports feeds from a JSON file."""

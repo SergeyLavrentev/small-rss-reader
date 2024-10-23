@@ -45,6 +45,8 @@ Stay updated with native macOS notifications for new articles.
    ```bash
    python3.13 -m pip install pync
    brew install terminal-notifier
+2. Please enable notifications for terminal-notifier in System Preferences > Security & Privacy > Privacy > Notifications.
+
 ---
 
 ## Usage
