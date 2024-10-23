@@ -475,35 +475,6 @@ class RSSReader(QMainWindow):
             5000  # Duration in milliseconds (e.g., 5000ms = 5 seconds)
         )
 
-        # Store the link to handle tray icon clicks
-        self.last_notification_link = link
-
-        # Connect the activated signal to handle tray icon clicks
-        # Disconnect previous connections to prevent multiple connections
-        try:
-            self.tray_icon.activated.disconnect()
-        except TypeError:
-            # If no previous connections, pass
-            pass
-        self.tray_icon.activated.connect(self.handle_tray_icon_click)
-
-    def handle_tray_icon_click(self, reason):
-        """
-        Handles clicks on the tray icon to open the associated link.
-
-        Parameters:
-        - reason (QSystemTrayIcon.ActivationReason): The reason for activation.
-        """
-        if reason == QSystemTrayIcon.Trigger:
-            if hasattr(self, 'last_notification_link') and self.last_notification_link:
-                webbrowser.open(self.last_notification_link)
-                logging.debug(f"Opened link from notification: {self.last_notification_link}")
-                # Clear the link after opening
-                self.last_notification_link = None
-            else:
-                # Optionally, open the main window if no link is associated
-                self.show_window()
-                logging.debug("No link associated with the notification. Restoring main window.")
 
     def send_notification(self, feed_title, entry):
         """Emit a signal to show a macOS notification for a new article."""
@@ -1058,37 +1029,48 @@ class RSSReader(QMainWindow):
         self.tray_icon.setIcon(QIcon(tray_icon_pixmap))
         self.tray_icon.setToolTip("Small RSS Reader")
 
-        # Create tray menu
-        tray_menu = QMenu()
+        # Create tray menu (only for right-click)
+        self.tray_menu = QMenu()
 
         show_action = QAction("Show", self)
-        show_action.triggered.connect(self.show_window)  # Connect to show_window method
-        tray_menu.addAction(show_action)
+        show_action.triggered.connect(self.show_window)
+        self.tray_menu.addAction(show_action)
 
         refresh_action = QAction("Refresh All Feeds", self)
         refresh_action.triggered.connect(self.force_refresh_all_feeds)
-        tray_menu.addAction(refresh_action)
+        self.tray_menu.addAction(refresh_action)
 
         exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(self.quit_app)  # Connect to quit_app instead of self.close
-        tray_menu.addAction(exit_action)
+        exit_action.triggered.connect(self.quit_app)
+        self.tray_menu.addAction(exit_action)
 
-        self.tray_icon.setContextMenu(tray_menu)
+        # Do NOT set the context menu via setContextMenu
+        # self.tray_icon.setContextMenu(self.tray_menu)
+
+        self.tray_icon.activated.connect(self.on_tray_icon_activated)
         self.tray_icon.show()
 
-        # Restore window on single left-click, differentiate between left and right-click
-        self.tray_icon.activated.connect(self.on_tray_icon_activated)
-
     def on_tray_icon_activated(self, reason):
-        """Handles tray icon activation (e.g., single or double-click)."""
+        """Handles tray icon activation (left-click to toggle visibility, right-click for menu)."""
         if reason == QSystemTrayIcon.Trigger:
-             # Left-click: Show or raise the application window, but do not show the context menu
-            if not self.tray_icon.isVisible():
+            # Left-click: Toggle application visibility
+            if self.isVisible():
+                self.hide()
+                self.tray_icon.showMessage(
+                    "Small RSS Reader",
+                    "Application minimized to tray.",
+                    QSystemTrayIcon.Information,
+                    2000  # Duration in milliseconds
+                )
+                logging.info("Application hidden to tray.")
+            else:
                 self.show_window()
+                self.raise_()
+                self.activateWindow()
+                logging.info("Application shown from tray.")
         elif reason == QSystemTrayIcon.Context:
             # Right-click: Show the context menu
-            #self.tray_icon.contextMenu().popup(QCursor.pos())
-            pass
+            self.tray_menu.exec_(QCursor.pos())
 
     def show_window(self):
         """Shows and raises the application window."""
