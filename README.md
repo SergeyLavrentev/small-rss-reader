@@ -41,11 +41,7 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
 
 Stay updated with native macOS notifications for new articles.
 
-1. **Install `pync` Module and `terminal-notifier`**
-   ```bash
-   python3.13 -m pip install pync
-   brew install terminal-notifier
-2. Please enable notifications for terminal-notifier in System Preferences > Security & Privacy > Privacy > Notifications.
+2. Please enable notifications for the App in System Preferences > Security & Privacy > Privacy > Notifications.
 
 ---
 

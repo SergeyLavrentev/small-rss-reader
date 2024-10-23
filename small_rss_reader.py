@@ -9,12 +9,11 @@ import re
 import unicodedata
 import hashlib
 import argparse
-import pync
 import ctypes
+import webbrowser
 
 from urllib.parse import urlparse
 from omdbapi.movie_search import GetMovie
-from pync import Notifier
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -347,6 +346,8 @@ class RSSReader(QMainWindow):
         self.select_first_feed()
         self.active_feed_threads = 0 
 
+        # Initialize QSystemTrayIcon for native notifications
+        self.init_tray_icon()
         # Connect the notification signal to the slot
         self.notify_signal.connect(self.show_notification)
 
@@ -375,8 +376,6 @@ class RSSReader(QMainWindow):
         self.default_font = QFont("Arial", self.default_font_size)
         settings = QSettings('rocker', 'SmallRSSReader')
         self.current_font_size = settings.value('font_size', self.default_font_size, type=int)
-        # **Initialize System Tray Icon**
-        self.init_tray_icon()
 
         # **Initialize Thread Pool**
         self.thread_pool = QThreadPool.globalInstance()
@@ -430,15 +429,59 @@ class RSSReader(QMainWindow):
         logging.info(f"Reset font size to default ({self.default_font_size}).")
 
     def show_notification(self, title, subtitle, message, link):
-        """Slot to display macOS notifications using pync."""
-        logging.debug(f"Displaying notification: Title={title}, Subtitle={subtitle}, Message={message}, Link={link}")
-        Notifier.notify(
-            message,
-            title=title,
-            subtitle=subtitle,
-            open=link,
-            execute='open'  # Opens the link when the notification is clicked
+        """
+        Slot to display native macOS notifications using QSystemTrayIcon.
+
+        Parameters:
+        - title (str): The title of the notification.
+        - subtitle (str): The subtitle of the notification (not directly supported, included in the message).
+        - message (str): The body of the notification.
+        - link (str): The URL to open when the notification is clicked.
+        """
+        logging.debug(
+            f"Displaying notification: Title='{title}', Subtitle='{subtitle}', Message='{message}', Link='{link}'"
         )
+
+        # Combine subtitle and message since QSystemTrayIcon.showMessage doesn't support subtitles
+        full_message = f"{subtitle}\n\n{message}" if subtitle else message
+
+        # Display the notification
+        self.tray_icon.showMessage(
+            title,
+            full_message,
+            QSystemTrayIcon.Information,
+            5000  # Duration in milliseconds (e.g., 5000ms = 5 seconds)
+        )
+
+        # Store the link to handle tray icon clicks
+        self.last_notification_link = link
+
+        # Connect the activated signal to handle tray icon clicks
+        # Disconnect previous connections to prevent multiple connections
+        try:
+            self.tray_icon.activated.disconnect()
+        except TypeError:
+            # If no previous connections, pass
+            pass
+        self.tray_icon.activated.connect(self.handle_tray_icon_click)
+
+    def handle_tray_icon_click(self, reason):
+        """
+        Handles clicks on the tray icon to open the associated link.
+
+        Parameters:
+        - reason (QSystemTrayIcon.ActivationReason): The reason for activation.
+        """
+        if reason == QSystemTrayIcon.Trigger:
+            if hasattr(self, 'last_notification_link') and self.last_notification_link:
+                webbrowser.open(self.last_notification_link)
+                logging.debug(f"Opened link from notification: {self.last_notification_link}")
+                # Clear the link after opening
+                self.last_notification_link = None
+            else:
+                # Optionally, open the main window if no link is associated
+                self.show_window()
+                logging.debug("No link associated with the notification. Restoring main window.")
 
     def send_notification(self, feed_title, entry):
         """Emit a signal to show a macOS notification for a new article."""
