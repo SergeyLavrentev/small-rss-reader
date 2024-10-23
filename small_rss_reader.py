@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import (
     QSplashScreen
 )
 from PyQt5.QtGui import QCursor
+from PyQt5.QtWidgets import QFontComboBox
 
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import (
@@ -240,6 +241,7 @@ class SettingsDialog(QDialog):
     def setup_ui(self):
         layout = QFormLayout(self)
 
+        # OMDb API Key Input
         self.api_key_input = QLineEdit(self)
         self.api_key_input.setEchoMode(QLineEdit.Password)
         self.api_key_input.setText(self.parent.api_key)
@@ -250,10 +252,21 @@ class SettingsDialog(QDialog):
         self.update_api_key_notice()
         layout.addRow("", self.api_key_notice)
 
+        # Refresh Interval Input
         self.refresh_interval_input = QSpinBox(self)
         self.refresh_interval_input.setRange(1, 1440)
         self.refresh_interval_input.setValue(self.parent.refresh_interval)
         layout.addRow("Refresh Interval (minutes):", self.refresh_interval_input)
+
+        # **Font Selection Widgets**
+        self.font_name_combo = QFontComboBox(self)
+        self.font_name_combo.setCurrentFont(self.parent.default_font)
+        layout.addRow("Font Name:", self.font_name_combo)
+
+        self.font_size_spin = QSpinBox(self)
+        self.font_size_spin.setRange(8, 48)
+        self.font_size_spin.setValue(self.parent.current_font_size)
+        layout.addRow("Font Size:", self.font_size_spin)
 
         # **Add Global Notifications Checkbox**
         self.global_notifications_checkbox = QCheckBox("Enable Notifications", self)
@@ -278,8 +291,12 @@ class SettingsDialog(QDialog):
         # Save existing settings
         api_key = self.api_key_input.text().strip()
         refresh_interval = self.refresh_interval_input.value()
+        font_name = self.font_name_combo.currentFont().family()
+        font_size = self.font_size_spin.value()
         self.parent.api_key = api_key
         self.parent.refresh_interval = refresh_interval
+        self.parent.current_font_size = font_size
+        self.parent.default_font = QFont(font_name, font_size)
 
         # Save Global Notifications Setting
         notifications_enabled = self.global_notifications_checkbox.isChecked()
@@ -287,9 +304,12 @@ class SettingsDialog(QDialog):
         settings = QSettings('rocker', 'SmallRSSReader')
         settings.setValue('omdb_api_key', api_key)
         settings.setValue('refresh_interval', refresh_interval)
+        settings.setValue('font_name', font_name)
+        settings.setValue('font_size', font_size)
         settings.setValue('notifications_enabled', notifications_enabled)
 
         self.parent.update_refresh_timer()
+        self.parent.apply_font_size()
         self.update_api_key_notice()
 
     def accept(self):
@@ -371,11 +391,13 @@ class RSSReader(QMainWindow):
         self.auto_refresh_timer = QTimer()
         self.force_refresh_icon_pixmap = None  # To store the icon pixmap
 
-        # **Font Size Variables**
+        # **Font Variables**
         self.default_font_size = 14  # Default font size
         self.default_font = QFont("Arial", self.default_font_size)
         settings = QSettings('rocker', 'SmallRSSReader')
         self.current_font_size = settings.value('font_size', self.default_font_size, type=int)
+        font_name = settings.value('font_name', self.default_font.family(), type=str)
+        self.default_font = QFont(font_name, self.current_font_size)
 
         # **Initialize Thread Pool**
         self.thread_pool = QThreadPool.globalInstance()
@@ -392,9 +414,8 @@ class RSSReader(QMainWindow):
         settings.setValue('font_size', self.current_font_size)
 
     def apply_font_size(self):
-        """Applies the current font size to relevant widgets."""
-        font = self.default_font
-        font.setPointSize(self.current_font_size)
+        """Applies the current font name and size to relevant widgets."""
+        font = QFont(self.default_font.family(), self.current_font_size)
         self.articles_tree.setFont(font)
         self.content_view.setFont(font)
 
@@ -402,8 +423,9 @@ class RSSReader(QMainWindow):
         # self.feeds_list.setFont(font)
         # self.toolbar.setFont(font)
 
-        # **Update Status Bar with Current Font Size**
-        self.statusBar().showMessage(f"Font Size: {self.current_font_size}")
+        # **Update Status Bar with Current Font Information**
+        self.statusBar().showMessage(f"Font: {font.family()}, Size: {font.pointSize()}")
+
 
     def increase_font_size(self):
         """Increases the font size."""
@@ -835,14 +857,12 @@ class RSSReader(QMainWindow):
         self.load_group_settings(settings)
         self.load_read_articles()
         self.load_feeds()
-        self.apply_font_size()  # Apply font size after loading settings
+        self.apply_font_size()  # Apply font settings after loading settings
 
         # Start refresh after event loop starts to prevent blocking UI
         QTimer.singleShot(0, self.force_refresh_all_feeds)
 
         self.select_first_feed()
-
-
 
     def restore_geometry_and_state(self, settings):
         """Restores the window geometry and state."""
@@ -1775,18 +1795,18 @@ class RSSReader(QMainWindow):
         article_id = self.get_article_id(entry)
         item = self.article_id_to_item.get(article_id)
         if item:
-            imdb_rating = movie_data.get('imdbRating', 'N/A')  # Corrected key
+            imdb_rating = movie_data.get('imdbrating', 'N/A')  # Corrected key
             rating_value = self.parse_rating(imdb_rating)
             item.setData(2, Qt.UserRole, rating_value)
             item.setText(2, imdb_rating)
 
-            released = movie_data.get('Released', '')
+            released = movie_data.get('released', '')
             release_date = self.parse_release_date(released)
             item.setData(3, Qt.UserRole, release_date)
             item.setText(3, release_date.strftime('%d %b %Y') if release_date != datetime.datetime.min else '')
 
-            genre = movie_data.get('Genre', '')
-            director = movie_data.get('Director', '')
+            genre = movie_data.get('genre', '')
+            director = movie_data.get('director', '')
             item.setText(4, genre)
             item.setText(5, director)
 
