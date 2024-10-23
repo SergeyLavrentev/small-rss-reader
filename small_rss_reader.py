@@ -1214,7 +1214,7 @@ class RSSReader(QMainWindow):
 
 
     def find_or_create_group(self, group_name, domain):
-        """Finds or creates a group in the feeds list."""
+        """Finds or creates a group in the feeds list with bold font."""
         for i in range(self.feeds_list.topLevelItemCount()):
             group = self.feeds_list.topLevelItem(i)
             if group.text(0) == group_name:
@@ -1223,7 +1223,14 @@ class RSSReader(QMainWindow):
         group.setText(0, group_name)
         group.setExpanded(False)
         group.setFlags(group.flags() & ~Qt.ItemIsSelectable)
+
+        # **Set Bold Font for Group Name**
+        font = group.font(0)
+        font.setBold(True)
+        group.setFont(0, font)
+
         return group
+
 
     def feeds_context_menu(self, position):
         """Context menu for the feeds list."""
