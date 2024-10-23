@@ -819,11 +819,18 @@ class RSSReader(QMainWindow):
         self.toolbar.addAction(mark_unread_action)
 
     def add_search_widget(self):
-        """Adds the search widget to the toolbar."""
+        """Adds the search widget to the toolbar with a clear button, Esc key handling, and increased size."""
         search_label = QLabel("Search:")
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search articles...")
-        self.search_input.setFixedWidth(300)  # Set the width of the search input
+        self.search_input.setFixedWidth(350)  # Increased width for better fit
+
+        # **Add Clear (X) Button to QLineEdit**
+        self.search_input.setClearButtonEnabled(True)
+
+        # **Handle Esc Key to Clear Input**
+        self.search_input.installEventFilter(self)
+
         self.search_input.textChanged.connect(self.filter_articles)
         search_layout = QHBoxLayout()
         search_layout.setContentsMargins(0, 0, 0, 0)
@@ -838,6 +845,15 @@ class RSSReader(QMainWindow):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.toolbar.addWidget(spacer)
+
+    def eventFilter(self, source, event):
+        """Event filter to handle Esc key press on the search input."""
+        if source == self.search_input:
+            if event.type() == QEvent.KeyPress:
+                if event.key() == Qt.Key_Escape:
+                    self.search_input.clear()
+                    return True
+        return super().eventFilter(source, event)
 
     def update_refresh_timer(self):
         """Updates the refresh timer based on the refresh interval."""
