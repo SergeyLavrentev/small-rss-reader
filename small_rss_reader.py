@@ -2000,7 +2000,7 @@ class RSSReader(QMainWindow):
         else:
             logging.warning(f"Failed to fetch feed: {url}")
 
-        def on_feed_fetched_force_refresh(self, url, feed):
+    def on_feed_fetched_force_refresh(self, url, feed):
         """Callback when a feed is forcefully refreshed and updates the new icon."""
         logging.debug(f"on_feed_fetched_force_refresh called for feed: {url}")
         if feed is not None:
@@ -2032,6 +2032,20 @@ class RSSReader(QMainWindow):
             self.force_refresh_action.setIcon(QIcon(self.force_refresh_icon_pixmap))
             logging.info("Completed force refresh of all feeds.")
 
+    def show_feed_context_menu(self, feed_item, position):
+        """Shows the context menu for a feed item."""
+        menu = QMenu()
+
+        rename_feed_action = QAction("Rename Feed", self)
+        rename_feed_action.triggered.connect(self.rename_feed)
+        menu.addAction(rename_feed_action)
+
+        remove_feed_action = QAction("Remove Feed", self)
+        remove_feed_action.triggered.connect(self.remove_feed)
+        menu.addAction(remove_feed_action)
+
+        menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
+
         
     def set_feed_new_icon(self, url, has_new):
         """Sets or removes the new updates icon for a specific feed."""
@@ -2041,7 +2055,7 @@ class RSSReader(QMainWindow):
                 feed_item = group.child(j)
                 if feed_item.data(0, Qt.UserRole) == url:
                     if has_new:
-                        new_icon = QIcon(resource_path('icons/new_icon_large.png'))  # Ensure this larger icon exists
+                        new_icon = QIcon(resource_path('icons/new_icon.png'))  # Ensure this larger icon exists
                         feed_item.setIcon(0, new_icon)
                     else:
                         feed_item.setIcon(0, QIcon())  # Remove the icon
