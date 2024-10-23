@@ -1194,7 +1194,7 @@ class RSSReader(QMainWindow):
         self.add_feed_to_ui(feed_data)
 
     def add_feed_to_ui(self, feed_data):
-        """Adds a feed to the UI under the appropriate group."""
+        """Adds a feed to the UI under the appropriate group with a new updates icon."""
         parsed_url = urlparse(feed_data['url'])
         domain = parsed_url.netloc or 'Unknown Domain'
         group_name = self.group_name_mapping.get(domain, domain)
@@ -1203,7 +1203,15 @@ class RSSReader(QMainWindow):
         feed_item.setText(0, feed_data['title'])
         feed_item.setData(0, Qt.UserRole, feed_data['url'])
         feed_item.setFlags(feed_item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)
+
+        # **Set New Updates Icon Initially if there are new articles**
+        if feed_data.get('entries'):
+            # Assuming you have an icon named 'new_icon.png' in your resources
+            new_icon = QIcon(resource_path('icons/new_icon.png'))
+            feed_item.setIcon(0, new_icon)
+
         self.feeds_list.expandItem(existing_group)
+
 
     def find_or_create_group(self, group_name, domain):
         """Finds or creates a group in the feeds list."""
@@ -1935,7 +1943,7 @@ class RSSReader(QMainWindow):
             logging.warning(f"Failed to fetch feed: {url}")
 
     def on_feed_fetched_force_refresh(self, url, feed):
-        """Callback when a feed is forcefully refreshed."""
+        """Callback when a feed is forcefully refreshed and updates the new icon."""
         logging.debug(f"on_feed_fetched_force_refresh called for feed: {url}")
         if feed is not None:
             for feed_data in self.feeds:
@@ -1948,6 +1956,9 @@ class RSSReader(QMainWindow):
                             feed_data['entries'].append(entry)
                             new_entries.append(entry)
                             self.send_notification(feed_data['title'], entry)
+                    # **Update Feed Icon if New Entries are Added**
+                    if new_entries:
+                        self.set_feed_new_icon(url, True)
                     break
         else:
             logging.warning(f"Failed to fetch feed during force refresh: {url}")
@@ -1962,6 +1973,20 @@ class RSSReader(QMainWindow):
             self.icon_rotation_timer.stop()
             self.force_refresh_action.setIcon(QIcon(self.force_refresh_icon_pixmap))
             logging.info("Completed force refresh of all feeds.")
+        
+    def set_feed_new_icon(self, url, has_new):
+        """Sets or removes the new updates icon for a specific feed."""
+        for i in range(self.feeds_list.topLevelItemCount()):
+            group = self.feeds_list.topLevelItem(i)
+            for j in range(group.childCount()):
+                feed_item = group.child(j)
+                if feed_item.data(0, Qt.UserRole) == url:
+                    if has_new:
+                        new_icon = QIcon(resource_path('icons/new_icon.png'))  # Ensure this icon exists
+                        feed_item.setIcon(0, new_icon)
+                    else:
+                        feed_item.setIcon(0, QIcon())  # Remove the icon
+                    return
 
     def import_feeds(self):
         """Imports feeds from a JSON file."""
