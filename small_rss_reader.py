@@ -494,6 +494,8 @@ class RSSReader(QMainWindow):
             # Emit the notification signal
             self.notify_signal.emit(title, subtitle, message, link)
             logging.info(f"Sent notification for new article: {entry.get('title', 'No Title')}")
+        else:
+            logging.debug(f"Notification for feed '{feed_title}' is disabled.")
 
     def init_ui(self):
         """Initializes the main UI components."""
@@ -595,7 +597,7 @@ class RSSReader(QMainWindow):
         header = self.articles_tree.header()
         header.setSectionResizeMode(QHeaderView.Interactive)
 
-        # **Set Default Column Widths**
+        # Set Default Column Widths
         self.articles_tree.setColumnWidth(0, 200)  # Title column
         self.articles_tree.setColumnWidth(1, 100)  # Date column
         self.articles_tree.setColumnWidth(2, 80)   # Rating column
@@ -606,19 +608,24 @@ class RSSReader(QMainWindow):
         self.articles_tree.setSortingEnabled(True)
         self.articles_tree.header().setSectionsClickable(True)
         self.articles_tree.header().setSortIndicatorShown(True)
-        self.articles_tree.itemSelectionChanged.connect(self.display_content)
-        self.articles_tree.header().sortIndicatorChanged.connect(self.on_sort_changed)
 
-        # **New Connection Added Below**
+        # Existing Connections
+        self.articles_tree.itemSelectionChanged.connect(self.display_content)
+
+        # Additional Connections
+        self.articles_tree.itemClicked.connect(self.display_content)
+        self.articles_tree.itemActivated.connect(self.display_content)
+
+        # Handle Double Click
         self.articles_tree.itemDoubleClicked.connect(self.open_article_url)
 
-        articles_layout.addWidget(self.articles_tree)
-
+        # Context Menu
         self.articles_tree.header().setContextMenuPolicy(Qt.CustomContextMenu)
         self.articles_tree.header().customContextMenuRequested.connect(self.show_header_menu)
 
-        self.horizontal_splitter.addWidget(self.articles_panel)
+        articles_layout.addWidget(self.articles_tree)
 
+        self.horizontal_splitter.addWidget(self.articles_panel)
 
     def init_content_panel(self):
         """Initializes the content panel."""
@@ -1103,7 +1110,7 @@ class RSSReader(QMainWindow):
         except Exception as e:
             logging.error(f"Failed to save movie data cache: {e}")
 
-    def save_group_settings(self, settings):
+    def save_group_settings(self):
         """Saves group-specific settings to group_settings.json."""
         try:
             group_settings_path = get_user_data_path('group_settings.json')
@@ -1295,7 +1302,7 @@ class RSSReader(QMainWindow):
         omdb_checkbox.setChecked(omdb_enabled)
         layout.addWidget(omdb_checkbox)
 
-        # **Add Group Notifications Checkbox**
+        # Add Group Notifications Checkbox
         notifications_checkbox = QCheckBox("Enable Notifications", dialog)
         notifications_checkbox.setChecked(notifications_enabled)
         layout.addWidget(notifications_checkbox)
@@ -1314,7 +1321,7 @@ class RSSReader(QMainWindow):
             'omdb_enabled': omdb_enabled,
             'notifications_enabled': notifications_enabled
         }
-        self.save_group_settings(QSettings('rocker', 'SmallRSSReader'))
+        self.save_group_settings()  # Removed the 'settings' argument
         self.statusBar().showMessage(f"Updated settings for group: {group_name}")
         logging.info(f"Updated settings for group '{group_name}': OMDb {'enabled' if omdb_enabled else 'disabled'}, Notifications {'enabled' if notifications_enabled else 'disabled'}.")
         current_feed = self.get_current_feed()
@@ -1694,11 +1701,13 @@ class RSSReader(QMainWindow):
         self.content_view.setHtml(html_content, baseUrl=QUrl(feed_url))
         self.statusBar().showMessage(f"Displaying article: {title}")
 
+        # Mark as read instantly
         article_id = item.data(0, Qt.UserRole + 1)
         if article_id not in self.read_articles:
             self.read_articles.add(article_id)
-            item.setIcon(0, self.get_unread_icon())
+            item.setIcon(0, QIcon())  # Remove the unread icon
             self.save_read_articles()
+            logging.debug(f"Marked article as read: {title}")
 
     def populate_articles(self):
         """Populates the articles tree with the current entries."""
@@ -1778,7 +1787,7 @@ class RSSReader(QMainWindow):
         self.articles_tree.setSortingEnabled(True)
         self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
 
-        if omdb_enabled and self.api_key:
+        if current_feed and omdb_enabled and self.api_key:
             movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
             movie_thread.movie_data_fetched.connect(self.update_movie_info)
             self.threads.append(movie_thread)
@@ -1804,10 +1813,6 @@ class RSSReader(QMainWindow):
             self.articles_tree.setCurrentItem(first_item)
 
         self.apply_font_size()
-        # Automatically Select the First Article if Available
-        if self.articles_tree.topLevelItemCount() > 0:
-            first_item = self.articles_tree.topLevelItem(0)
-            self.articles_tree.setCurrentItem(first_item)
 
     def get_current_feed(self):
         """Returns the currently selected feed data."""
@@ -1996,6 +2001,7 @@ class RSSReader(QMainWindow):
                     if new_entries:
                         self.set_feed_new_icon(url, True)
                     break
+
         else:
             logging.warning(f"Failed to fetch feed during force refresh: {url}")
         
@@ -2009,6 +2015,12 @@ class RSSReader(QMainWindow):
             self.icon_rotation_timer.stop()
             self.force_refresh_action.setIcon(QIcon(self.force_refresh_icon_pixmap))
             logging.info("Completed force refresh of all feeds.")
+        
+        # **Refresh the Article List if the Current Feed is Being Updated**
+        current_feed = self.get_current_feed()
+        if current_feed and current_feed['url'] == url:
+            self.populate_articles()
+
 
     def show_feed_context_menu(self, feed_item, position):
         """Shows the context menu for a feed item."""
