@@ -10,7 +10,7 @@ DATA_FILES = [
         'icons/rss_icon.png',
         'icons/rss_tray_icon.png',
         'icons/rss_icon.icns',
-        'icons/new_icon.png',
+        'icons/movie_icon.png',
     ]),
 ]
 

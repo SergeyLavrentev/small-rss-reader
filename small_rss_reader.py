@@ -210,7 +210,7 @@ class AddFeedDialog(QDialog):
         layout = QFormLayout(self)
 
         self.name_input = QLineEdit(self)
-        self.name_input.setPlaceholderText("Enter custom feed name")
+        self.name_input.setPlaceholderText("Enter custom feed name (optional)")
         layout.addRow("Feed Name:", self.name_input)
 
         self.url_input = QLineEdit(self)
@@ -227,6 +227,10 @@ class AddFeedDialog(QDialog):
 
     def accept(self):
         """Override accept to save settings before closing the dialog."""
+        feed_name, feed_url = self.get_inputs()
+        if not feed_url:
+            QMessageBox.warning(self, "Input Error", "Feed URL is required.")
+            return
         super().accept()
 
 class SettingsDialog(QDialog):
@@ -403,6 +407,22 @@ class RSSReader(QMainWindow):
         self.thread_pool = QThreadPool.globalInstance()
         self.thread_pool.setMaxThreadCount(8)  # Limit to 8 concurrent threads
 
+        # **Load Movie Icon**
+        movie_icon_path = resource_path('icons/movie_icon.png')
+        if not os.path.exists(movie_icon_path):
+            logging.error(f"Movie icon not found at: {movie_icon_path}")
+            # Optionally, handle missing icon by using a default icon or skipping
+            self.movie_icon = QIcon()
+        else:
+            pixmap = QPixmap(movie_icon_path)
+            if pixmap.isNull():
+                logging.error(f"Failed to load movie icon from: {movie_icon_path}")
+                self.movie_icon = QIcon()
+            else:
+                # **Scale the pixmap to desired size **
+                scaled_pixmap = pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.movie_icon = QIcon(scaled_pixmap)
+
     def quit_app(self):
         """Handles the quitting of the application."""
         self.is_quitting = True
@@ -566,6 +586,10 @@ class RSSReader(QMainWindow):
         # **Allow Group Items to be Selectable**
         self.feeds_list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.feeds_list.itemClicked.connect(self.on_feed_item_clicked)
+
+        # **Set Icon Size to Accommodate Larger Movie Icons**
+        self.feeds_list.setIconSize(QSize(32, 32))  # Adjust size as needed (32x32 is 3x)
+        # For 5x scaling, use QSize(120, 120)
 
         feeds_layout.addWidget(self.feeds_list)
 
@@ -1006,7 +1030,7 @@ class RSSReader(QMainWindow):
             self.save_geometry_and_state(settings)
             self.save_ui_visibility_settings(settings)
             self.save_movie_data_cache()
-            self.save_group_settings(settings)
+            self.save_group_settings()
             self.save_read_articles()
             self.save_font_size()
 
@@ -1171,17 +1195,17 @@ class RSSReader(QMainWindow):
 
     def add_feed(self, feed_name, feed_url):
         """Adds a new feed to the feeds list."""
-        if not feed_name or not feed_url:
-            QMessageBox.warning(self, "Input Error", "Both Feed Name and Feed URL are required.")
+        if not feed_url:
+            QMessageBox.warning(self, "Input Error", "Feed URL is required.")
             return
+
         if not feed_url.startswith(('http://', 'https://')):
             feed_url = 'http://' + feed_url
+
         if feed_url in [feed['url'] for feed in self.feeds]:
             QMessageBox.information(self, "Duplicate Feed", "This feed URL is already added.")
             return
-        if feed_name in [feed['title'] for feed in self.feeds]:
-            QMessageBox.warning(self, "Duplicate Name", "A feed with this name already exists.")
-            return
+
         try:
             feed = feedparser.parse(feed_url)
             if feed.bozo and feed.bozo_exception:
@@ -1190,6 +1214,16 @@ class RSSReader(QMainWindow):
             QMessageBox.critical(self, "Feed Error", f"Failed to load feed: {e}")
             logging.error(f"Failed to load feed {feed_url}: {e}")
             return
+
+        # If feed_name is not provided, get it from the feed's title
+        if not feed_name:
+            feed_name = feed.feed.get('title', feed_url)  # Use feed URL as a fallback if title is missing
+
+        # Check for duplicate feed names only if a custom name was provided
+        if feed_name in [feed['title'] for feed in self.feeds]:
+            QMessageBox.warning(self, "Duplicate Name", "A feed with this name already exists.")
+            return
+
         self.create_feed_data(feed_name, feed_url, feed)
         self.statusBar().showMessage(f"Added feed: {feed_name}")
         logging.info(f"Added new feed: {feed_name} ({feed_url})")
@@ -1247,7 +1281,7 @@ class RSSReader(QMainWindow):
         logging.info(f"Selected feed: {feed_item.text(0)}")
 
     def find_or_create_group(self, group_name, domain):
-        """Finds or creates a group in the feeds list with bold font."""
+        """Finds or creates a group in the feeds list with bold font and optional movie icon."""
         for i in range(self.feeds_list.topLevelItemCount()):
             group = self.feeds_list.topLevelItem(i)
             if group.text(0) == group_name:
@@ -1261,6 +1295,13 @@ class RSSReader(QMainWindow):
         font = group.font(0)
         font.setBold(True)
         group.setFont(0, font)
+
+        # **Set Movie Icon if OMDb is Enabled for the Group**
+        group_settings = self.group_settings.get(group_name, {'omdb_enabled': True})
+        if group_settings.get('omdb_enabled', True):
+            group.setIcon(0, self.movie_icon)  # Use the scaled movie icon
+        else:
+            group.setIcon(0, QIcon())  # No icon
 
         return group
 
@@ -1321,7 +1362,7 @@ class RSSReader(QMainWindow):
             'omdb_enabled': omdb_enabled,
             'notifications_enabled': notifications_enabled
         }
-        self.save_group_settings()  # Removed the 'settings' argument
+        self.save_group_settings()  # Corrected: Removed 'settings' argument
         self.statusBar().showMessage(f"Updated settings for group: {group_name}")
         logging.info(f"Updated settings for group '{group_name}': OMDb {'enabled' if omdb_enabled else 'disabled'}, Notifications {'enabled' if notifications_enabled else 'disabled'}.")
         current_feed = self.get_current_feed()
@@ -1329,6 +1370,16 @@ class RSSReader(QMainWindow):
             current_group_name = self.get_group_name_for_feed(current_feed['url'])
             if current_group_name == group_name:
                 self.populate_articles()
+
+        # **Update the Group Item's Icon**
+        for i in range(self.feeds_list.topLevelItemCount()):
+            group_item = self.feeds_list.topLevelItem(i)
+            if group_item.text(0) == group_name:
+                if omdb_enabled:
+                    group_item.setIcon(0, self.movie_icon)
+                else:
+                    group_item.setIcon(0, QIcon())
+                break
 
     def get_group_name_for_feed(self, feed_url):
         """Returns the group name for a given feed URL."""
@@ -1403,7 +1454,7 @@ class RSSReader(QMainWindow):
         if item.parent() is None:
             QMessageBox.information(self, "Invalid Selection", "Please select a feed, not a group.")
             return
-        feed_name = item.text()
+        feed_name = item.text(0)
         reply = QMessageBox.question(self, 'Remove Feed',
                                      f"Are you sure you want to remove the feed '{feed_name}'?",
                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -1465,7 +1516,7 @@ class RSSReader(QMainWindow):
                     feed_item.setData(0, Qt.UserRole, feed['url'])
                     feed_item.setFlags(feed_item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)
                 logging.info(f"Loaded {len(self.feeds)} feeds.")
-                # **Add this line to expand all feed groups**
+                # **Expand All Feed Groups**
                 self.feeds_list.expandAll()
             except json.JSONDecodeError:
                 QMessageBox.critical(self, "Load Error", "Failed to parse feeds.json. The file may be corrupted.")
