@@ -1002,25 +1002,21 @@ class RSSReader(QMainWindow):
             self.save_group_settings(settings)
             self.save_read_articles()
             self.save_font_size()
-        
+
             # Gracefully terminate all threads
             for thread in self.threads:
                 thread.terminate()
                 thread.wait()
             logging.info("All threads terminated.")
-        
+
             # Accept the event to allow the application to quit
             event.accept()
         else:
-            # Minimize to tray instead of closing
+            # Minimize to tray without showing any notification
             event.ignore()
             self.hide()
-            self.tray_icon.showMessage(
-                "Small RSS Reader",
-                "Application minimized to tray. Double-click the tray icon to restore.",
-                QSystemTrayIcon.Information,
-                2000
-            )
+            logging.info("Application minimized to tray without notification.")
+
 
     def init_tray_icon(self):
         """Initializes the system tray icon."""
@@ -1218,8 +1214,8 @@ class RSSReader(QMainWindow):
 
         # **Set New Updates Icon Initially if there are new articles**
         if feed_data.get('entries'):
-            # Use a larger icon named 'new_icon_large.png' in your resources
-            new_icon = QIcon(resource_path('icons/new_icon_large.png'))
+            # Use the existing blue dot icon
+            new_icon = self.get_unread_icon()
             feed_item.setIcon(0, new_icon)
 
         self.feeds_list.expandItem(existing_group)
@@ -2037,7 +2033,7 @@ class RSSReader(QMainWindow):
                 feed_item = group.child(j)
                 if feed_item.data(0, Qt.UserRole) == url:
                     if has_new:
-                        new_icon = QIcon(resource_path('icons/new_icon.png'))  # Ensure this larger icon exists
+                        new_icon = self.get_unread_icon()  # Use the blue dot icon
                         feed_item.setIcon(0, new_icon)
                     else:
                         feed_item.setIcon(0, QIcon())  # Remove the icon
