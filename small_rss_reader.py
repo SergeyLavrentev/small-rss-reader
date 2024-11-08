@@ -1082,6 +1082,7 @@ class RSSReader(QMainWindow):
         if reason == QSystemTrayIcon.Trigger:
             # Left-click: Toggle application visibility
             if self.isVisible():
+                self.saved_geometry = self.saveGeometry()
                 self.hide()
                 self.tray_icon.showMessage(
                     "Small RSS Reader",
@@ -1102,10 +1103,12 @@ class RSSReader(QMainWindow):
     def show_window(self):
         """Shows and raises the application window."""
         if self.isHidden() or not self.isVisible():
-            self.showNormal()  # Show the window normally if it's hidden
+            self.show()  # Show the window normally if it's hidden
+            if hasattr(self, 'saved_geometry'):
+                self.restoreGeometry(self.saved_geometry)
         self.raise_()  # Bring the window to the front
         self.activateWindow()  # Ensure it gets focus
-        self.setWindowState(self.windowState() & ~Qt.WindowMinimized)  # Unminimize if minimized
+        self.setWindowState(self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)  # Unminimize if minimized
 
     def save_geometry_and_state(self, settings):
         """Saves the window geometry and state."""
