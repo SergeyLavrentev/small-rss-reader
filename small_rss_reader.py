@@ -394,6 +394,7 @@ class RSSReader(QMainWindow):
         self.icon_rotation_timer.timeout.connect(self.rotate_refresh_icon)
         self.auto_refresh_timer = QTimer()
         self.force_refresh_icon_pixmap = None  # To store the icon pixmap
+        self.column_widths = {}  # Stores column widths per feed
 
         # **Font Variables**
         self.default_font_size = 14  # Default font size
@@ -620,6 +621,10 @@ class RSSReader(QMainWindow):
         # Set all columns to Interactive to allow manual resizing
         header = self.articles_tree.header()
         header.setSectionResizeMode(QHeaderView.Interactive)
+        header.sectionResized.connect(self.save_column_widths)
+
+        articles_layout.addWidget(self.articles_tree)
+        self.horizontal_splitter.addWidget(self.articles_panel)
 
         # Set Default Column Widths
         self.articles_tree.setColumnWidth(0, 200)  # Title column
@@ -786,8 +791,16 @@ class RSSReader(QMainWindow):
         self.add_new_feed_button()
         self.add_refresh_buttons()
         self.add_mark_unread_button()
+        self.add_mark_feed_read_button()
         self.add_search_widget()
 
+    def add_mark_feed_read_button(self):
+        """Adds the 'Mark Feed as Read' button to the toolbar."""
+        mark_read_icon = self.style().standardIcon(QStyle.SP_DialogApplyButton)
+        mark_read_action = QAction(mark_read_icon, "Mark Feed as Read", self)
+        mark_read_action.triggered.connect(self.mark_feed_as_read)
+        self.toolbar.addAction(mark_read_action)
+        
     def add_new_feed_button(self):
         """Adds the 'New Feed' button to the toolbar."""
         new_feed_icon = self.style().standardIcon(QStyle.SP_FileDialogNewFolder)
@@ -1048,7 +1061,32 @@ class RSSReader(QMainWindow):
             self.hide()
             logging.info("Application minimized to tray without notification.")
 
+    def mark_feed_as_read(self):
+        """Marks all articles in the selected feed as read."""
+        current_feed = self.get_current_feed()
+        if not current_feed:
+            QMessageBox.information(self, "No Feed Selected", "Please select a feed to mark as read.")
+            return
 
+        feed_url = current_feed['url']
+        feed_entries = current_feed.get('entries', [])
+        if not feed_entries:
+            QMessageBox.information(self, "No Articles", "The selected feed has no articles.")
+            return
+
+        for entry in feed_entries:
+            article_id = self.get_article_id(entry)
+            if article_id not in self.read_articles:
+                self.read_articles.add(article_id)
+
+        # Save read articles
+        self.save_read_articles()
+
+        # Update the UI to reflect the changes
+        self.populate_articles()
+        self.statusBar().showMessage(f"Marked all articles in '{current_feed['title']}' as read.")
+        logging.info(f"Marked all articles in feed '{current_feed['title']}' as read.")
+        
     def init_tray_icon(self):
         """Initializes the system tray icon."""
         self.tray_icon = QSystemTrayIcon(self)
@@ -1110,6 +1148,23 @@ class RSSReader(QMainWindow):
         self.activateWindow()  # Ensure it gets focus
         self.setWindowState(self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)  # Unminimize if minimized
 
+    def save_column_widths(self, logical_index, old_size, new_size):
+        """Saves the column widths for the current feed."""
+        current_feed = self.get_current_feed()
+        if not current_feed:
+            return
+
+        feed_url = current_feed['url']
+        if feed_url not in self.column_widths:
+            self.column_widths[feed_url] = []
+
+        # Ensure the list has enough elements
+        while len(self.column_widths[feed_url]) <= logical_index:
+            self.column_widths[feed_url].append(0)
+
+        self.column_widths[feed_url][logical_index] = new_size
+        self.save_feeds()  # Save to persistent storage
+        
     def save_geometry_and_state(self, settings):
         """Saves the window geometry and state."""
         settings.setValue('geometry', self.saveGeometry())
@@ -1493,7 +1548,7 @@ class RSSReader(QMainWindow):
         settings.setValue('group_name_mapping', json.dumps(self.group_name_mapping))
 
     def load_feeds(self):
-        """Loads the feeds from the saved feeds.json file."""
+        """Loads the feeds and column widths from feeds.json."""
         feeds_path = get_user_data_path('feeds.json')
         if os.path.exists(feeds_path):
             try:
@@ -1501,6 +1556,8 @@ class RSSReader(QMainWindow):
                     data = json.load(f)
                     if isinstance(data, dict):
                         self.feeds = []
+                        self.column_widths = data.get('column_widths', {})
+                        logging.info(f"Loaded {len(self.feeds)} feeds and column widths.")
                         for feed in data.get('feeds', []):
                             self.feeds.append(feed)
                     elif isinstance(data, list):
@@ -1531,6 +1588,7 @@ class RSSReader(QMainWindow):
                 self.feeds = []
         else:
             # Create default feeds.json with default or empty feeds
+            self.column_widths = {}
             self.feeds = [
                 {
                     'title': 'BBC News',
@@ -1554,13 +1612,17 @@ class RSSReader(QMainWindow):
             logging.info("Created default feeds.json with initial feeds.")
 
     def save_feeds(self):
-        """Saves the feeds to feeds.json file."""
+        """Saves the feeds and column widths to feeds.json."""
         try:
+            feeds_data = {
+                'feeds': self.feeds,
+                'column_widths': self.column_widths,
+            }
             feeds_path = get_user_data_path('feeds.json')
             os.makedirs(os.path.dirname(feeds_path), exist_ok=True)
             with open(feeds_path, 'w') as f:
-                json.dump(self.feeds, f, indent=4)
-            logging.info("Feeds saved successfully.")
+                json.dump(feeds_data, f, indent=4)
+            logging.info("Feeds and column widths saved successfully.")
         except Exception as e:
             logging.error(f"Failed to save feeds: {e}")
 
@@ -1770,6 +1832,11 @@ class RSSReader(QMainWindow):
         self.article_id_to_item = {}  # Reset the mapping
 
         current_feed = self.get_current_feed()
+        # Restore column widths for the current feed
+        feed_url = current_feed['url']
+        if feed_url in self.column_widths:
+            for index, width in enumerate(self.column_widths[feed_url]):
+                self.articles_tree.header().resizeSection(index, width)
 
         if current_feed:
             group_name = self.get_group_name_for_feed(current_feed['url'])
