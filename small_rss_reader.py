@@ -1875,6 +1875,7 @@ class RSSReader(QMainWindow):
             item.data(0, Qt.UserRole + 1): item  # Map by article ID
             for item in self.get_all_tree_items(self.articles_tree)
         }
+        self.article_id_to_item = current_items
         new_entries = {self.get_article_id(entry): entry for entry in self.current_entries}
 
         # Delta update: Determine added, updated, and removed articles
@@ -1963,6 +1964,7 @@ class RSSReader(QMainWindow):
             item.setIcon(0, QIcon())
 
         self.articles_tree.addTopLevelItem(item)
+        self.article_id_to_item[article_id] = item
         
     def update_article_in_tree(self, item, entry):
         """Updates an existing article in the tree."""
