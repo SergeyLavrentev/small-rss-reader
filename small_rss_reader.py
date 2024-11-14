@@ -1826,89 +1826,84 @@ class RSSReader(QMainWindow):
             logging.debug(f"Marked article as read: {title}")
 
     def populate_articles(self):
-        """Populates the articles tree with the current entries."""
+        """Populates the articles tree with the current entries using delta updates."""
         self.articles_tree.setSortingEnabled(False)
-        self.articles_tree.clear()
-        self.article_id_to_item = {}  # Reset the mapping
 
         current_feed = self.get_current_feed()
+        if not current_feed:
+            self.articles_tree.clear()
+            self.article_id_to_item = {}
+            self.statusBar().showMessage("No feed selected")
+            return
+
         # Restore column widths for the current feed
         feed_url = current_feed['url']
-        if feed_url in self.column_widths:
-            for index, width in enumerate(self.column_widths[feed_url]):
-                self.articles_tree.header().resizeSection(index, width)
+        if feed_url not in self.column_widths:
+            self.column_widths[feed_url] = [100] * self.articles_tree.header().count()  # Default widths
+        for index, width in enumerate(self.column_widths[feed_url]):
+            self.articles_tree.header().resizeSection(index, width)
 
-        if current_feed:
-            group_name = self.get_group_name_for_feed(current_feed['url'])
-            group_settings = self.group_settings.get(group_name, {'omdb_enabled': True})
-            omdb_enabled = group_settings.get('omdb_enabled', True)
+        # Retrieve settings for the feed group
+        group_name = self.get_group_name_for_feed(feed_url)
+        group_settings = self.group_settings.get(group_name, {'omdb_enabled': True})
+        omdb_enabled = group_settings.get('omdb_enabled', True)
 
-            # **Update Column Visibility Based on OMDb Setting**
-            if not omdb_enabled:
-                # Show only Title and Date
-                current_feed['visible_columns'] = [True, True, False, False, False, False]
-                self.save_feeds()
-            elif 'visible_columns' not in current_feed:
-                # If visible_columns not set, default to all columns visible
-                current_feed['visible_columns'] = [True] * 6
-                self.save_feeds()
-        else:
-            omdb_enabled = True  # Default to True if no feed is selected
+        # Update column visibility based on OMDb settings
+        if not omdb_enabled:
+            current_feed['visible_columns'] = [True, True, False, False, False, False]
+            self.save_feeds()
+        elif 'visible_columns' not in current_feed:
+            current_feed['visible_columns'] = [True] * 6
+            self.save_feeds()
 
-        for index, entry in enumerate(self.current_entries):
-            title = entry.get('title', 'No Title')
+        # Prepare for delta updates
+        current_items = {
+            item.data(0, Qt.UserRole + 1): item  # Map by article ID
+            for item in self.get_all_tree_items(self.articles_tree)
+        }
+        new_entries = {self.get_article_id(entry): entry for entry in self.current_entries}
 
-            # **Create the Article Item with Full Title**
-            item = ArticleTreeWidgetItem([title, '', '', '', '', ''])  # Temporarily set empty strings
-            item.setToolTip(0, title)  # Set full title as tooltip
+        # Delta update: Determine added, updated, and removed articles
+        added_ids = new_entries.keys() - current_items.keys()
+        updated_ids = new_entries.keys() & current_items.keys()
+        removed_ids = current_items.keys() - new_entries.keys()
 
-            # **Set Date**
-            date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
-            if date_struct:
-                date_obj = datetime.datetime(*date_struct[:6])
-                date_formatted = date_obj.strftime('%d-%m-%Y')
-            else:
-                date_obj = datetime.datetime.min
-                date_formatted = 'No Date'
-            item.setText(1, date_formatted)
-            item.setData(1, Qt.UserRole, date_obj)
+        # Add new articles
+        for article_id in added_ids:
+            entry = new_entries[article_id]
+            self.add_article_to_tree(entry)
 
-            # **Set Default Values for Other Columns**
-            if not omdb_enabled or not self.api_key:
-                rating_str = 'N/A'
-                released_str = ''
-                genre_str = ''
-                director_str = ''
-            else:
-                rating_str = 'Loading...'
-                released_str = ''
-                genre_str = ''
-                director_str = ''
+        # Update existing articles
+        for article_id in updated_ids:
+            entry = new_entries[article_id]
+            item = current_items[article_id]
+            self.update_article_in_tree(item, entry)
 
-            item.setText(2, rating_str)
-            item.setText(3, released_str)
-            item.setText(4, genre_str)
-            item.setText(5, director_str)
+        # Remove obsolete articles
+        for article_id in removed_ids:
+            item = current_items[article_id]
+            index = self.articles_tree.indexOfTopLevelItem(item)
+            self.articles_tree.takeTopLevelItem(index)
 
-            # **Store Article Data**
-            article_id = self.get_article_id(entry)
-            item.setData(0, Qt.UserRole + 1, article_id)
-            item.setData(0, Qt.UserRole, entry)
+        # Reapply sorting
+        sort_column = current_feed.get('sort_column', 1)
+        sort_order = current_feed.get('sort_order', Qt.AscendingOrder)
+        self.articles_tree.sortItems(sort_column, sort_order)
 
-            self.article_id_to_item[article_id] = item
+        # Apply column visibility
+        for i, visible in enumerate(current_feed['visible_columns']):
+            self.articles_tree.setColumnHidden(i, not visible)
 
-            # **Set Unread Icon if Applicable**
-            if article_id not in self.read_articles:
-                item.setIcon(0, self.get_unread_icon())
-            else:
-                item.setIcon(0, QIcon())
-
-            self.articles_tree.addTopLevelItem(item)
+        # Automatically select the first article if available
+        if self.articles_tree.topLevelItemCount() > 0:
+            first_item = self.articles_tree.topLevelItem(0)
+            self.articles_tree.setCurrentItem(first_item)
 
         self.articles_tree.setSortingEnabled(True)
         self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
 
-        if current_feed and omdb_enabled and self.api_key:
+        # Fetch movie data if applicable
+        if omdb_enabled and self.api_key:
             movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache)
             movie_thread.movie_data_fetched.connect(self.update_movie_info)
             self.threads.append(movie_thread)
@@ -1917,24 +1912,68 @@ class RSSReader(QMainWindow):
         else:
             logging.info(f"OMDb feature disabled for group '{group_name}' or API key not provided; skipping movie data fetching.")
 
-        # **Apply the Feed's Sort Preference**
-        if current_feed:
-            sort_column = current_feed.get('sort_column', 1)
-            sort_order = current_feed.get('sort_order', Qt.AscendingOrder)
-            self.articles_tree.sortItems(sort_column, sort_order)
-
-        # **Apply Column Visibility Based on the Current Feed's Settings**
-        if current_feed and 'visible_columns' in current_feed:
-            for i, visible in enumerate(current_feed['visible_columns']):
-                self.articles_tree.setColumnHidden(i, not visible)
-
-        # **Automatically Select the First Article if Available**
-        if self.articles_tree.topLevelItemCount() > 0:
-            first_item = self.articles_tree.topLevelItem(0)
-            self.articles_tree.setCurrentItem(first_item)
-
         self.apply_font_size()
+        
+    def add_article_to_tree(self, entry):
+        """Adds a new article to the tree."""
+        title = entry.get('title', 'No Title')
+        item = QTreeWidgetItem([title, '', '', '', '', ''])
+        item.setToolTip(0, title)
 
+        # Set Date
+        date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
+        if date_struct:
+            date_obj = datetime.datetime(*date_struct[:6])
+            date_formatted = date_obj.strftime('%d-%m-%Y')
+        else:
+            date_obj = datetime.datetime.min
+            date_formatted = 'No Date'
+        item.setText(1, date_formatted)
+        item.setData(1, Qt.UserRole, date_obj)
+
+        # Set default values for other columns
+        item.setText(2, 'N/A')
+        item.setText(3, '')
+        item.setText(4, '')
+        item.setText(5, '')
+
+        # Store article data
+        article_id = self.get_article_id(entry)
+        item.setData(0, Qt.UserRole + 1, article_id)
+        item.setData(0, Qt.UserRole, entry)
+
+        # Set unread icon if applicable
+        if article_id not in self.read_articles:
+            item.setIcon(0, self.get_unread_icon())
+        else:
+            item.setIcon(0, QIcon())
+
+        self.articles_tree.addTopLevelItem(item)
+        
+    def update_article_in_tree(self, item, entry):
+        """Updates an existing article in the tree."""
+        title = entry.get('title', 'No Title')
+        item.setText(0, title)
+        item.setToolTip(0, title)
+
+        # Update Date
+        date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
+        if date_struct:
+            date_obj = datetime.datetime(*date_struct[:6])
+            date_formatted = date_obj.strftime('%d-%m-%Y')
+        else:
+            date_obj = datetime.datetime.min
+            date_formatted = 'No Date'
+        item.setText(1, date_formatted)
+        item.setData(1, Qt.UserRole, date_obj)
+        
+    def get_all_tree_items(self, tree_widget):
+        """Returns all items in the QTreeWidget as a list."""
+        items = []
+        for index in range(tree_widget.topLevelItemCount()):
+            items.append(tree_widget.topLevelItem(index))
+        return items
+        
     def get_current_feed(self):
         """Returns the currently selected feed data."""
         selected_items = self.feeds_list.selectedItems()
@@ -1963,6 +2002,10 @@ class RSSReader(QMainWindow):
             return  # Safely exit the function to prevent the crash
         entry = self.current_entries[index]
         article_id = self.get_article_id(entry)
+        # Skip update if article is no longer present
+        if article_id not in self.article_id_to_item:
+            logging.warning(f"Skipped update: Article ID {article_id} not found in tree.")
+            return
         item = self.article_id_to_item.get(article_id)
         if item:
             imdb_rating = movie_data.get('imdbrating', 'N/A')  # Corrected key
