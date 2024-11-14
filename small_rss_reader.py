@@ -155,7 +155,6 @@ class FetchMovieDataThread(QThread):
 
 class ArticleTreeWidgetItem(QTreeWidgetItem):
     """Custom QTreeWidgetItem to handle sorting of different data types."""
-
     def __lt__(self, other):
         column = self.treeWidget().sortColumn()
         data1 = self.data(column, Qt.UserRole)
@@ -1932,7 +1931,7 @@ class RSSReader(QMainWindow):
     def add_article_to_tree(self, entry):
         """Adds a new article to the tree."""
         title = entry.get('title', 'No Title')
-        item = QTreeWidgetItem([title, '', '', '', '', ''])
+        item = ArticleTreeWidgetItem([title, '', '', '', '', ''])
         item.setToolTip(0, title)
 
         # Set Date
