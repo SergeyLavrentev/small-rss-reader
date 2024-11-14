@@ -1149,7 +1149,7 @@ class RSSReader(QMainWindow):
         self.setWindowState(self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)  # Unminimize if minimized
 
     def save_column_widths(self, logical_index, old_size, new_size):
-        """Saves the column widths for the current feed."""
+        """Saves the column widths for the current feed and applies them to the entire group."""
         current_feed = self.get_current_feed()
         if not current_feed:
             return
@@ -1162,9 +1162,24 @@ class RSSReader(QMainWindow):
         while len(self.column_widths[feed_url]) <= logical_index:
             self.column_widths[feed_url].append(0)
 
+        # Save the new width for the current feed
         self.column_widths[feed_url][logical_index] = new_size
-        self.save_feeds()  # Save to persistent storage
-        
+
+        # Update the widths for all feeds in the same group
+        group_name = self.get_group_name_for_feed(feed_url)
+        for feed in self.feeds:
+            if self.get_group_name_for_feed(feed['url']) == group_name:
+                if feed['url'] not in self.column_widths:
+                    self.column_widths[feed['url']] = [100] * self.articles_tree.header().count()  # Default widths
+
+                # Ensure the list has enough elements
+                while len(self.column_widths[feed['url']]) <= logical_index:
+                    self.column_widths[feed['url']].append(0)
+
+                # Apply the new column width
+                self.column_widths[feed['url']][logical_index] = new_size
+        self.save_feeds()  # Save to persistent storage    
+
     def save_geometry_and_state(self, settings):
         """Saves the window geometry and state."""
         settings.setValue('geometry', self.saveGeometry())
