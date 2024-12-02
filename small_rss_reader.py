@@ -282,6 +282,13 @@ class SettingsDialog(QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         layout.addRow(self.buttons)
+    
+        # Add Tray Icon Checkbox
+        self.tray_icon_checkbox = QCheckBox("Enable Tray Icon", self)
+        settings = QSettings('rocker', 'SmallRSSReader')
+        tray_icon_enabled = settings.value('tray_icon_enabled', True, type=bool)
+        self.tray_icon_checkbox.setChecked(tray_icon_enabled)
+        layout.addRow("Tray Icon:", self.tray_icon_checkbox)
 
     def update_api_key_notice(self):
         if not self.parent.api_key:
@@ -314,6 +321,33 @@ class SettingsDialog(QDialog):
         self.parent.update_refresh_timer()
         self.parent.apply_font_size()
         self.update_api_key_notice()
+
+        # Save Tray Icon Setting
+        tray_icon_enabled = self.tray_icon_checkbox.isChecked()
+        settings.setValue('tray_icon_enabled', tray_icon_enabled)
+        self.parent.tray_icon_enabled = tray_icon_enabled  # Update the parent variable
+
+        # Save Tray Icon Setting
+        tray_icon_enabled = self.tray_icon_checkbox.isChecked()
+        settings.setValue('tray_icon_enabled', tray_icon_enabled)
+        self.parent.tray_icon_enabled = tray_icon_enabled  # Update the parent variable
+
+        # Update the tray icon visibility
+        if tray_icon_enabled:
+            if self.parent.tray_icon is None:
+                self.parent.init_tray_icon()
+            else:
+                # Set the normal tray icon
+                tray_icon_pixmap = QPixmap(resource_path('icons/rss_tray_icon.png'))
+                self.parent.tray_icon.setIcon(QIcon(tray_icon_pixmap))
+                self.parent.tray_icon.show()
+        else:
+            if self.parent.tray_icon is not None:
+                # Set a transparent icon and hide it
+                transparent_pixmap = QPixmap(1, 1)
+                transparent_pixmap.fill(Qt.transparent)
+                self.parent.tray_icon.setIcon(QIcon(transparent_pixmap))
+                self.parent.tray_icon.hide()
 
     def accept(self):
         """Override accept to save settings before closing the dialog."""
@@ -472,11 +506,11 @@ class RSSReader(QMainWindow):
 
     def show_notification(self, title, subtitle, message, link):
         """
-        Slot to display native macOS notifications using QSystemTrayIcon.
+        Slot to display system notifications using QSystemTrayIcon.
 
         Parameters:
         - title (str): The title of the notification.
-        - subtitle (str): The subtitle of the notification (not directly supported, included in the message).
+        - subtitle (str): The subtitle of the notification (included in the message).
         - message (str): The body of the notification.
         - link (str): The URL to open when the notification is clicked.
         """
@@ -494,6 +528,7 @@ class RSSReader(QMainWindow):
             QSystemTrayIcon.Information,
             5000  # Duration in milliseconds (e.g., 5000ms = 5 seconds)
         )
+
 
 
     def send_notification(self, feed_title, entry):
@@ -656,7 +691,10 @@ class RSSReader(QMainWindow):
         articles_layout.addWidget(self.articles_tree)
 
         self.horizontal_splitter.addWidget(self.articles_panel)
-    
+
+        # disable toolip mouse hovering on articles title
+        self.articles_tree.setMouseTracking(False)
+        self.articles_tree.setToolTipDuration(0)    
 
     def init_content_panel(self):
         """Initializes the content panel."""
@@ -906,6 +944,10 @@ class RSSReader(QMainWindow):
         self.load_feeds()
         self.apply_font_size()  # Apply font settings after loading settings
 
+        self.tray_icon_enabled = settings.value('tray_icon_enabled', True, type=bool)
+        # Initialize tray icon based on the setting
+        self.init_tray_icon()
+        
         # Start refresh after event loop starts to prevent blocking UI
         QTimer.singleShot(0, self.force_refresh_all_feeds)
 
@@ -1092,9 +1134,17 @@ class RSSReader(QMainWindow):
     def init_tray_icon(self):
         """Initializes the system tray icon."""
         self.tray_icon = QSystemTrayIcon(self)
-        tray_icon_pixmap = QPixmap(resource_path('icons/rss_tray_icon.png'))  # Ensure you have this icon
-        self.tray_icon.setIcon(QIcon(tray_icon_pixmap))
-        self.tray_icon.setToolTip("Small RSS Reader")
+        if self.tray_icon_enabled:
+            tray_icon_pixmap = QPixmap(resource_path('icons/rss_tray_icon.png'))  # Ensure you have this icon
+            self.tray_icon.setIcon(QIcon(tray_icon_pixmap))
+            self.tray_icon.setToolTip("Small RSS Reader")
+            self.tray_icon.show()
+        else:
+            # Set a transparent icon to hide the tray icon
+            transparent_pixmap = QPixmap(1, 1)
+            transparent_pixmap.fill(Qt.transparent)
+            self.tray_icon.setIcon(QIcon(transparent_pixmap))
+            self.tray_icon.hide()
 
         # Create tray menu (only for right-click)
         self.tray_menu = QMenu()
@@ -1119,6 +1169,8 @@ class RSSReader(QMainWindow):
 
     def on_tray_icon_activated(self, reason):
         """Handles tray icon activation (left-click to toggle visibility, right-click for menu)."""
+        if self.tray_icon is None:
+            return  # Tray icon is disabled; do nothing
         if reason == QSystemTrayIcon.Trigger:
             # Left-click: Toggle application visibility
             if self.isVisible():
@@ -1936,7 +1988,6 @@ class RSSReader(QMainWindow):
         """Adds a new article to the tree."""
         title = entry.get('title', 'No Title')
         item = ArticleTreeWidgetItem([title, '', '', '', '', ''])
-        item.setToolTip(0, title)
 
         # Set Date
         date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
@@ -1973,7 +2024,6 @@ class RSSReader(QMainWindow):
         """Updates an existing article in the tree."""
         title = entry.get('title', 'No Title')
         item.setText(0, title)
-        item.setToolTip(0, title)
 
         # Update Date
         date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
