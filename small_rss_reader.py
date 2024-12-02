@@ -617,6 +617,8 @@ class RSSReader(QMainWindow):
         self.articles_tree = QTreeWidget()
         self.articles_tree.setHeaderLabels(['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director'])
 
+        # disable toolip mouse hovering on articles title
+        
         # Set all columns to Interactive to allow manual resizing
         header = self.articles_tree.header()
         header.setSectionResizeMode(QHeaderView.Interactive)
@@ -654,6 +656,7 @@ class RSSReader(QMainWindow):
         articles_layout.addWidget(self.articles_tree)
 
         self.horizontal_splitter.addWidget(self.articles_panel)
+    
 
     def init_content_panel(self):
         """Initializes the content panel."""
