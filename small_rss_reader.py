@@ -12,6 +12,7 @@ import argparse
 import sqlite3
 from urllib.parse import urlparse
 from omdbapi.movie_search import GetMovie
+from PyQt5.QtWidgets import QFontComboBox
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTreeWidget, QTreeWidgetItem, QSplitter, QMessageBox, QAction, QFileDialog, QMenu, QToolBar,
@@ -257,6 +258,12 @@ class SettingsDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         layout.addRow(self.buttons)
 
+        # Add Max Days Setting
+        self.max_days_input = QSpinBox(self)
+        self.max_days_input.setRange(1, 365)  # Allow 1 to 365 days
+        self.max_days_input.setValue(self.parent.max_days)
+        layout.addRow("Max Days to Keep Articles:", self.max_days_input)
+
     def update_api_key_notice(self):
         if not self.parent.api_key:
             self.api_key_notice.setText("Ratings feature is disabled without an API key.")
@@ -301,6 +308,11 @@ class SettingsDialog(QDialog):
                 transparent_pixmap.fill(Qt.transparent)
                 self.parent.tray_icon.setIcon(QIcon(transparent_pixmap))
                 self.parent.tray_icon.hide()
+        
+        # Save Max Days Setting
+        self.parent.max_days = self.max_days_input.value()
+        settings.setValue('max_days', self.parent.max_days)
+
 
     def accept(self):
         self.save_settings()
@@ -352,6 +364,7 @@ class RSSReader(QMainWindow):
         self.default_font_size = 14
         self.default_font = QFont("Arial", self.default_font_size)
         settings = QSettings('rocker', 'SmallRSSReader')
+        self.max_days = settings.value('max_days', 30, type=int)  # Default to 30 days
         self.current_font_size = settings.value('font_size', self.default_font_size, type=int)
         font_name = settings.value('font_name', self.default_font.family(), type=str)
         self.default_font = QFont(font_name, self.current_font_size)
@@ -752,9 +765,23 @@ class RSSReader(QMainWindow):
         self.tray_icon_enabled = settings.value('tray_icon_enabled', True, type=bool)
         self.init_tray_icon()
 
-        QTimer.singleShot(0, self.force_refresh_all_feeds)
-
+        QTimer.singleShot(1000, self.force_refresh_all_feeds)#Delay by 1 second to ensure UI is ready
         self.select_first_feed()
+    
+    def filter_articles_by_max_days(self, entries):
+        """Filter articles to keep only those within the max_days limit."""
+        max_days_ago = datetime.datetime.now() - datetime.timedelta(days=self.max_days)
+        filtered_entries = []
+        for entry in entries:
+            date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
+            if date_struct:
+                entry_date = datetime.datetime(*date_struct[:6])
+                if entry_date >= max_days_ago:
+                    filtered_entries.append(entry)
+            else:
+                # If no date is available, keep the article
+                filtered_entries.append(entry)
+        return filtered_entries
 
     def restore_geometry_and_state(self, settings):
         geometry = settings.value('geometry')
@@ -1614,6 +1641,9 @@ class RSSReader(QMainWindow):
             self.article_id_to_item = {}
             self.statusBar().showMessage("No feed selected")
             return
+        # Filter articles by max_days
+        self.current_entries = self.filter_articles_by_max_days(current_feed.get('entries', []))
+
 
         feed_url = current_feed['url']
         if feed_url not in self.column_widths:
@@ -1847,6 +1877,7 @@ class RSSReader(QMainWindow):
         logging.info("Refreshed selected feed.")
 
     def force_refresh_all_feeds(self):
+        """Force refresh all feeds in the background during app start."""
         if self.is_refreshing:
             logging.debug("Refresh attempt ignored: already in progress.")
             return
@@ -1870,6 +1901,9 @@ class RSSReader(QMainWindow):
             self.thread_pool.start(runnable)
             logging.debug(f"Started thread for feed: {url}")
 
+        # Ensure UI remains responsive
+        QApplication.processEvents()
+
     def on_feed_fetched(self, url, feed):
         if feed is not None:
             for feed_data in self.feeds:
@@ -1892,6 +1926,7 @@ class RSSReader(QMainWindow):
             logging.warning(f"Failed to fetch feed: {url}")
 
     def on_feed_fetched_force_refresh(self, url, feed):
+        """Handle feed updates during force refresh."""
         logging.debug(f"on_feed_fetched_force_refresh called for feed: {url}")
         if feed is not None:
             for feed_data in self.feeds:
@@ -1920,9 +1955,11 @@ class RSSReader(QMainWindow):
             self.force_refresh_action.setIcon(QIcon(self.force_refresh_icon_pixmap))
             logging.info("Completed force refresh of all feeds.")
 
-        current_feed = self.get_current_feed()
-        if current_feed and current_feed['url'] == url:
-            self.populate_articles()
+            # Update UI after all feeds are refreshed
+            current_feed = self.get_current_feed()
+            if current_feed:
+                self.populate_articles()
+
 
     def show_feed_context_menu(self, feed_item, position):
         menu = QMenu()
