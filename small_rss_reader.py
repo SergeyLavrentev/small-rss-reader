@@ -664,8 +664,9 @@ class RSSReader(QMainWindow):
         self.add_mark_unread_button()
         self.add_mark_feed_read_button()
         self.add_search_widget()
-
+    
     def add_mark_feed_read_button(self):
+        """Adds the 'Mark Feed as Read' button to the toolbar."""
         mark_read_icon = self.style().standardIcon(QStyle.SP_DialogApplyButton)
         mark_read_action = QAction(mark_read_icon, "Mark Feed as Read", self)
         mark_read_action.triggered.connect(self.mark_feed_as_read)
@@ -767,6 +768,14 @@ class RSSReader(QMainWindow):
 
         QTimer.singleShot(1000, self.force_refresh_all_feeds)#Delay by 1 second to ensure UI is ready
         self.select_first_feed()
+
+    def has_unread_articles(self, feed_data):
+        """Check if a feed has any unread articles."""
+        for entry in feed_data.get('entries', []):
+            article_id = self.get_article_id(entry)
+            if article_id not in self.read_articles:
+                return True
+        return False
     
     def filter_articles_by_max_days(self, entries):
         """Filter articles to keep only those within the max_days limit."""
@@ -919,6 +928,7 @@ class RSSReader(QMainWindow):
             logging.info("Application minimized to tray without notification.")
 
     def mark_feed_as_read(self):
+        """Marks all articles in the selected feed as read."""
         current_feed = self.get_current_feed()
         if not current_feed:
             QMessageBox.information(self, "No Feed Selected", "Please select a feed to mark as read.")
@@ -937,6 +947,18 @@ class RSSReader(QMainWindow):
 
         self.save_read_articles()
         self.populate_articles()
+
+        # Update feed display to remove bold formatting
+        for i in range(self.feeds_list.topLevelItemCount()):
+            group = self.feeds_list.topLevelItem(i)
+            for j in range(group.childCount()):
+                feed_item = group.child(j)
+                if feed_item.data(0, Qt.UserRole) == feed_url:
+                    font = feed_item.font(0)
+                    font.setBold(False)
+                    feed_item.setFont(0, font)
+                    break
+
         self.statusBar().showMessage(f"Marked all articles in '{current_feed['title']}' as read.")
         logging.info(f"Marked all articles in feed '{current_feed['title']}' as read.")
 
@@ -1156,11 +1178,17 @@ class RSSReader(QMainWindow):
         feed_item.setText(0, feed_data['title'])
         feed_item.setData(0, Qt.UserRole, feed_data['url'])
         feed_item.setFlags(feed_item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)
+        
+        # Mark feed name bold if there are unread articles
+        if self.has_unread_articles(feed_data):
+            font = feed_item.font(0)
+            font.setBold(True)
+            feed_item.setFont(0, font)
 
         if feed_data.get('entries'):
             new_icon = self.get_unread_icon()
             feed_item.setIcon(0, new_icon)
-
+        
         self.feeds_list.expandItem(existing_group)
 
     def handle_group_selection(self, group_item):
@@ -1644,6 +1672,17 @@ class RSSReader(QMainWindow):
         # Filter articles by max_days
         self.current_entries = self.filter_articles_by_max_days(current_feed.get('entries', []))
 
+        # Update feed name bold status
+        feed_url = current_feed['url']
+        for i in range(self.feeds_list.topLevelItemCount()):
+            group = self.feeds_list.topLevelItem(i)
+            for j in range(group.childCount()):
+                feed_item = group.child(j)
+                if feed_item.data(0, Qt.UserRole) == feed_url:
+                    font = feed_item.font(0)
+                    font.setBold(self.has_unread_articles(current_feed))
+                    feed_item.setFont(0, font)
+                    break
 
         feed_url = current_feed['url']
         if feed_url not in self.column_widths:
