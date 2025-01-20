@@ -949,19 +949,10 @@ class RSSReader(QMainWindow):
         self.populate_articles()
 
         # Update feed display to remove bold formatting
-        for i in range(self.feeds_list.topLevelItemCount()):
-            group = self.feeds_list.topLevelItem(i)
-            for j in range(group.childCount()):
-                feed_item = group.child(j)
-                if feed_item.data(0, Qt.UserRole) == feed_url:
-                    font = feed_item.font(0)
-                    font.setBold(False)
-                    feed_item.setFont(0, font)
-                    break
+        self.update_feed_bold_status(feed_url)
 
         self.statusBar().showMessage(f"Marked all articles in '{current_feed['title']}' as read.")
         logging.info(f"Marked all articles in feed '{current_feed['title']}' as read.")
-
     def init_tray_icon(self):
         self.tray_icon = QSystemTrayIcon(self)
         if self.tray_icon_enabled:
@@ -1398,6 +1389,7 @@ class RSSReader(QMainWindow):
         settings.setValue('group_name_mapping', json.dumps(self.group_name_mapping))
 
     def load_feeds(self):
+        """Loads the feeds and column widths from feeds.json."""
         feeds_path = get_user_data_path('feeds.json')
         if os.path.exists(feeds_path):
             try:
@@ -1423,6 +1415,13 @@ class RSSReader(QMainWindow):
                     feed_item.setText(0, feed['title'])
                     feed_item.setData(0, Qt.UserRole, feed['url'])
                     feed_item.setFlags(feed_item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)
+
+                    # Mark feed name bold if there are unread articles
+                    if self.has_unread_articles(feed):
+                        font = feed_item.font(0)
+                        font.setBold(True)
+                        feed_item.setFont(0, font)
+
                 logging.info(f"Loaded {len(self.feeds)} feeds.")
                 self.feeds_list.expandAll()
             except json.JSONDecodeError:
@@ -1455,7 +1454,6 @@ class RSSReader(QMainWindow):
             ]
             self.save_feeds()
             logging.info("Created default feeds.json with initial feeds.")
-
     def save_feeds(self):
         try:
             feeds_data = {
@@ -1944,6 +1942,7 @@ class RSSReader(QMainWindow):
         QApplication.processEvents()
 
     def on_feed_fetched(self, url, feed):
+        """Handles the feed fetched signal, updating the feed with new data and sending notifications."""
         if feed is not None:
             for feed_data in self.feeds:
                 if feed_data['url'] == url:
@@ -1961,6 +1960,9 @@ class RSSReader(QMainWindow):
                 self.populate_articles()
             self.save_read_articles()
             logging.info(f"Feed fetched: {url} with {len(new_entries)} new articles.")
+
+            # Update feed name bold status
+            self.update_feed_bold_status(url)
         else:
             logging.warning(f"Failed to fetch feed: {url}")
 
@@ -1999,6 +2001,22 @@ class RSSReader(QMainWindow):
             if current_feed:
                 self.populate_articles()
 
+        # Update feed name bold status
+        self.update_feed_bold_status(url)
+
+    def update_feed_bold_status(self, feed_url):
+        """Updates the bold status of a feed based on whether it has unread articles."""
+        for i in range(self.feeds_list.topLevelItemCount()):
+            group = self.feeds_list.topLevelItem(i)
+            for j in range(group.childCount()):
+                feed_item = group.child(j)
+                if feed_item.data(0, Qt.UserRole) == feed_url:
+                    feed_data = next((feed for feed in self.feeds if feed['url'] == feed_url), None)
+                    if feed_data:
+                        font = feed_item.font(0)
+                        font.setBold(self.has_unread_articles(feed_data))
+                        feed_item.setFont(0, font)
+                    break
 
     def show_feed_context_menu(self, feed_item, position):
         menu = QMenu()
