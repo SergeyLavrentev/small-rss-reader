@@ -1641,7 +1641,6 @@ class RSSReader(QMainWindow):
         search_text = self.search_input.text().lower().strip()
         if search_text:
             title = self.highlight_text(title, search_text)
-            summary = self.highlight_text(summary, search_text)
             content = self.highlight_text(content, search_text)
 
         if 'media_content' in entry:
