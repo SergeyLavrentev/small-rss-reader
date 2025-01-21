@@ -3,13 +3,14 @@ import os
 import json
 import logging
 import feedparser
-import datetime
 import signal
 import re
 import unicodedata
 import hashlib
 import argparse
 import sqlite3
+from functools import lru_cache
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from omdbapi.movie_search import GetMovie
 from PyQt5.QtWidgets import QFontComboBox
@@ -149,7 +150,7 @@ class ArticleTreeWidgetItem(QTreeWidgetItem):
         if data2 is None or data2 == '':
             data2 = other.text(column)
 
-        if isinstance(data1, datetime.datetime) and isinstance(data2, datetime.datetime):
+        if isinstance(data1, datetime) and isinstance(data2, datetime):
             return data1 < data2
         elif isinstance(data1, float) and isinstance(data2, float):
             return data1 < data2
@@ -332,6 +333,8 @@ class RSSReader(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.feed_cache = {}  # Cache for feed data
+        self.cache_expiry = timedelta(minutes=5)  # Cache expiry time
         self.setWindowTitle("Small RSS Reader")
         self.resize(1200, 800)
         self.initialize_variables()
@@ -345,6 +348,49 @@ class RSSReader(QMainWindow):
         self.active_feed_threads = 0
         self.init_tray_icon()
         self.notify_signal.connect(self.show_notification)
+
+    @lru_cache(maxsize=64)  # Cache up to 32 feeds
+    def fetch_feed_with_cache(self, url):
+        """Fetch and cache feed data with error handling."""
+        try:
+            if url in self.feed_cache:
+                cached_data, timestamp = self.feed_cache[url]
+                if datetime.now() - timestamp < self.cache_expiry:
+                    return cached_data
+
+            feed = feedparser.parse(url)
+            if feed.bozo and feed.bozo_exception:
+                raise feed.bozo_exception
+
+            self.feed_cache[url] = (feed, datetime.now())
+            return feed
+
+        except Exception as e:
+            logging.error(f"Failed to fetch feed {url}: {e}")
+            QMessageBox.critical(
+                self,
+                "Feed Error",
+                f"Failed to fetch feed from {url}. Please check the URL and your internet connection.\n\nError: {str(e)}"
+            )
+            return None
+
+    def clear_expired_cache(self):
+        """Clear expired cache entries."""
+        now = datetime.now()
+        expired_urls = [
+            url for url, (_, timestamp) in self.feed_cache.items()
+            if now - timestamp >= self.cache_expiry
+        ]
+        for url in expired_urls:
+            del self.feed_cache[url]
+        logging.info(f"Cleared {len(expired_urls)} expired cache entries.")
+
+    def initialize_periodic_cleanup(self):
+        """Initialize periodic cleanup of cache and old articles."""
+        self.cleanup_timer = QTimer()
+        self.cleanup_timer.timeout.connect(self.perform_periodic_cleanup)
+        self.cleanup_timer.start(300000)  # Run every 5 minutes
+        logging.info("Periodic cleanup timer initialized.")
 
     def initialize_variables(self):
         self.feeds = []
@@ -750,8 +796,8 @@ class RSSReader(QMainWindow):
 
         self.search_input.setClearButtonEnabled(True)
         self.search_input.installEventFilter(self)
-
         self.search_input.textChanged.connect(self.filter_articles)
+
         search_layout = QHBoxLayout()
         search_layout.setContentsMargins(0, 0, 0, 0)
         search_layout.setSpacing(0)
@@ -808,12 +854,12 @@ class RSSReader(QMainWindow):
 
     def filter_articles_by_max_days(self, entries):
         """Filter articles to keep only those within the max_days limit."""
-        max_days_ago = datetime.datetime.now() - datetime.timedelta(days=self.max_days)
+        max_days_ago = datetime.now() - timedelta(days=self.max_days)
         filtered_entries = []
         for entry in entries:
             date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
             if date_struct:
-                entry_date = datetime.datetime(*date_struct[:6])
+                entry_date = datetime(*date_struct[:6])
                 if entry_date >= max_days_ago:
                     filtered_entries.append(entry)
             else:
@@ -823,7 +869,7 @@ class RSSReader(QMainWindow):
 
     def prune_old_entries(self):
         """Remove articles older than max_days from each feed."""
-        cutoff_date = datetime.datetime.now() - datetime.timedelta(days=self.max_days)
+        cutoff_date = datetime.now() - timedelta(days=self.max_days)
         for feed in self.feeds:
             original_count = len(feed.get('entries', []))
             feed['entries'] = [
@@ -838,9 +884,9 @@ class RSSReader(QMainWindow):
         """Extracts the publication date from an entry."""
         date_struct = entry.get('published_parsed') or entry.get('updated_parsed')
         if date_struct:
-            return datetime.datetime(*date_struct[:6])
+            return datetime(*date_struct[:6])
         else:
-            return datetime.datetime.min  # Assign a minimal date if not available
+            return datetime.min  # Assign a minimal date if not available
 
     def restore_geometry_and_state(self, settings):
         geometry = settings.value('geometry')
@@ -1590,6 +1636,14 @@ class RSSReader(QMainWindow):
             content = ''
 
         images_html = ''
+        
+        # Highlight search text in the content
+        search_text = self.search_input.text().lower().strip()
+        if search_text:
+            title = self.highlight_text(title, search_text)
+            summary = self.highlight_text(summary, search_text)
+            content = self.highlight_text(content, search_text)
+
         if 'media_content' in entry:
             for media in entry.get('media_content', []):
                 img_url = media.get('url')
@@ -1718,6 +1772,15 @@ class RSSReader(QMainWindow):
             item.setIcon(0, QIcon())
             self.save_read_articles()
             logging.debug(f"Marked article as read: {title}")
+    
+    def highlight_text(self, text, search_text):
+        """
+        Highlight the search text in the given text using HTML.
+        """
+        if not search_text:
+            return text
+        highlighted = f'<span style="background-color: yellow;">{search_text}</span>'
+        return text.replace(search_text, highlighted)
 
     def populate_articles(self):
         self.articles_tree.setSortingEnabled(False)
@@ -1818,10 +1881,10 @@ class RSSReader(QMainWindow):
 
         date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
         if date_struct:
-            date_obj = datetime.datetime(*date_struct[:6])
+            date_obj = datetime(*date_struct[:6])
             date_formatted = date_obj.strftime('%d-%m-%Y')
         else:
-            date_obj = datetime.datetime.min
+            date_obj = datetime.min
             date_formatted = 'No Date'
         item.setText(1, date_formatted)
         item.setData(1, Qt.UserRole, date_obj)
@@ -1849,10 +1912,10 @@ class RSSReader(QMainWindow):
 
         date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
         if date_struct:
-            date_obj = datetime.datetime(*date_struct[:6])
+            date_obj = datetime(*date_struct[:6])
             date_formatted = date_obj.strftime('%d-%m-%Y')
         else:
-            date_obj = datetime.datetime.min
+            date_obj = datetime.min
             date_formatted = 'No Date'
         item.setText(1, date_formatted)
         item.setData(1, Qt.UserRole, date_obj)
@@ -1901,7 +1964,7 @@ class RSSReader(QMainWindow):
             released = movie_data.get('released', '')
             release_date = self.parse_release_date(released)
             item.setData(3, Qt.UserRole, release_date)
-            item.setText(3, release_date.strftime('%d %b %Y') if release_date != datetime.datetime.min else '')
+            item.setText(3, release_date.strftime('%d %b %Y') if release_date != datetime.min else '')
 
             genre = movie_data.get('genre', '')
             director = movie_data.get('director', '')
@@ -1920,9 +1983,9 @@ class RSSReader(QMainWindow):
 
     def parse_release_date(self, released_str):
         try:
-            return datetime.datetime.strptime(released_str, '%d %b %Y')
+            return datetime.strptime(released_str, '%d %b %Y')
         except (ValueError, TypeError):
-            return datetime.datetime.min
+            return datetime.min
 
     def get_unread_icon(self):
         """
@@ -1971,13 +2034,27 @@ class RSSReader(QMainWindow):
             self.populate_articles()
             logging.info(f"Marked all articles in feed '{feed_data['title']}' as unread.")
 
-    def filter_articles(self, text):
-        for i in range(self.articles_tree.topLevelItemCount()):
-            item = self.articles_tree.topLevelItem(i)
-            if text.lower() in item.text(0).lower():
-                item.setHidden(False)
-            else:
-                item.setHidden(True)
+    def filter_articles(self, search_text):
+        """
+        Filter articles across all feeds based on the search text.
+        Searches both titles and content (summary).
+        """
+        search_text = search_text.lower().strip()
+
+        # Clear the articles tree before populating with search results
+        self.articles_tree.clear()
+
+        # Iterate through all feeds and their articles
+        for feed in self.feeds:
+            for entry in feed.get('entries', []):
+                title = entry.get("title", "").lower()
+                summary = entry.get("summary", "").lower()
+                content = entry.get("content", [{}])[0].get("value", "").lower()
+
+                # Check if the search text matches in title, summary, or content
+                if (search_text in title) or (search_text in summary) or (search_text in content):
+                    self.add_article_to_tree(entry)  # Add matching articles to the tree
+
 
     def refresh_feed(self):
         self.load_articles()
@@ -2265,9 +2342,9 @@ class RSSReader(QMainWindow):
         """Extracts the publication date from an entry."""
         date_struct = entry.get('published_parsed') or entry.get('updated_parsed')
         if date_struct:
-            return datetime.datetime(*date_struct[:6])
+            return datetime(*date_struct[:6])
         else:
-            return datetime.datetime.min  # Assign a minimal date if not available
+            return datetime.min  # Assign a minimal date if not available
 
     def get_all_tree_items(self, tree_widget):
         items = []
