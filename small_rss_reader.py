@@ -308,11 +308,16 @@ class SettingsDialog(QDialog):
                 transparent_pixmap.fill(Qt.transparent)
                 self.parent.tray_icon.setIcon(QIcon(transparent_pixmap))
                 self.parent.tray_icon.hide()
-        
+
         # Save Max Days Setting
         self.parent.max_days = self.max_days_input.value()
         settings.setValue('max_days', self.parent.max_days)
 
+        # Prune old entries after updating max_days
+        self.parent.prune_old_entries()
+        self.parent.save_feeds()
+        self.parent.load_feeds()  # Reload feeds to reflect changes
+        self.parent.load_articles()
 
     def accept(self):
         self.save_settings()
@@ -384,6 +389,9 @@ class RSSReader(QMainWindow):
             else:
                 scaled_pixmap = pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.movie_icon = QIcon(scaled_pixmap)
+
+        # Initialize periodic cleanup (optional)
+        self.initialize_periodic_cleanup()
 
     def quit_app(self):
         self.is_quitting = True
@@ -562,6 +570,27 @@ class RSSReader(QMainWindow):
         content_layout.addWidget(self.content_view)
 
         self.main_splitter.addWidget(self.content_panel)
+
+    def set_feed_new_icon(self, url, has_new):
+        """
+        Update the feed's icon to indicate unread articles.
+
+        Parameters:
+        - url (str): The URL of the feed.
+        - has_new (bool): True if there are unread articles, False otherwise.
+        """
+        for i in range(self.feeds_list.topLevelItemCount()):
+            group = self.feeds_list.topLevelItem(i)
+            for j in range(group.childCount()):
+                feed_item = group.child(j)
+                if feed_item.data(0, Qt.UserRole) == url:
+                    if has_new:
+                        new_icon = self.get_unread_icon()
+                        feed_item.setIcon(0, new_icon)
+                    else:
+                        feed_item.setIcon(0, QIcon())
+                    return
+
 
     def init_menu(self):
         menu = self.menuBar()
@@ -766,7 +795,7 @@ class RSSReader(QMainWindow):
         self.tray_icon_enabled = settings.value('tray_icon_enabled', True, type=bool)
         self.init_tray_icon()
 
-        QTimer.singleShot(1000, self.force_refresh_all_feeds)#Delay by 1 second to ensure UI is ready
+        QTimer.singleShot(1000, self.force_refresh_all_feeds)  # Delay by 1 second to ensure UI is ready
         self.select_first_feed()
 
     def has_unread_articles(self, feed_data):
@@ -776,7 +805,7 @@ class RSSReader(QMainWindow):
             if article_id not in self.read_articles:
                 return True
         return False
-    
+
     def filter_articles_by_max_days(self, entries):
         """Filter articles to keep only those within the max_days limit."""
         max_days_ago = datetime.datetime.now() - datetime.timedelta(days=self.max_days)
@@ -791,6 +820,27 @@ class RSSReader(QMainWindow):
                 # If no date is available, keep the article
                 filtered_entries.append(entry)
         return filtered_entries
+
+    def prune_old_entries(self):
+        """Remove articles older than max_days from each feed."""
+        cutoff_date = datetime.datetime.now() - datetime.timedelta(days=self.max_days)
+        for feed in self.feeds:
+            original_count = len(feed.get('entries', []))
+            feed['entries'] = [
+                entry for entry in feed.get('entries', [])
+                if self.get_entry_date(entry) >= cutoff_date
+            ]
+            pruned_count = original_count - len(feed['entries'])
+            if pruned_count > 0:
+                logging.info(f"Pruned {pruned_count} old articles from feed '{feed['title']}'.")
+
+    def get_entry_date(self, entry):
+        """Extracts the publication date from an entry."""
+        date_struct = entry.get('published_parsed') or entry.get('updated_parsed')
+        if date_struct:
+            return datetime.datetime(*date_struct[:6])
+        else:
+            return datetime.datetime.min  # Assign a minimal date if not available
 
     def restore_geometry_and_state(self, settings):
         geometry = settings.value('geometry')
@@ -953,6 +1003,7 @@ class RSSReader(QMainWindow):
 
         self.statusBar().showMessage(f"Marked all articles in '{current_feed['title']}' as read.")
         logging.info(f"Marked all articles in feed '{current_feed['title']}' as read.")
+
     def init_tray_icon(self):
         self.tray_icon = QSystemTrayIcon(self)
         if self.tray_icon_enabled:
@@ -1146,6 +1197,9 @@ class RSSReader(QMainWindow):
         self.create_feed_data(feed_name, feed_url, feed)
         self.statusBar().showMessage(f"Added feed: {feed_name}")
         logging.info(f"Added new feed: {feed_name} ({feed_url})")
+        
+        # Prune old entries after adding a new feed
+        self.prune_old_entries()
         self.save_feeds()
 
     def create_feed_data(self, feed_name, feed_url, feed):
@@ -1396,15 +1450,17 @@ class RSSReader(QMainWindow):
                 with open(feeds_path, 'r') as f:
                     data = json.load(f)
                     if isinstance(data, dict):
-                        self.feeds = []
+                        self.feeds = data.get('feeds', [])
                         self.column_widths = data.get('column_widths', {})
                         logging.info(f"Loaded {len(self.feeds)} feeds and column widths.")
-                        for feed in data.get('feeds', []):
-                            self.feeds.append(feed)
                     elif isinstance(data, list):
                         self.feeds = data
+                        self.column_widths = {}
                     else:
                         self.feeds = []
+                        self.column_widths = {}
+                # Prune old entries after loading
+                self.prune_old_entries()
                 self.feeds_list.clear()
                 for feed in self.feeds:
                     parsed_url = urlparse(feed['url'])
@@ -1424,14 +1480,17 @@ class RSSReader(QMainWindow):
 
                 logging.info(f"Loaded {len(self.feeds)} feeds.")
                 self.feeds_list.expandAll()
+                self.save_feeds()  # Save after pruning to persist changes
             except json.JSONDecodeError:
                 QMessageBox.critical(self, "Load Error", "Failed to parse feeds.json. The file may be corrupted.")
                 logging.error("Failed to parse feeds.json.")
                 self.feeds = []
+                self.column_widths = {}
             except Exception as e:
                 QMessageBox.critical(self, "Load Error", f"An unexpected error occurred while loading feeds: {e}")
                 logging.error(f"Unexpected error while loading feeds: {e}")
                 self.feeds = []
+                self.column_widths = {}
         else:
             self.column_widths = {}
             self.feeds = [
@@ -1454,6 +1513,7 @@ class RSSReader(QMainWindow):
             ]
             self.save_feeds()
             logging.info("Created default feeds.json with initial feeds.")
+
     def save_feeds(self):
         try:
             feeds_data = {
@@ -1505,11 +1565,11 @@ class RSSReader(QMainWindow):
             self.populate_articles()
         else:
             self.statusBar().showMessage(f"Loading articles from {item.text(0)}")
-            thread = FetchFeedThread(url)
-            thread.feed_fetched.connect(self.on_feed_fetched)
-            self.threads.append(thread)
-            thread.finished.connect(lambda t=thread: self.remove_thread(t))
-            thread.start()
+            worker = Worker()
+            worker.feed_fetched.connect(self.on_feed_fetched)
+            runnable = FetchFeedRunnable(url, worker)
+            self.thread_pool.start(runnable)
+            logging.debug(f"Started thread for feed: {url}")
 
     def display_content(self):
         selected_items = self.articles_tree.selectedItems()
@@ -1748,6 +1808,9 @@ class RSSReader(QMainWindow):
             logging.info(f"OMDb feature disabled for group '{group_name}' or API key not provided; skipping movie data fetching.")
 
         self.apply_font_size()
+        
+        # Ensure pruned entries are saved
+        self.save_feeds()
 
     def add_article_to_tree(self, entry):
         title = entry.get('title', 'No Title')
@@ -1862,6 +1925,12 @@ class RSSReader(QMainWindow):
             return datetime.datetime.min
 
     def get_unread_icon(self):
+        """
+        Creates and returns an icon to indicate unread articles.
+
+        Returns:
+        - QIcon: The unread icon.
+        """
         pixmap = QPixmap(10, 10)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
@@ -1899,6 +1968,7 @@ class RSSReader(QMainWindow):
                     self.read_articles.remove(article_id)
             self.save_read_articles()
             self.load_articles()
+            self.populate_articles()
             logging.info(f"Marked all articles in feed '{feed_data['title']}' as unread.")
 
     def filter_articles(self, text):
@@ -1914,7 +1984,7 @@ class RSSReader(QMainWindow):
         logging.info("Refreshed selected feed.")
 
     def force_refresh_all_feeds(self):
-        """Force refresh all feeds in the background during app start."""
+        """Force refresh all feeds in the background."""
         if self.is_refreshing:
             logging.debug("Refresh attempt ignored: already in progress.")
             return
@@ -1954,6 +2024,8 @@ class RSSReader(QMainWindow):
                             feed_data['entries'].append(entry)
                             new_entries.append(entry)
                             self.send_notification(feed_data['title'], entry)
+                    # Prune old entries after adding new ones
+                    self.prune_old_entries()
                     break
             current_feed_item = self.feeds_list.currentItem()
             if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
@@ -1982,6 +2054,8 @@ class RSSReader(QMainWindow):
                             self.send_notification(feed_data['title'], entry)
                     if new_entries:
                         self.set_feed_new_icon(url, True)
+                    # Prune old entries after adding new ones
+                    self.prune_old_entries()
                     break
 
         else:
@@ -2003,6 +2077,9 @@ class RSSReader(QMainWindow):
 
         # Update feed name bold status
         self.update_feed_bold_status(url)
+        
+        # Save feeds after pruning
+        self.save_feeds()
 
     def update_feed_bold_status(self, feed_url):
         """Updates the bold status of a feed based on whether it has unread articles."""
@@ -2031,19 +2108,6 @@ class RSSReader(QMainWindow):
 
         menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
 
-    def set_feed_new_icon(self, url, has_new):
-        for i in range(self.feeds_list.topLevelItemCount()):
-            group = self.feeds_list.topLevelItem(i)
-            for j in range(group.childCount()):
-                feed_item = group.child(j)
-                if feed_item.data(0, Qt.UserRole) == url:
-                    if has_new:
-                        new_icon = self.get_unread_icon()
-                        feed_item.setIcon(0, new_icon)
-                    else:
-                        feed_item.setIcon(0, QIcon())
-                    return
-
     def import_feeds(self):
         file_name, _ = QFileDialog.getOpenFileName(self, "Import Feeds", "", "JSON Files (*.json)")
         if file_name:
@@ -2067,6 +2131,8 @@ class RSSReader(QMainWindow):
                             feed_item.setText(0, feed['title'])
                             feed_item.setData(0, Qt.UserRole, feed['url'])
                             feed_item.setFlags(feed_item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)
+                # Prune old entries after importing
+                self.prune_old_entries()
                 self.save_feeds()
                 self.statusBar().showMessage("Feeds imported")
                 logging.info("Feeds imported successfully.")
@@ -2139,6 +2205,77 @@ class RSSReader(QMainWindow):
             if first_group.childCount() > 0:
                 first_feed = first_group.child(0)
                 self.feeds_list.setCurrentItem(first_feed)
+
+    def initialize_periodic_cleanup(self):
+        self.cleanup_timer = QTimer()
+        self.cleanup_timer.timeout.connect(self.perform_periodic_cleanup)
+        # Schedule to run once a day (86400000 milliseconds)
+        self.cleanup_timer.start(86400000)
+        logging.info("Periodic cleanup timer initialized to run daily.")
+
+    def perform_periodic_cleanup(self):
+        logging.info("Performing periodic cleanup of old articles.")
+        self.prune_old_entries()
+        self.save_feeds()
+        self.statusBar().showMessage("Periodic cleanup completed.")
+
+    def add_feed(self, feed_name, feed_url):
+        if not feed_url:
+            QMessageBox.warning(self, "Input Error", "Feed URL is required.")
+            return
+
+        if not feed_url.startswith(('http://', 'https://')):
+            feed_url = 'http://' + feed_url
+
+        if feed_url in [feed['url'] for feed in self.feeds]:
+            QMessageBox.information(self, "Duplicate Feed", "This feed URL is already added.")
+            return
+
+        try:
+            feed = feedparser.parse(feed_url)
+            if feed.bozo and feed.bozo_exception:
+                raise feed.bozo_exception
+        except Exception as e:
+            QMessageBox.critical(self, "Feed Error", f"Failed to load feed: {e}")
+            logging.error(f"Failed to load feed {feed_url}: {e}")
+            return
+
+        if not feed_name:
+            feed_name = feed.feed.get('title', feed_url)
+
+        if feed_name in [feed['title'] for feed in self.feeds]:
+            QMessageBox.warning(self, "Duplicate Name", "A feed with this name already exists.")
+            return
+
+        self.create_feed_data(feed_name, feed_url, feed)
+        self.statusBar().showMessage(f"Added feed: {feed_name}")
+        logging.info(f"Added new feed: {feed_name} ({feed_url})")
+        
+        # Prune old entries after adding a new feed
+        self.prune_old_entries()
+        self.save_feeds()
+
+    ### Remaining Methods are the same as previously provided ###
+    # Due to space constraints, only the modified or newly added methods are highlighted above.
+    # The rest of the methods from your original code remain unchanged and should be included as-is.
+
+    # ... [All other existing methods from your original code should be included here without changes] ...
+
+    def get_entry_date(self, entry):
+        """Extracts the publication date from an entry."""
+        date_struct = entry.get('published_parsed') or entry.get('updated_parsed')
+        if date_struct:
+            return datetime.datetime(*date_struct[:6])
+        else:
+            return datetime.datetime.min  # Assign a minimal date if not available
+
+    def get_all_tree_items(self, tree_widget):
+        items = []
+        for index in range(tree_widget.topLevelItemCount()):
+            items.append(tree_widget.topLevelItem(index))
+        return items
+
+    # Ensure that all other methods are included appropriately
 
 ### Main Function ###
 
