@@ -6,17 +6,20 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
 
 ## Features
 
-- **Manage Feeds**: Add, remove, and reorder RSS feeds.
-- **Article Viewing**: Browse articles with titles, dates, and summaries.
-- **Search**: Quickly find articles using keywords.
-- **Unread Indicators**: Easily spot unread articles.
-- **Content Display**: View articles with images and links.
-- **OMDb Integration**: Optionally fetch movie data.
-- **Customizable Interface**: Toggle toolbar, status bar, and menu bar.
-- **Settings**: Configure OMDb API key and refresh intervals.
-- **Import/Export**: Backup and restore feeds via JSON files.
+## Features
+
+- **Manage Feeds**: Add, remove, and reorder RSS feeds with smart, domain-based grouping.
+- **Article Viewing**: Browse articles with titles, dates, summaries, images, and links.
+- **Search**: Quickly find articles using keywords across titles, summaries, and content.
+- **Unread Indicators**: Easily spot unread articles with visual markers.
+- **Background Article Opening**: Open articles in the browser in the background without losing focus.
+- **OMDb Integration**: Optionally fetch and display movie data for relevant articles.
+- **Customizable Interface**: Toggle the toolbar, status bar, and menu bar; adjust fonts and display settings.
+- **Settings**: Configure OMDb API key, refresh intervals, notifications, tray icon behavior, and iCloud backup.
+- **Import/Export**: Backup and restore feeds and settings via JSON files.
 - **Auto Refresh**: Automatically update feeds at set intervals.
-- **System Tray Integration**: Minimize to tray for a clutter-free experience.
+- **System Tray Integration**: Minimize the application to the system tray for a clutter-free experience.
+- **iCloud Backup & Restore**: Automatically backup and restore feeds and user settings to/from iCloud.
 
 ## Installation
 
