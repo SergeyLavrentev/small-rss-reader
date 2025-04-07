@@ -12,6 +12,7 @@ import argparse
 import sqlite3
 import shutil
 import threading
+import requests
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from omdbapi.movie_search import GetMovie
@@ -57,6 +58,26 @@ def get_user_data_path(filename):
             return os.path.join(Path.home(), ".smallrssreader", filename)
     else:
         return os.path.join(os.path.abspath("."), filename)
+
+def fetch_favicon(url):
+    """Fetch the favicon for a given URL."""
+    try:
+        domain = urlparse(url).netloc
+        favicon_url = f"https://{domain}/favicon.ico"
+        logging.debug(f"Attempting to fetch favicon from: {favicon_url}")
+        response = requests.get(favicon_url, stream=True, timeout=5)
+        if response.status_code == 200:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(response.content):
+                logging.debug(f"Successfully loaded favicon for {domain}")
+                return pixmap
+            else:
+                logging.warning(f"Failed to load favicon data for {domain}.")
+        else:
+            logging.warning(f"Failed to fetch favicon for {domain}: {response.status_code}")
+    except Exception as e:
+        logging.error(f"Error fetching favicon for {domain}: {e}")
+    return None
 
 ### Helper Classes ###
 
@@ -539,6 +560,14 @@ class RSSReader(QMainWindow):
         self.feeds_panel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         self.horizontal_splitter.addWidget(self.feeds_panel)
 
+        # Set favicons for each feed
+        for feed in self.feeds:
+            feed_item = QTreeWidgetItem(self.feeds_list)
+            feed_item.setText(0, feed['title'])
+            feed_item.setData(0, Qt.UserRole, feed['url'])
+            if self.has_unread_articles(feed):
+                self.set_feed_icon(feed_item, feed['url'])
+
     def on_feed_item_clicked(self, item, column):
         if item.data(0, Qt.UserRole) is None:
             self.handle_group_selection(item)
@@ -593,8 +622,7 @@ class RSSReader(QMainWindow):
         def update_icon(item):
             if item.data(0, Qt.UserRole) == url:
                 if has_new:
-                    new_icon = self.get_unread_icon()
-                    item.setIcon(0, new_icon)
+                    self.set_feed_icon(item, url)  # Устанавливаем фавикон вместо синего кружка
                 else:
                     item.setIcon(0, QIcon())
                 return True
@@ -604,12 +632,17 @@ class RSSReader(QMainWindow):
             top_item = self.feeds_list.topLevelItem(i)
             if top_item.data(0, Qt.UserRole):
                 if update_icon(top_item):
+                    self.set_feed_icon(top_item, top_item.data(0, Qt.UserRole))
                     return
-            else:
-                for j in range(top_item.childCount()):
-                    child = top_item.child(j)
-                    if update_icon(child):
-                        return
+
+    def set_feed_icon(self, item, url):
+        """Set the favicon for a feed or group."""
+        pixmap = fetch_favicon(url)
+        if pixmap:
+            icon = QIcon(pixmap)
+            item.setIcon(0, icon)
+        else:
+            logging.info(f"No favicon found for {url}, using default icon.")
 
     def init_menu(self):
         menu = self.menuBar()
@@ -1097,7 +1130,7 @@ class RSSReader(QMainWindow):
         self.toolbar.setVisible(visible)
 
     def toggle_statusbar_visibility(self):
-        visible = self.toggle_statusbar_action.isChecked()
+        visible = self.toggle_statusbar_action.setChecked()
         self.statusBar().setVisible(visible)
 
     def toggle_menubar_visibility(self):
@@ -1370,7 +1403,8 @@ class RSSReader(QMainWindow):
 
     def load_feeds(self):
         """Loads feeds from feeds.json and rebuilds the feeds tree.
-           If a domain has only one feed, it is not grouped.
+           If a domain has only one feed, its favicon is displayed.
+           If a domain has multiple feeds, the group's favicon is displayed.
         """
         feeds_path = get_user_data_path('feeds.json')
         if os.path.exists(feeds_path):
@@ -1437,7 +1471,7 @@ class RSSReader(QMainWindow):
                     font = feed_item.font(0)
                     font.setBold(True)
                     feed_item.setFont(0, font)
-                    feed_item.setIcon(0, self.get_unread_icon())
+                self.set_feed_icon(feed_item, feed_data['url'])  # Set favicon for standalone feed
             else:
                 group_name = self.group_name_mapping.get(domain, domain)
                 group_item = QTreeWidgetItem(self.feeds_list)
@@ -1445,8 +1479,7 @@ class RSSReader(QMainWindow):
                 font = group_item.font(0)
                 font.setBold(True)
                 group_item.setFont(0, font)
-                group_settings = self.group_settings.get(group_name, {'omdb_enabled': False})
-                group_item.setIcon(0, self.movie_icon if group_settings.get('omdb_enabled', False) else QIcon())
+                self.set_feed_icon(group_item, feeds[0]['url'])  # Set favicon for the group
                 for feed_data in feeds:
                     feed_item = QTreeWidgetItem(group_item)
                     feed_item.setText(0, feed_data['title'])
@@ -1455,7 +1488,6 @@ class RSSReader(QMainWindow):
                         font = feed_item.font(0)
                         font.setBold(True)
                         feed_item.setFont(0, font)
-                        feed_item.setIcon(0, self.get_unread_icon())
         self.feeds_list.expandAll()
         self.save_feeds()
 
@@ -1713,9 +1745,9 @@ class RSSReader(QMainWindow):
         item.setData(0, Qt.UserRole + 1, article_id)
         item.setData(0, Qt.UserRole, entry)
         if article_id not in self.read_articles:
-            item.setIcon(0, self.get_unread_icon())
+            self.set_feed_icon(item, entry.get('link', ''))  # Use favicon for unread articles
         else:
-            item.setIcon(0, QIcon())
+            item.setIcon(0, QIcon())  # No icon for read articles
         self.articles_tree.addTopLevelItem(item)
         self.article_id_to_item[article_id] = item
 
@@ -1791,16 +1823,6 @@ class RSSReader(QMainWindow):
             return datetime.strptime(released_str, '%d %b %Y')
         except (ValueError, TypeError):
             return datetime.min
-
-    def get_unread_icon(self):
-        pixmap = QPixmap(10, 10)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setBrush(QBrush(QColor(0, 122, 204)))
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(0, 0, 10, 10)
-        painter.end()
-        return QIcon(pixmap)
 
     def get_article_id(self, entry):
         unique_string = entry.get('id') or entry.get('guid') or entry.get('link') or (entry.get('title', '') + entry.get('published', ''))
