@@ -350,6 +350,36 @@ class SettingsDialog(QDialog):
 
 ### Main Application Class ###
 
+class PopulateArticlesThread(QThread):
+    articles_ready = pyqtSignal(list, dict)  # Emits (entries, article_id_to_item)
+
+    def __init__(self, entries, read_articles, max_days):
+        super().__init__()
+        self.entries = entries
+        self.read_articles = read_articles
+        self.max_days = max_days
+
+    def run(self):
+        filtered_entries = []
+        article_id_to_item = {}
+        max_days_ago = datetime.now() - timedelta(days=self.max_days)
+
+        for entry in self.entries:
+            date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
+            if date_struct:
+                entry_date = datetime(*date_struct[:6])
+                if entry_date >= max_days_ago:
+                    filtered_entries.append(entry)
+            else:
+                filtered_entries.append(entry)
+
+            article_id = hashlib.md5(
+                (entry.get('id') or entry.get('guid') or entry.get('link') or (entry.get('title', '') + entry.get('published', ''))).encode('utf-8')
+            ).hexdigest()
+            article_id_to_item[article_id] = entry
+
+        self.articles_ready.emit(filtered_entries, article_id_to_item)
+
 class RSSReader(QMainWindow):
     REFRESH_SELECTED_ICON = QStyle.SP_BrowserReload
     REFRESH_ALL_ICON = QStyle.SP_DialogResetButton
@@ -532,6 +562,7 @@ class RSSReader(QMainWindow):
         # Initialize iCloud backup setting:
         self.icloud_backup_enabled = settings.value('icloud_backup_enabled', False, type=bool)
         self.feeds_dirty = False  # Flag to track if feeds need saving
+        self.favicon_cache = {}  # Cache for favicons
 
     def quit_app(self):
         self.is_quitting = True
@@ -718,12 +749,18 @@ class RSSReader(QMainWindow):
 
     def set_feed_icon(self, item, url):
         """Set the favicon for a feed or group."""
+        if url in self.favicon_cache:
+            item.setIcon(0, self.favicon_cache[url])
+            return
+
         pixmap = fetch_favicon(url)
         if pixmap:
             icon = QIcon(pixmap)
+            self.favicon_cache[url] = icon
             item.setIcon(0, icon)
         else:
             logging.info(f"No favicon found for {url}, using default icon.")
+            self.favicon_cache[url] = QIcon()  # Cache default icon
 
     def init_menu(self):
         menu = self.menuBar()
@@ -1420,10 +1457,7 @@ class RSSReader(QMainWindow):
         settings.setValue('group_name_mapping', json.dumps(self.group_name_mapping))
 
     def load_feeds(self):
-        """Loads feeds from feeds.json and rebuilds the feeds tree.
-           If a domain has only one feed, its favicon is displayed.
-           If a domain has multiple feeds, the group's favicon is displayed.
-        """
+        """Loads feeds and sets favicons efficiently."""
         feeds_path = get_user_data_path('feeds.json')
         if os.path.exists(feeds_path):
             try:
@@ -1557,8 +1591,8 @@ class RSSReader(QMainWindow):
         url = item.data(0, Qt.UserRole)
         feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
         if feed_data and feed_data.get('entries'):
-            self.current_entries = feed_data['entries']
-            self.populate_articles()
+            self.statusBar().showMessage(f"Loading articles from {item.text(0)}")
+            self.populate_articles_in_background(feed_data['entries'])
         else:
             self.statusBar().showMessage(f"Loading articles from {item.text(0)}")
             worker = Worker()
@@ -1566,6 +1600,25 @@ class RSSReader(QMainWindow):
             runnable = FetchFeedRunnable(url, worker)
             self.thread_pool.start(runnable)
             logging.debug(f"Started thread for feed: {url}")
+
+    def populate_articles_in_background(self, entries):
+        self.populate_thread = PopulateArticlesThread(entries, self.read_articles, self.max_days)
+        self.populate_thread.articles_ready.connect(self.on_articles_ready)
+        self.populate_thread.start()
+
+    def on_articles_ready(self, filtered_entries, article_id_to_item):
+        self.current_entries = filtered_entries
+        self.article_id_to_item = article_id_to_item
+        self.populate_articles_ui()
+
+    def populate_articles_ui(self):
+        self.articles_tree.setSortingEnabled(False)
+        self.articles_tree.clear()
+        for entry in self.current_entries:
+            self.add_article_to_tree(entry)
+        self.articles_tree.setSortingEnabled(True)
+        self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
+        logging.info(f"Loaded {len(self.current_entries)} articles into the UI.")
 
     def display_content(self):
         selected_items = self.articles_tree.selectedItems()
@@ -1665,83 +1718,8 @@ class RSSReader(QMainWindow):
         highlighted = f'<span style="background-color: yellow;">{search_text}</span>'
         return re.sub(re.escape(search_text), highlighted, text, flags=re.IGNORECASE)
 
-    def populate_articles(self):
-        self.articles_tree.setSortingEnabled(False)
-        current_feed = self.get_current_feed()
-        if not current_feed:
-            self.articles_tree.clear()
-            self.article_id_to_item = {}
-            self.statusBar().showMessage("No feed selected")
-            return
-        self.current_entries = self.filter_articles_by_max_days(current_feed.get('entries', []))
-        feed_url = current_feed['url']
-        for i in range(self.feeds_list.topLevelItemCount()):
-            top_item = self.feeds_list.topLevelItem(i)
-            if top_item.data(0, Qt.UserRole) == feed_url:
-                font = top_item.font(0)
-                font.setBold(self.has_unread_articles(current_feed))
-                top_item.setFont(0, font)
-                break
-            else:
-                for j in range(top_item.childCount()):
-                    feed_item = top_item.child(j)
-                    if feed_item.data(0, Qt.UserRole) == feed_url:
-                        font = feed_item.font(0)
-                        font.setBold(self.has_unread_articles(current_feed))
-                        feed_item.setFont(0, font)
-                        break
-        if feed_url not in self.column_widths:
-            self.column_widths[feed_url] = [100] * self.articles_tree.header().count()
-        for index, width in enumerate(self.column_widths[feed_url]):
-            self.articles_tree.header().resizeSection(index, width)
-        group_name = self.get_group_name_for_feed(feed_url)
-        group_settings = self.group_settings.get(group_name, {'omdb_enabled': False})
-        omdb_enabled = group_settings.get('omdb_enabled', False)
-        if not omdb_enabled:
-            current_feed['visible_columns'] = [True, True, False, False, False, False]
-            self.mark_feeds_dirty()
-        elif 'visible_columns' not in current_feed:
-            current_feed['visible_columns'] = [True] * 6
-            self.mark_feeds_dirty()
-        current_items = {item.data(0, Qt.UserRole + 1): item for item in self.get_all_tree_items(self.articles_tree)}
-        self.article_id_to_item = current_items
-        new_entries = {self.get_article_id(entry): entry for entry in self.current_entries}
-        added_ids = new_entries.keys() - current_items.keys()
-        updated_ids = new_entries.keys() & current_items.keys()
-        removed_ids = current_items.keys() - new_entries.keys()
-        for article_id in added_ids:
-            entry = new_entries[article_id]
-            self.add_article_to_tree(entry)
-        for article_id in updated_ids:
-            entry = new_entries[article_id]
-            item = current_items[article_id]
-            self.update_article_in_tree(item, entry)
-        for article_id in removed_ids:
-            item = current_items[article_id]
-            index = self.articles_tree.indexOfTopLevelItem(item)
-            self.articles_tree.takeTopLevelItem(index)
-        sort_column = current_feed.get('sort_column', 1)
-        sort_order = current_feed.get('sort_order', Qt.AscendingOrder)
-        self.articles_tree.sortItems(sort_column, sort_order)
-        for i, visible in enumerate(current_feed['visible_columns']):
-            self.articles_tree.setColumnHidden(i, not visible)
-        if self.articles_tree.topLevelItemCount() > 0:
-            first_item = self.articles_tree.topLevelItem(0)
-            self.articles_tree.setCurrentItem(first_item)
-        self.articles_tree.setSortingEnabled(True)
-        self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
-        if omdb_enabled and self.api_key:
-            movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache, self.quit_flag)
-            movie_thread.movie_data_fetched.connect(self.update_movie_info)
-            self.threads.append(movie_thread)
-            movie_thread.finished.connect(lambda t=movie_thread: self.remove_thread(t))
-            movie_thread.start()
-        else:
-            logging.info(f"OMDb feature disabled for group '{group_name}' or API key not provided; skipping movie data fetching.")
-        self.apply_font_size()
-        self.mark_feeds_dirty()
-
     def add_article_to_tree(self, entry):
+        """Add an article to the articles tree."""
         title = entry.get('title', 'No Title')
         item = ArticleTreeWidgetItem([title, '', '', '', '', ''])
         date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
@@ -1760,10 +1738,16 @@ class RSSReader(QMainWindow):
         article_id = self.get_article_id(entry)
         item.setData(0, Qt.UserRole + 1, article_id)
         item.setData(0, Qt.UserRole, entry)
-        if article_id not in self.read_articles:
-            self.set_feed_icon(item, entry.get('link', ''))  # Use favicon for unread articles
-        else:
-            item.setIcon(0, QIcon())  # No icon for read articles
+
+        # Use cached favicon for the feed
+        current_feed_item = self.feeds_list.currentItem()
+        if current_feed_item:
+            feed_url = current_feed_item.data(0, Qt.UserRole)
+            if feed_url in self.favicon_cache:
+                item.setIcon(0, self.favicon_cache[feed_url])
+            else:
+                item.setIcon(0, QIcon())  # Default icon if no favicon is cached
+
         self.articles_tree.addTopLevelItem(item)
         self.article_id_to_item[article_id] = item
 
@@ -1958,7 +1942,7 @@ class RSSReader(QMainWindow):
             logging.info("Completed force refresh of all feeds.")
             current_feed = self.get_current_feed()
             if current_feed:
-                self.populate_articles()
+                self.populate_articles_ui()  # Corrected method call
         self.update_feed_bold_status(url)
 
     def update_feed_bold_status(self, feed_url):
