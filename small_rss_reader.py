@@ -427,28 +427,28 @@ class RSSReader(QMainWindow):
 
     def add_feed(self, feed_name, feed_url):
         if not feed_url:
-            QMessageBox.warning(self, "Input Error", "Feed URL is required.")
+            self.statusBar().showMessage("Feed URL is required.", 5000)
             return
         if not feed_url.startswith(('http://', 'https://')):
             feed_url = 'http://' + feed_url
         if feed_url in [feed['url'] for feed in self.feeds]:
-            QMessageBox.information(self, "Duplicate Feed", "This feed URL is already added.")
+            self.statusBar().showMessage("This feed URL is already added.", 5000)
             return
         try:
             feed = feedparser.parse(feed_url)
             if feed.bozo and feed.bozo_exception:
                 raise feed.bozo_exception
         except Exception as e:
-            QMessageBox.critical(self, "Feed Error", f"Failed to load feed: {e}")
+            self.statusBar().showMessage(f"Failed to load feed: {e}", 5000)
             logging.error(f"Failed to load feed {feed_url}: {e}")
             return
         if not feed_name:
             feed_name = feed.feed.get('title', feed_url)
         if feed_name in [feed['title'] for feed in self.feeds]:
-            QMessageBox.warning(self, "Duplicate Name", "A feed with this name already exists.")
+            self.statusBar().showMessage("A feed with this name already exists.", 5000)
             return
         self.create_feed_data(feed_name, feed_url, feed)
-        self.statusBar().showMessage(f"Added feed: {feed_name}")
+        self.statusBar().showMessage(f"Added feed: {feed_name}", 5000)
         logging.info(f"Added new feed: {feed_name} ({feed_url})")
         self.prune_old_entries()
         self.mark_feeds_dirty()
@@ -458,11 +458,11 @@ class RSSReader(QMainWindow):
     def remove_feed(self):
         selected_items = self.feeds_list.selectedItems()
         if not selected_items:
-            QMessageBox.information(self, "No Feed Selected", "Please select a feed to remove.")
+            self.statusBar().showMessage("Please select a feed to remove.", 5000)
             return
         item = selected_items[0]
         if item.data(0, Qt.UserRole) is None:
-            QMessageBox.information(self, "Invalid Selection", "Please select a feed, not a group.")
+            self.statusBar().showMessage("Please select a feed, not a group.", 5000)
             return
         feed_name = item.text(0)
         reply = QMessageBox.question(self, 'Remove Feed',
@@ -481,7 +481,7 @@ class RSSReader(QMainWindow):
                 self.feeds_list.takeTopLevelItem(index)
             self.mark_feeds_dirty()
             self.save_feeds()
-            self.statusBar().showMessage(f"Removed feed: {feed_name}")
+            self.statusBar().showMessage(f"Removed feed: {feed_name}", 5000)
             logging.info(f"Removed feed: {feed_name}")
 
     def fetch_feed_with_cache(self, url):
@@ -497,11 +497,7 @@ class RSSReader(QMainWindow):
             return feed
         except Exception as e:
             logging.error(f"Failed to fetch feed {url}: {e}")
-            QMessageBox.critical(
-                self,
-                "Feed Error",
-                f"Failed to fetch feed from {url}.\n\nError: {str(e)}"
-            )
+            self.statusBar().showMessage(f"Failed to fetch feed from {url}. Error: {str(e)}", 5000)
             return None
 
     def clear_expired_cache(self):
@@ -567,6 +563,7 @@ class RSSReader(QMainWindow):
     def quit_app(self):
         self.is_quitting = True
         self.quit_flag.set()
+        self.statusBar().showMessage("Saving your data before exiting...", 5000)
         self.close()
 
     def save_font_size(self):
@@ -789,15 +786,15 @@ class RSSReader(QMainWindow):
     def open_article_url(self, item, column):
         entry = item.data(0, Qt.UserRole)
         if not entry:
-            QMessageBox.warning(self, "No Entry Data", "No data available for the selected article.")
+            self.statusBar().showMessage("No data available for the selected article.", 5000)
             return
         url = entry.get('link', '')
         if not url:
-            QMessageBox.warning(self, "No URL", "No URL found for the selected article.")
+            self.statusBar().showMessage("No URL found for the selected article.", 5000)
             return
         parsed_url = urlparse(url)
         if not parsed_url.scheme.startswith('http'):
-            QMessageBox.warning(self, "Invalid URL", "The URL is invalid or unsupported.")
+            self.statusBar().showMessage("The URL is invalid or unsupported.", 5000)
             return
         QDesktopServices.openUrl(QUrl(url))
         QTimer.singleShot(100, self.activateWindow)
@@ -1016,11 +1013,11 @@ class RSSReader(QMainWindow):
                     self.movie_data_cache = json.load(f)
                     logging.info(f"Loaded movie data cache with {len(self.movie_data_cache)} entries.")
             except json.JSONDecodeError:
-                QMessageBox.critical(self, "Load Error", "Failed to parse movie_data_cache.json.")
+                self.statusBar().showMessage("Failed to parse movie_data_cache.json.", 5000)
                 logging.error("Failed to parse movie_data_cache.json.")
                 self.movie_data_cache = {}
             except Exception as e:
-                QMessageBox.critical(self, "Load Error", f"Unexpected error: {e}")
+                self.statusBar().showMessage(f"Unexpected error: {e}", 5000)
                 logging.error(f"Unexpected error while loading movie data cache: {e}")
                 self.movie_data_cache = {}
         else:
@@ -1036,11 +1033,11 @@ class RSSReader(QMainWindow):
                     self.group_settings = json.load(f)
                     logging.info(f"Loaded group settings with {len(self.group_settings)} groups.")
             except json.JSONDecodeError:
-                QMessageBox.critical(self, "Load Error", "Failed to parse group_settings.json.")
+                self.statusBar().showMessage("Failed to parse group_settings.json.", 5000)
                 logging.error("Failed to parse group_settings.json.")
                 self.group_settings = {}
             except Exception as e:
-                QMessageBox.critical(self, "Load Error", f"Unexpected error: {e}")
+                self.statusBar().showMessage(f"Unexpected error: {e}", 5000)
                 logging.error(f"Unexpected error while loading group settings: {e}")
                 self.group_settings = {}
         else:
@@ -1059,11 +1056,11 @@ class RSSReader(QMainWindow):
                 self.read_articles = set()
                 logging.info("Created empty read_articles.json.")
         except json.JSONDecodeError:
-            QMessageBox.critical(self, "Load Error", "Failed to parse read_articles.json.")
+            self.statusBar().showMessage("Failed to parse read_articles.json.", 5000)
             logging.error("Failed to parse read_articles.json.")
             self.read_articles = set()
         except Exception as e:
-            QMessageBox.critical(self, "Load Error", f"Unexpected error: {e}")
+            self.statusBar().showMessage(f"Unexpected error: {e}", 5000)
             logging.error(f"Unexpected error while loading read articles: {e}")
             self.read_articles = set()
 
@@ -1098,19 +1095,19 @@ class RSSReader(QMainWindow):
     def mark_feed_as_read(self):
         current_feed = self.get_current_feed()
         if not current_feed:
-            QMessageBox.information(self, "No Feed Selected", "Please select a feed to mark as read.")
+            self.statusBar().showMessage("Please select a feed to mark as read.", 5000)
             return
         feed_url = current_feed['url']
         feed_entries = current_feed.get('entries', [])
         if not feed_entries:
-            QMessageBox.information(self, "No Articles", "The selected feed has no articles.")
+            self.statusBar().showMessage("The selected feed has no articles.", 5000)
             return
         for entry in feed_entries:
             article_id = self.get_article_id(entry)
             self.read_articles.add(article_id)
         self.populate_articles()
         self.update_feed_bold_status(feed_url)
-        self.statusBar().showMessage(f"Marked all articles in '{current_feed['title']}' as read.")
+        self.statusBar().showMessage(f"Marked all articles in '{current_feed['title']}' as read.", 5000)
         logging.info(f"Marked all articles in feed '{current_feed['title']}' as read.")
 
     def init_tray_icon(self):
@@ -1236,6 +1233,23 @@ class RSSReader(QMainWindow):
         except Exception as e:
             logging.error(f"Failed to save read articles: {e}")
 
+    def save_feeds(self):
+        try:
+            feeds_data = {
+                'feeds': self.feeds,
+                'column_widths': self.column_widths,
+            }
+            feeds_path = get_user_data_path('feeds.json')
+            os.makedirs(os.path.dirname(feeds_path), exist_ok=True)
+            with open(feeds_path, 'w') as f:
+                json.dump(feeds_data, f, indent=4)
+            logging.info("Feeds saved successfully.")
+            self.data_changed = True  # Mark data as changed
+            self.statusBar().showMessage("Feeds saved successfully.", 5000)
+        except Exception as e:
+            logging.error(f"Failed to save feeds: {e}")
+            self.statusBar().showMessage("Error saving feeds. Check logs for details.", 5000)
+
     def toggle_toolbar_visibility(self):
         visible = self.toggle_toolbar_action.isChecked()
         self.toolbar.setVisible(visible)
@@ -1285,7 +1299,7 @@ class RSSReader(QMainWindow):
 
     def handle_group_selection(self, group_item):
         self.feeds_list.setCurrentItem(group_item)
-        self.statusBar().showMessage(f"Selected group: {group_item.text(0)}")
+        self.statusBar().showMessage(f"Selected group: {group_item.text(0)}", 5000)
         logging.info(f"Selected group: {group_item.text(0)}")
         if group_item.childCount() > 0:
             first_feed_item = group_item.child(0)
@@ -1363,7 +1377,7 @@ class RSSReader(QMainWindow):
             'notifications_enabled': notifications_enabled
         }
         self.save_group_settings()
-        self.statusBar().showMessage(f"Updated settings for group: {group_name}")
+        self.statusBar().showMessage(f"Updated settings for group: {group_name}", 5000)
         logging.info(f"Updated settings for group '{group_name}': OMDb {'enabled' if omdb_enabled else 'disabled'}, Notifications {'enabled' if notifications_enabled else 'disabled'}.")
         current_feed = self.get_current_feed()
         if current_feed:
@@ -1404,7 +1418,7 @@ class RSSReader(QMainWindow):
         self.save_group_names()
         self.save_group_settings()
         group_item.setText(0, new_group_name)
-        self.statusBar().showMessage(f"Renamed group to: {new_group_name}")
+        self.statusBar().showMessage(f"Renamed group to: {new_group_name}", 5000)
         logging.info(f"Renamed group '{current_group_name}' to '{new_group_name}'.")
 
     def get_domain_for_group(self, group_name):
@@ -1416,18 +1430,18 @@ class RSSReader(QMainWindow):
     def rename_feed(self):
         selected_items = self.feeds_list.selectedItems()
         if not selected_items:
-            QMessageBox.information(self, "No Feed Selected", "Please select a feed to rename.")
+            self.statusBar().showMessage("Please select a feed to rename.", 5000)
             return
         item = selected_items[0]
         if item.data(0, Qt.UserRole) is None:
-            QMessageBox.information(self, "Invalid Selection", "Please select a feed, not a group.")
+            self.statusBar().showMessage("Please select a feed, not a group.", 5000)
             return
         current_name = item.text(0)
         new_name, ok = QInputDialog.getText(
             self, "Rename Feed", "Enter new name:", QLineEdit.Normal, current_name)
         if ok and new_name:
             if new_name in [feed['title'] for feed in self.feeds]:
-                QMessageBox.warning(self, "Duplicate Name", "A feed with this name already exists.")
+                self.statusBar().showMessage("A feed with this name already exists.", 5000)
                 return
             url = item.data(0, Qt.UserRole)
             feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
@@ -1436,7 +1450,7 @@ class RSSReader(QMainWindow):
                 item.setText(0, new_name)
                 self.mark_feeds_dirty()
                 self.save_feeds()
-                self.statusBar().showMessage(f"Renamed feed to: {new_name}")
+                self.statusBar().showMessage(f"Renamed feed to: {new_name}", 5000)
                 logging.info(f"Renamed feed '{current_name}' to '{new_name}'.")
 
     def load_group_names(self):
@@ -1475,12 +1489,12 @@ class RSSReader(QMainWindow):
                         self.column_widths = {}
                 self.prune_old_entries()
             except json.JSONDecodeError:
-                QMessageBox.critical(self, "Load Error", "Failed to parse feeds.json.")
+                self.statusBar().showMessage("Failed to parse feeds.json.", 5000)
                 logging.error("Failed to parse feeds.json.")
                 self.feeds = []
                 self.column_widths = {}
             except Exception as e:
-                QMessageBox.critical(self, "Load Error", f"Unexpected error: {e}")
+                self.statusBar().showMessage(f"Unexpected error: {e}", 5000)
                 logging.error(f"Unexpected error while loading feeds: {e}")
                 self.feeds = []
                 self.column_widths = {}
@@ -1543,6 +1557,38 @@ class RSSReader(QMainWindow):
                         feed_item.setFont(0, font)
         self.feeds_list.expandAll()
 
+    def backup_to_icloud(self):
+        backup_folder = os.path.join(Path.home(), "Library", "Mobile Documents", "com~apple~CloudDocs", "SmallRSSReaderBackup")
+        os.makedirs(backup_folder, exist_ok=True)
+        files_to_backup = ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json']
+        for filename in files_to_backup:
+            source = get_user_data_path(filename)
+            dest = os.path.join(backup_folder, filename)
+            if os.path.exists(source):
+                try:
+                    shutil.copy2(source, dest)
+                    logging.info(f"Backed up {filename} to iCloud.")
+                except Exception as e:
+                    logging.error(f"Failed to backup {filename}: {e}")
+        self.statusBar().showMessage("Backup to iCloud completed successfully.", 5000)
+
+    def restore_from_icloud(self):
+        backup_folder = os.path.join(Path.home(), "Library", "Mobile Documents", "com~apple~CloudDocs", "SmallRSSReaderBackup")
+        files_to_restore = ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json']
+        for filename in files_to_restore:
+            backup_file = os.path.join(backup_folder, filename)
+            if os.path.exists(backup_file):
+                dest = get_user_data_path(filename)
+                try:
+                    shutil.copy2(backup_file, dest)
+                    logging.info(f"Restored {filename} from iCloud.")
+                except Exception as e:
+                    logging.error(f"Failed to restore {filename}: {e}")
+        self.load_group_settings(QSettings('rocker', 'SmallRSSReader'))
+        self.load_read_articles()
+        self.load_feeds()
+        self.statusBar().showMessage("Restore from iCloud completed successfully.", 5000)
+
     def save_feeds(self):
         try:
             feeds_data = {
@@ -1555,8 +1601,10 @@ class RSSReader(QMainWindow):
                 json.dump(feeds_data, f, indent=4)
             logging.info("Feeds saved successfully.")
             self.data_changed = True  # Mark data as changed
+            self.statusBar().showMessage("Feeds saved successfully.", 5000)
         except Exception as e:
             logging.error(f"Failed to save feeds: {e}")
+            self.statusBar().showMessage("Error saving feeds. Check logs for details.", 5000)
 
     def update_feed_titles(self):
         for feed in self.feeds:
@@ -1591,10 +1639,10 @@ class RSSReader(QMainWindow):
         url = item.data(0, Qt.UserRole)
         feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
         if feed_data and feed_data.get('entries'):
-            self.statusBar().showMessage(f"Loading articles from {item.text(0)}")
+            self.statusBar().showMessage(f"Loading articles from {item.text(0)}", 5000)
             self.populate_articles_in_background(feed_data['entries'])
         else:
-            self.statusBar().showMessage(f"Loading articles from {item.text(0)}")
+            self.statusBar().showMessage(f"Loading articles from {item.text(0)}", 5000)
             worker = Worker()
             worker.feed_fetched.connect(self.on_feed_fetched)
             runnable = FetchFeedRunnable(url, worker)
@@ -1617,7 +1665,7 @@ class RSSReader(QMainWindow):
         for entry in self.current_entries:
             self.add_article_to_tree(entry)
         self.articles_tree.setSortingEnabled(True)
-        self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles")
+        self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles", 5000)
         logging.info(f"Loaded {len(self.current_entries)} articles into the UI.")
 
     def display_content(self):
@@ -1705,7 +1753,7 @@ class RSSReader(QMainWindow):
             feed_url = current_feed_item.data(0, Qt.UserRole)
             self.set_feed_new_icon(feed_url, False)
         self.content_view.setHtml(html_content, baseUrl=QUrl(feed_url))
-        self.statusBar().showMessage(f"Displaying article: {title}")
+        self.statusBar().showMessage(f"Displaying article: {title}", 5000)
         article_id = item.data(0, Qt.UserRole + 1)
         if article_id not in self.read_articles:
             self.read_articles.add(article_id)
@@ -1831,16 +1879,16 @@ class RSSReader(QMainWindow):
     def mark_feed_unread(self):
         selected_items = self.feeds_list.selectedItems()
         if not selected_items:
-            QMessageBox.information(self, "No Feed Selected", "Please select a feed to mark as unread.")
+            self.statusBar().showMessage("Please select a feed to mark as unread.", 5000)
             return
         item = selected_items[0]
         if item.data(0, Qt.UserRole) is None:
-            QMessageBox.information(self, "Invalid Selection", "Please select a feed, not a group.")
+            self.statusBar().showMessage("Please select a feed, not a group.", 5000)
             return
         url = item.data(0, Qt.UserRole)
         feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
         if not feed_data or 'entries' not in feed_data:
-            QMessageBox.warning(self, "No Entries", "No articles found for the selected feed.")
+            self.statusBar().showMessage("No articles found for the selected feed.", 5000)
             return
         reply = QMessageBox.question(self, 'Mark Feed Unread',
                                      'Are you sure you want to mark all articles in this feed as unread?',
@@ -1991,10 +2039,10 @@ class RSSReader(QMainWindow):
                 self.prune_old_entries()
                 self.mark_feeds_dirty()
                 self.save_feeds()
-                self.statusBar().showMessage("Feeds imported")
+                self.statusBar().showMessage("Feeds imported", 5000)
                 logging.info("Feeds imported successfully.")
             except Exception as e:
-                QMessageBox.critical(self, "Import Error", f"Failed to import feeds: {e}")
+                self.statusBar().showMessage(f"Failed to import feeds: {e}", 5000)
                 logging.error(f"Failed to import feeds: {e}")
 
     def export_feeds(self):
@@ -2003,10 +2051,10 @@ class RSSReader(QMainWindow):
             try:
                 with open(file_name, 'w') as f:
                     json.dump(self.feeds, f, indent=4)
-                self.statusBar().showMessage("Feeds exported")
+                self.statusBar().showMessage("Feeds exported", 5000)
                 logging.info("Feeds exported successfully.")
             except Exception as e:
-                QMessageBox.critical(self, "Export Error", f"Failed to export feeds: {e}")
+                self.statusBar().showMessage(f"Failed to export feeds: {e}", 5000)
                 logging.error(f"Failed to export feeds: {e}")
 
     def show_header_menu(self, position):
@@ -2071,39 +2119,6 @@ class RSSReader(QMainWindow):
         logging.info("Performing periodic cleanup of old articles.")
         self.prune_old_entries()
         self.statusBar().showMessage("Periodic cleanup completed.")
-
-    # --- iCloud Backup/Restore Feature ---
-    def backup_to_icloud(self):
-        backup_folder = os.path.join(Path.home(), "Library", "Mobile Documents", "com~apple~CloudDocs", "SmallRSSReaderBackup")
-        os.makedirs(backup_folder, exist_ok=True)
-        files_to_backup = ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json']
-        for filename in files_to_backup:
-            source = get_user_data_path(filename)
-            dest = os.path.join(backup_folder, filename)
-            if os.path.exists(source):
-                try:
-                    shutil.copy2(source, dest)
-                    logging.info(f"Backed up {filename} to iCloud.")
-                except Exception as e:
-                    logging.error(f"Failed to backup {filename}: {e}")
-
-    def restore_from_icloud(self):
-        backup_folder = os.path.join(Path.home(), "Library", "Mobile Documents", "com~apple~CloudDocs", "SmallRSSReaderBackup")
-        files_to_restore = ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json']
-        for filename in files_to_restore:
-            backup_file = os.path.join(backup_folder, filename)
-            if os.path.exists(backup_file):
-                dest = get_user_data_path(filename)
-                try:
-                    shutil.copy2(backup_file, dest)
-                    logging.info(f"Restored {filename} from iCloud.")
-                except Exception as e:
-                    logging.error(f"Failed to restore {filename}: {e}")
-        self.load_group_settings(QSettings('rocker', 'SmallRSSReader'))
-        self.load_read_articles()
-        self.load_feeds()
-
-    # --- End iCloud Backup/Restore ---
 
 ### Main Function ###
 
