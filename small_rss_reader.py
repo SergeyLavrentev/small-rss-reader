@@ -342,8 +342,7 @@ class SettingsDialog(QDialog):
         self.parent.save_feeds()
         self.parent.load_feeds()
         self.parent.load_articles()
-        if icloud_enabled:
-            self.parent.backup_to_icloud()
+        # Removed backup_to_icloud call here to prevent unnecessary backups during startup.
 
     def accept(self):
         self.save_settings()
@@ -358,6 +357,7 @@ class RSSReader(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.data_changed = False  # Track if data has been modified
         self.feed_cache = {}  # Cache for feed data with timestamps
         self.cache_expiry = timedelta(minutes=5)
         self.setWindowTitle("Small RSS Reader")
@@ -373,6 +373,86 @@ class RSSReader(QMainWindow):
         self.active_feed_threads = 0
         self.init_tray_icon()
         self.notify_signal.connect(self.show_notification)
+
+    def mark_feeds_dirty(self):
+        self.feeds_dirty = True
+
+    def prune_old_entries(self):
+        cutoff_date = datetime.now() - timedelta(days=self.max_days)
+        feeds_updated = False
+        for feed in self.feeds:
+            original_count = len(feed.get('entries', []))
+            feed['entries'] = [entry for entry in feed.get('entries', []) if self.get_entry_date(entry) >= cutoff_date]
+            pruned_count = original_count - len(feed['entries'])
+            if pruned_count > 0:
+                logging.info(f"Pruned {pruned_count} old articles from feed '{feed['title']}'.")
+                feeds_updated = True
+        if feeds_updated:
+            self.mark_feeds_dirty()
+
+    def perform_periodic_cleanup(self):
+        logging.info("Performing periodic cleanup of old articles.")
+        self.prune_old_entries()
+        self.statusBar().showMessage("Periodic cleanup completed.")
+
+    def add_feed(self, feed_name, feed_url):
+        if not feed_url:
+            QMessageBox.warning(self, "Input Error", "Feed URL is required.")
+            return
+        if not feed_url.startswith(('http://', 'https://')):
+            feed_url = 'http://' + feed_url
+        if feed_url in [feed['url'] for feed in self.feeds]:
+            QMessageBox.information(self, "Duplicate Feed", "This feed URL is already added.")
+            return
+        try:
+            feed = feedparser.parse(feed_url)
+            if feed.bozo and feed.bozo_exception:
+                raise feed.bozo_exception
+        except Exception as e:
+            QMessageBox.critical(self, "Feed Error", f"Failed to load feed: {e}")
+            logging.error(f"Failed to load feed {feed_url}: {e}")
+            return
+        if not feed_name:
+            feed_name = feed.feed.get('title', feed_url)
+        if feed_name in [feed['title'] for feed in self.feeds]:
+            QMessageBox.warning(self, "Duplicate Name", "A feed with this name already exists.")
+            return
+        self.create_feed_data(feed_name, feed_url, feed)
+        self.statusBar().showMessage(f"Added feed: {feed_name}")
+        logging.info(f"Added new feed: {feed_name} ({feed_url})")
+        self.prune_old_entries()
+        self.mark_feeds_dirty()
+        self.save_feeds()
+        self.load_feeds()
+
+    def remove_feed(self):
+        selected_items = self.feeds_list.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "No Feed Selected", "Please select a feed to remove.")
+            return
+        item = selected_items[0]
+        if item.data(0, Qt.UserRole) is None:
+            QMessageBox.information(self, "Invalid Selection", "Please select a feed, not a group.")
+            return
+        feed_name = item.text(0)
+        reply = QMessageBox.question(self, 'Remove Feed',
+                                     f"Are you sure you want to remove the feed '{feed_name}'?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            url = item.data(0, Qt.UserRole)
+            self.feeds = [feed for feed in self.feeds if feed['url'] != url]
+            parent_group = item.parent()
+            if parent_group:
+                parent_group.removeChild(item)
+                if parent_group.childCount() == 0:
+                    self.feeds_list.takeTopLevelItem(self.feeds_list.indexOfTopLevelItem(parent_group))
+            else:
+                index = self.feeds_list.indexOfTopLevelItem(item)
+                self.feeds_list.takeTopLevelItem(index)
+            self.mark_feeds_dirty()
+            self.save_feeds()
+            self.statusBar().showMessage(f"Removed feed: {feed_name}")
+            logging.info(f"Removed feed: {feed_name}")
 
     def fetch_feed_with_cache(self, url):
         try:
@@ -451,6 +531,7 @@ class RSSReader(QMainWindow):
         self.quit_flag = threading.Event()
         # Initialize iCloud backup setting:
         self.icloud_backup_enabled = settings.value('icloud_backup_enabled', False, type=bool)
+        self.feeds_dirty = False  # Flag to track if feeds need saving
 
     def quit_app(self):
         self.is_quitting = True
@@ -845,15 +926,6 @@ class RSSReader(QMainWindow):
                 filtered_entries.append(entry)
         return filtered_entries
 
-    def prune_old_entries(self):
-        cutoff_date = datetime.now() - timedelta(days=self.max_days)
-        for feed in self.feeds:
-            original_count = len(feed.get('entries', []))
-            feed['entries'] = [entry for entry in feed.get('entries', []) if self.get_entry_date(entry) >= cutoff_date]
-            pruned_count = original_count - len(feed['entries'])
-            if pruned_count > 0:
-                logging.info(f"Pruned {pruned_count} old articles from feed '{feed['title']}'.")
-
     def get_entry_date(self, entry):
         date_struct = entry.get('published_parsed') or entry.get('updated_parsed')
         return datetime(*date_struct[:6]) if date_struct else datetime.min
@@ -948,7 +1020,6 @@ class RSSReader(QMainWindow):
                     logging.info(f"Loaded {len(self.read_articles)} read articles.")
             else:
                 self.read_articles = set()
-                self.save_read_articles()
                 logging.info("Created empty read_articles.json.")
         except json.JSONDecodeError:
             QMessageBox.critical(self, "Load Error", "Failed to parse read_articles.json.")
@@ -967,18 +1038,19 @@ class RSSReader(QMainWindow):
 
     def closeEvent(self, event):
         if self.is_quitting:
-            self.save_feeds()
+            self.save_feeds()  # Save feeds on exit
+            self.save_read_articles()  # Save read articles on exit
             settings = QSettings('rocker', 'SmallRSSReader')
             self.save_geometry_and_state(settings)
             self.save_ui_visibility_settings(settings)
             self.save_movie_data_cache()
             self.save_group_settings()
-            self.save_read_articles()
             self.save_font_size()
+            if self.data_changed and self.icloud_backup_enabled:
+                self.backup_to_icloud()
             for thread in self.threads:
-                if isinstance(thread, QThread):
-                    thread.quit()
-                    thread.wait()
+                thread.quit()
+                thread.wait()
             logging.info("All threads terminated.")
             event.accept()
         else:
@@ -999,7 +1071,6 @@ class RSSReader(QMainWindow):
         for entry in feed_entries:
             article_id = self.get_article_id(entry)
             self.read_articles.add(article_id)
-        self.save_read_articles()
         self.populate_articles()
         self.update_feed_bold_status(feed_url)
         self.statusBar().showMessage(f"Marked all articles in '{current_feed['title']}' as read.")
@@ -1079,7 +1150,7 @@ class RSSReader(QMainWindow):
                 while len(self.column_widths[feed['url']]) <= logical_index:
                     self.column_widths[feed['url']].append(0)
                 self.column_widths[feed['url']][logical_index] = new_size
-        self.save_feeds()
+        self.mark_feeds_dirty()
 
     def save_geometry_and_state(self, settings):
         settings.setValue('geometry', self.saveGeometry())
@@ -1094,6 +1165,7 @@ class RSSReader(QMainWindow):
         settings.setValue('statusbar_visible', self.statusBar().isVisible())
         settings.setValue('toolbar_visible', self.toolbar.isVisible())
         settings.setValue('menubar_visible', self.menuBar().isVisible())
+        self.data_changed = True  # Mark data as changed
 
     def save_movie_data_cache(self):
         try:
@@ -1112,6 +1184,7 @@ class RSSReader(QMainWindow):
             with open(group_settings_path, 'w') as f:
                 json.dump(self.group_settings, f, indent=4)
             logging.info("Group settings saved successfully.")
+            self.data_changed = True  # Mark data as changed
         except Exception as e:
             logging.error(f"Failed to save group settings: {e}")
 
@@ -1122,6 +1195,7 @@ class RSSReader(QMainWindow):
             with open(read_articles_path, 'w') as f:
                 json.dump(list(self.read_articles), f, indent=4)
             logging.info(f"Saved {len(self.read_articles)} read articles.")
+            self.data_changed = True  # Mark data as changed
         except Exception as e:
             logging.error(f"Failed to save read articles: {e}")
 
@@ -1155,35 +1229,6 @@ class RSSReader(QMainWindow):
         if dialog.exec_() == QDialog.Accepted:
             feed_name, feed_url = dialog.get_inputs()
             self.add_feed(feed_name, feed_url)
-
-    def add_feed(self, feed_name, feed_url):
-        if not feed_url:
-            QMessageBox.warning(self, "Input Error", "Feed URL is required.")
-            return
-        if not feed_url.startswith(('http://', 'https://')):
-            feed_url = 'http://' + feed_url
-        if feed_url in [feed['url'] for feed in self.feeds]:
-            QMessageBox.information(self, "Duplicate Feed", "This feed URL is already added.")
-            return
-        try:
-            feed = feedparser.parse(feed_url)
-            if feed.bozo and feed.bozo_exception:
-                raise feed.bozo_exception
-        except Exception as e:
-            QMessageBox.critical(self, "Feed Error", f"Failed to load feed: {e}")
-            logging.error(f"Failed to load feed {feed_url}: {e}")
-            return
-        if not feed_name:
-            feed_name = feed.feed.get('title', feed_url)
-        if feed_name in [feed['title'] for feed in self.feeds]:
-            QMessageBox.warning(self, "Duplicate Name", "A feed with this name already exists.")
-            return
-        self.create_feed_data(feed_name, feed_url, feed)
-        self.statusBar().showMessage(f"Added feed: {feed_name}")
-        logging.info(f"Added new feed: {feed_name} ({feed_url})")
-        self.prune_old_entries()
-        self.save_feeds()
-        self.load_feeds()
 
     def create_feed_data(self, feed_name, feed_url, feed):
         # New feeds start with OMDb and notifications disabled.
@@ -1352,37 +1397,10 @@ class RSSReader(QMainWindow):
             if feed_data:
                 feed_data['title'] = new_name
                 item.setText(0, new_name)
+                self.mark_feeds_dirty()
                 self.save_feeds()
                 self.statusBar().showMessage(f"Renamed feed to: {new_name}")
                 logging.info(f"Renamed feed '{current_name}' to '{new_name}'.")
-
-    def remove_feed(self):
-        selected_items = self.feeds_list.selectedItems()
-        if not selected_items:
-            QMessageBox.information(self, "No Feed Selected", "Please select a feed to remove.")
-            return
-        item = selected_items[0]
-        if item.data(0, Qt.UserRole) is None:
-            QMessageBox.information(self, "Invalid Selection", "Please select a feed, not a group.")
-            return
-        feed_name = item.text(0)
-        reply = QMessageBox.question(self, 'Remove Feed',
-                                     f"Are you sure you want to remove the feed '{feed_name}'?",
-                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            url = item.data(0, Qt.UserRole)
-            self.feeds = [feed for feed in self.feeds if feed['url'] != url]
-            parent_group = item.parent()
-            if parent_group:
-                parent_group.removeChild(item)
-                if parent_group.childCount() == 0:
-                    self.feeds_list.takeTopLevelItem(self.feeds_list.indexOfTopLevelItem(parent_group))
-            else:
-                index = self.feeds_list.indexOfTopLevelItem(item)
-                self.feeds_list.takeTopLevelItem(index)
-            self.save_feeds()
-            self.statusBar().showMessage(f"Removed feed: {feed_name}")
-            logging.info(f"Removed feed: {feed_name}")
 
     def load_group_names(self):
         settings = QSettings('rocker', 'SmallRSSReader')
@@ -1452,6 +1470,7 @@ class RSSReader(QMainWindow):
                     'visible_columns': [True] * 6
                 }
             ]
+            self.mark_feeds_dirty()
             self.save_feeds()
             logging.info("Created default feeds.json with initial feeds.")
         self.feeds_list.clear()
@@ -1489,7 +1508,6 @@ class RSSReader(QMainWindow):
                         font.setBold(True)
                         feed_item.setFont(0, font)
         self.feeds_list.expandAll()
-        self.save_feeds()
 
     def save_feeds(self):
         try:
@@ -1502,8 +1520,7 @@ class RSSReader(QMainWindow):
             with open(feeds_path, 'w') as f:
                 json.dump(feeds_data, f, indent=4)
             logging.info("Feeds saved successfully.")
-            if self.icloud_backup_enabled:
-                self.backup_to_icloud()
+            self.data_changed = True  # Mark data as changed
         except Exception as e:
             logging.error(f"Failed to save feeds: {e}")
 
@@ -1527,7 +1544,7 @@ class RSSReader(QMainWindow):
                             break
                 except Exception as e:
                     logging.error(f"Error updating feed title for {feed['url']}: {e}")
-        self.save_feeds()
+        self.mark_feeds_dirty()
 
     def load_articles(self):
         selected_items = self.feeds_list.selectedItems()
@@ -1640,7 +1657,6 @@ class RSSReader(QMainWindow):
         if article_id not in self.read_articles:
             self.read_articles.add(article_id)
             item.setIcon(0, QIcon())
-            self.save_read_articles()
             logging.debug(f"Marked article as read: {title}")
     
     def highlight_text(self, text, search_text):
@@ -1683,10 +1699,10 @@ class RSSReader(QMainWindow):
         omdb_enabled = group_settings.get('omdb_enabled', False)
         if not omdb_enabled:
             current_feed['visible_columns'] = [True, True, False, False, False, False]
-            self.save_feeds()
+            self.mark_feeds_dirty()
         elif 'visible_columns' not in current_feed:
             current_feed['visible_columns'] = [True] * 6
-            self.save_feeds()
+            self.mark_feeds_dirty()
         current_items = {item.data(0, Qt.UserRole + 1): item for item in self.get_all_tree_items(self.articles_tree)}
         self.article_id_to_item = current_items
         new_entries = {self.get_article_id(entry): entry for entry in self.current_entries}
@@ -1723,7 +1739,7 @@ class RSSReader(QMainWindow):
         else:
             logging.info(f"OMDb feature disabled for group '{group_name}' or API key not provided; skipping movie data fetching.")
         self.apply_font_size()
-        self.save_feeds()
+        self.mark_feeds_dirty()
 
     def add_article_to_tree(self, entry):
         title = entry.get('title', 'No Title')
@@ -1850,7 +1866,6 @@ class RSSReader(QMainWindow):
                 article_id = self.get_article_id(entry)
                 if article_id in self.read_articles:
                     self.read_articles.remove(article_id)
-            self.save_read_articles()
             self.load_articles()
             self.populate_articles()
             logging.info(f"Marked feed '{feed_data['title']}' as unread.")
@@ -1904,11 +1919,11 @@ class RSSReader(QMainWindow):
                             new_entries.append(entry)
                             self.send_notification(feed_data['title'], entry)
                     self.prune_old_entries()
+                    self.mark_feeds_dirty()
                     break
             current_feed_item = self.feeds_list.currentItem()
             if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
                 self.populate_articles()
-            self.save_read_articles()
             logging.info(f"Fetched feed: {url} with {len(new_entries)} new articles.")
             self.update_feed_bold_status(url)
         else:
@@ -1930,6 +1945,7 @@ class RSSReader(QMainWindow):
                     if new_entries:
                         self.set_feed_new_icon(url, True)
                     self.prune_old_entries()
+                    self.mark_feeds_dirty()
                     break
         else:
             logging.warning(f"Failed to refresh feed: {url}")
@@ -1944,7 +1960,6 @@ class RSSReader(QMainWindow):
             if current_feed:
                 self.populate_articles()
         self.update_feed_bold_status(url)
-        self.save_feeds()
 
     def update_feed_bold_status(self, feed_url):
         for i in range(self.feeds_list.topLevelItemCount()):
@@ -1990,6 +2005,7 @@ class RSSReader(QMainWindow):
                             feed.setdefault('visible_columns', [True] * 6)
                             self.feeds.append(feed)
                 self.prune_old_entries()
+                self.mark_feeds_dirty()
                 self.save_feeds()
                 self.statusBar().showMessage("Feeds imported")
                 logging.info("Feeds imported successfully.")
@@ -2041,7 +2057,7 @@ class RSSReader(QMainWindow):
         current_feed = self.get_current_feed()
         if current_feed and 'visible_columns' in current_feed and index < len(current_feed['visible_columns']):
             current_feed['visible_columns'][index] = checked
-            self.save_feeds()
+            self.mark_feeds_dirty()
             logging.debug(f"Column {index} visibility set to {checked} for feed '{current_feed['title']}'.")
 
     def on_sort_changed(self, column, order):
@@ -2049,7 +2065,7 @@ class RSSReader(QMainWindow):
         if current_feed:
             current_feed['sort_column'] = column
             current_feed['sort_order'] = order
-            self.save_feeds()
+            self.mark_feeds_dirty()
             logging.debug(f"Sort settings updated for feed '{current_feed['title']}': column={column}, order={order}.")
 
     def select_first_feed(self):
@@ -2070,7 +2086,6 @@ class RSSReader(QMainWindow):
     def perform_periodic_cleanup(self):
         logging.info("Performing periodic cleanup of old articles.")
         self.prune_old_entries()
-        self.save_feeds()
         self.statusBar().showMessage("Periodic cleanup completed.")
 
     # --- iCloud Backup/Restore Feature ---
