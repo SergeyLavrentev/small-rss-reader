@@ -1065,8 +1065,16 @@ class RSSReader(QMainWindow):
             self.read_articles = set()
 
     def keyPressEvent(self, event):
-        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Q:
-            self.quit_app()
+        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            selected_items = self.articles_tree.selectedItems()
+            if selected_items:
+                item = selected_items[0]
+                entry = item.data(0, Qt.UserRole)
+                if entry:
+                    url = entry.get('link', '')
+                    if url:
+                        QDesktopServices.openUrl(QUrl(url))
+                        self.statusBar().showMessage(f"Opened article: {entry.get('title', 'No Title')}", 5000)
         else:
             super().keyPressEvent(event)
 
