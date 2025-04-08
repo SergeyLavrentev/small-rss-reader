@@ -201,10 +201,19 @@ class FeedsTreeWidget(QTreeWidget):
 
 class WebEnginePage(QWebEnginePage):
     def acceptNavigationRequest(self, url, _type, isMainFrame):
-        if _type == QWebEnginePage.NavigationTypeLinkClicked:
+        if (_type == QWebEnginePage.NavigationTypeLinkClicked):
             QDesktopServices.openUrl(url)  # Open the link in the default browser
             return False  # Prevent the WebEngineView from handling the link
         return super().acceptNavigationRequest(url, _type, isMainFrame)
+
+    def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
+        # Suppress all JavaScript console messages except errors
+        if level == QWebEnginePage.ErrorMessageLevel:
+            logging.error(f"JS Error: {message} (Source: {sourceID}, Line: {lineNumber})")
+
+    def handleUnsupportedContent(self, reply):
+        logging.error(f"Unsupported content: {reply.url().toString()}")
+        reply.abort()
 
 class AddFeedDialog(QDialog):
     def __init__(self, parent=None):
@@ -367,14 +376,16 @@ class PopulateArticlesThread(QThread):
     def run(self):
         filtered_entries = []
         article_id_to_item = {}
-        max_days_ago = datetime.now() - timedelta(days=self.max_days)
+        # Reminder: Do not modify the following line under any circumstances:
+        # cutoff_date = datetime.now() - timedelta(days=self.max_days)
+        cutoff_date = datetime.now() - timedelta(days=self.max_days)
 
         for entry in self.entries:
             date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
             if date_struct:
                 entry_date = datetime(*date_struct[:6])
                 entry['formatted_date'] = format_date_column(entry_date)
-                if entry_date >= max_days_ago:
+                if entry_date >= cutoff_date:
                     filtered_entries.append(entry)
             else:
                 filtered_entries.append(entry)
@@ -496,13 +507,15 @@ class RSSReader(QMainWindow):
                 cached_data, timestamp = self.feed_cache[url]
                 if datetime.now() - timestamp < self.cache_expiry:
                     return cached_data
+
             feed = feedparser.parse(url)
             if feed.bozo and feed.bozo_exception:
                 raise feed.bozo_exception
+
             self.feed_cache[url] = (feed, datetime.now())
             return feed
+
         except Exception as e:
-            logging.error(f"Failed to fetch feed {url}: {e}")
             self.statusBar().showMessage(f"Failed to fetch feed from {url}. Error: {str(e)}", 5000)
             return None
 
@@ -635,15 +648,32 @@ class RSSReader(QMainWindow):
         notifications_enabled = group_settings.get('notifications_enabled', False)
         settings = QSettings('rocker', 'SmallRSSReader')
         global_notifications = settings.value('notifications_enabled', False, type=bool)
+
+        # Log only once per feed
+        if not hasattr(self, '_logged_notifications'):
+            self._logged_notifications = set()
+
+        if feed_title not in self._logged_notifications:
+            logging.debug(f"Notification for feed '{feed_title}' is {'enabled' if notifications_enabled else 'disabled'}.")
+            self._logged_notifications.add(feed_title)
+
+        # Avoid sending notifications for every article in the feed
         if global_notifications and notifications_enabled:
+            if not hasattr(self, '_notified_articles'):
+                self._notified_articles = set()
+
+            article_id = entry.get('id') or entry.get('link')
+            if article_id in self._notified_articles:
+                return  # Skip if notification for this article was already sent
+
+            self._notified_articles.add(article_id)
+
             title = f"New Article in {feed_title}"
             subtitle = entry.get('title', 'No Title')
             message = entry.get('summary', 'No summary available.')
             link = entry.get('link', '')
             self.notify_signal.emit(title, subtitle, message, link)
             logging.info(f"Sent notification for new article: {entry.get('title', 'No Title')}")
-        else:
-            logging.debug(f"Notification for feed '{feed_title}' is disabled.")
 
     def init_ui(self):
         self.setup_central_widget()
@@ -753,6 +783,9 @@ class RSSReader(QMainWindow):
         content_layout.setSpacing(2)
         self.content_view = QWebEngineView()
         self.content_view.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+        self.content_view.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
+        self.content_view.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
+        self.content_view.settings().setAttribute(QWebEngineSettings.PluginsEnabled, True)
         self.content_view.setPage(WebEnginePage(self.content_view))
         content_layout.addWidget(self.content_view)
         self.main_splitter.addWidget(self.content_panel)
@@ -781,7 +814,7 @@ class RSSReader(QMainWindow):
             return
 
         pixmap = fetch_favicon(url)
-        if pixmap:
+        if (pixmap):
             icon = QIcon(pixmap)
             self.favicon_cache[url] = icon
             item.setIcon(0, icon)
@@ -1434,29 +1467,70 @@ class RSSReader(QMainWindow):
 
     def group_settings_dialog(self, group_item):
         group_name = group_item.text(0)
-        settings = self.group_settings.get(group_name, {'omdb_enabled': False, 'notifications_enabled': False})
+        settings = self.group_settings.get(group_name, {'omdb_enabled': False, 'notifications_enabled': False, 'http_auth_enabled': False, 'http_auth_username': '', 'http_auth_password': ''})
         omdb_enabled = settings.get('omdb_enabled', False)
         notifications_enabled = settings.get('notifications_enabled', False)
+        http_auth_enabled = settings.get('http_auth_enabled', False)
+        http_auth_username = settings.get('http_auth_username', '')
+        http_auth_password = settings.get('http_auth_password', '')
+
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Settings for {group_name}")
         layout = QVBoxLayout(dialog)
+
         omdb_checkbox = QCheckBox("Enable OMDb Feature", dialog)
         omdb_checkbox.setChecked(omdb_enabled)
         layout.addWidget(omdb_checkbox)
+
         notifications_checkbox = QCheckBox("Enable Notifications", dialog)
         notifications_checkbox.setChecked(notifications_enabled)
         layout.addWidget(notifications_checkbox)
+
+        http_auth_checkbox = QCheckBox("Enable HTTP Authentication", dialog)
+        http_auth_checkbox.setChecked(http_auth_enabled)
+        layout.addWidget(http_auth_checkbox)
+
+        username_input = QLineEdit(dialog)
+        username_input.setPlaceholderText("Username")
+        username_input.setText(http_auth_username)
+        layout.addWidget(username_input)
+
+        password_input = QLineEdit(dialog)
+        password_input.setPlaceholderText("Password")
+        password_input.setEchoMode(QLineEdit.Password)
+        password_input.setText(http_auth_password)
+        layout.addWidget(password_input)
+
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         layout.addWidget(button_box)
         button_box.accepted.connect(dialog.accept)
         button_box.rejected.connect(dialog.reject)
-        if dialog.exec_() == QDialog.Accepted:
-            self.save_group_setting(group_name, omdb_checkbox.isChecked(), notifications_checkbox.isChecked())
 
-    def save_group_setting(self, group_name, omdb_enabled, notifications_enabled):
+        def toggle_auth_fields():
+            enabled = http_auth_checkbox.isChecked()
+            username_input.setEnabled(enabled)
+            password_input.setEnabled(enabled)
+
+        http_auth_checkbox.toggled.connect(toggle_auth_fields)
+        toggle_auth_fields()
+
+        if dialog.exec_() == QDialog.Accepted:
+            self.save_group_setting(
+                group_name,
+                omdb_checkbox.isChecked(),
+                notifications_checkbox.isChecked(),
+                http_auth_checkbox.isChecked(),
+                username_input.text().strip(),
+                password_input.text().strip()
+            )
+
+    def save_group_setting(self, group_name, omdb_enabled, notifications_enabled, http_auth_enabled, http_auth_username, http_auth_password):
         self.group_settings[group_name] = {
             'omdb_enabled': omdb_enabled,
-            'notifications_enabled': notifications_enabled
+            'notifications_enabled': notifications_enabled,
+            'http_auth_enabled': http_auth_enabled,
+            'http_auth_username': http_auth_username,
+            'http_auth_password': http_auth_password
         }
         self.save_group_settings()
         self.statusBar().showMessage(f"Updated settings for group: {group_name}", 5000)
@@ -1805,94 +1879,120 @@ class RSSReader(QMainWindow):
         selected_items = self.articles_tree.selectedItems()
         if not selected_items:
             return
+
         item = selected_items[0]
         entry = item.data(0, Qt.UserRole)
         if not entry:
             return
-        title = entry.get('title', 'No Title')
-        date_formatted = item.text(1)
-        if 'content' in entry and entry['content']:
-            content = entry['content'][0].get('value', '')
-        elif 'summary' in entry:
-            content = entry.get('summary', 'No content available.')
-        else:
-            content = ''
-        images_html = ''
-        search_text = self.search_input.text().lower().strip()
-        if search_text:
-            title = self.highlight_text(title, search_text)
-            content = self.highlight_text(content, search_text)
-        if 'media_content' in entry:
-            for media in entry.get('media_content', []):
-                img_url = media.get('url')
-                if img_url:
-                    images_html += f'<img src="{img_url}" alt="" /><br/>'
-        elif 'media_thumbnail' in entry:
-            for media in entry.get('media_thumbnail', []):
-                img_url = media.get('url')
-                if img_url:
-                    images_html += f'<img src="{img_url}" alt="" /><br/>'
-        elif 'links' in entry:
-            for link in entry.get('links', []):
-                if link.get('rel') == 'enclosure' and 'image' in link.get('type', ''):
-                    img_url = link.get('href')
-                    if img_url:
-                        images_html += f'<img src="{img_url}" alt="" /><br/>'
-        link = entry.get('link', '')
-        movie_data = entry.get('movie_data', {})
-        movie_info_html = ''
-        if movie_data:
-            poster_url = movie_data.get('poster', '')
-            if poster_url and poster_url != 'N/A':
-                movie_info_html += f'<img src="{poster_url}" alt="Poster" style="max-width:200px;" /><br/>'
-            details = [
-                ('Released', movie_data.get('released', '')),
-                ('Plot', movie_data.get('plot', '')),
-                ('Writer', movie_data.get('writer', '')),
-                ('Actors', movie_data.get('actors', '')),
-                ('Language', movie_data.get('language', '')),
-                ('Country', movie_data.get('country', '')),
-                ('Awards', movie_data.get('awards', '')),
-                ('DVD Release', movie_data.get('dvd', '')),
-                ('Box Office', movie_data.get('boxoffice', '')),
-            ]
-            for label, value in details:
-                if value and value != 'N/A':
-                    movie_info_html += f'<p><strong>{label}:</strong> {value}</p>'
-            ratings = movie_data.get('ratings', [])
-            if ratings:
-                ratings_html = '<ul>'
-                for rating in ratings:
-                    ratings_html += f"<li>{rating.get('Source')}: {rating.get('Value')}</li>"
-                ratings_html += '</ul>'
-                movie_info_html += f'<p><strong>Ratings:</strong>{ratings_html}</p>'
-        styles = """
-        <style>
-        body { max-width: 800px; margin: auto; padding: 5px; font-family: Helvetica, Arial, sans-serif; font-size: 16px; line-height: 1.6; color: #333; background-color: #f9f9f9; }
-        h3 { font-size: 18px; }
-        p { margin: 0 0 5px; }
-        img { max-width: 100%; height: auto; display: block; margin: 5px 0; }
-        a { color: #1e90ff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        blockquote { margin: 5px 0; padding: 5px 20px; background-color: #f0f0f0; border-left: 5px solid #ccc; }
-        code { font-family: monospace; background-color: #f0f0f0; padding: 2px 4px; border-radius: 4px; }
-        pre { background-color: #f0f0f0; padding: 10px; overflow: auto; border-radius: 4px; }
-        </style>
-        """
-        read_more = f'<p><a href="{link}" target="_self" rel="noopener noreferrer">Read more</a></p>' if link else ''
-        html_content = f"{styles}<h3>{title}</h3>{images_html}{content}{movie_info_html}{read_more}"
-        current_feed_item = self.feeds_list.currentItem()
-        feed_url = current_feed_item.data(0, Qt.UserRole) if current_feed_item else ''  # Ensure feed_url is defined
-        self.content_view.setHtml(html_content, baseUrl=QUrl(feed_url))
-        self.statusBar().showMessage(f"Displaying article: {title}", 5000)
-        article_id = item.data(0, Qt.UserRole + 1)
+
+        # Mark article as read when displaying content
+        article_id = self.get_article_id(entry)
         if article_id not in self.read_articles:
             self.read_articles.add(article_id)
-            font = item.font(0)
-            font.setBold(False)  # Remove bold font for read articles
-            item.setFont(0, font)
-            item.setIcon(0, QIcon())  # Remove unread icon
-            logging.debug(f"Marked article as read: {title}")
+
+        title = entry.get('title', 'No Title')
+        content = ''
+
+        # Try to get content from different possible fields
+        if 'content' in entry and entry['content']:
+            content = entry['content'][0].get('value', '')
+
+        if not content and 'summary_detail' in entry:
+            content = entry['summary_detail'].get('value', '')
+
+        if not content:
+            content = entry.get('summary', '')
+
+        # If content is still empty or contains "No content available.", fetch from URL
+        if not content or content == 'No content available.':
+            link = entry.get('link', '')
+            if link:
+                try:
+                    auth = self.get_http_auth_for_feed(entry.get('link', ''))
+                    response = requests.get(link, timeout=5, auth=auth)
+                    if response.status_code == 200:
+                        self.content_view.setHtml(response.text)  # Render full HTML in the browser
+                        return
+                except Exception as e:
+                    self.statusBar().showMessage(f"Failed to fetch article content from {link}. Error: {str(e)}", 5000)
+
+        # Replace relative image URLs with absolute ones based on the feed URL
+        if content and '<img' in content:
+            base_url = entry.get('link', '')
+            content = re.sub(r'src=["\'](?!http)([^"\']+)', f'src="{base_url}\1"', content)
+
+        # Add "Читать далее" link
+        link = entry.get('link', '')
+        read_more = f'<p style="margin-top: 15px;"><a href="{link}" target="_blank">Читать далее</a></p>' if link else ''
+
+        # Combine all parts into the final HTML
+        html_content = f"""
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body {{ 
+                    font-family: Arial, sans-serif; 
+                    line-height: 1.6; 
+                    margin: 0; 
+                    padding: 15px; 
+                    color: #333; 
+                    font-size: {self.current_font_size}px; 
+                }}
+                h3 {{ 
+                    margin-top: 0; 
+                    color: #444; 
+                    border-bottom: 1px solid #ddd;
+                    padding-bottom: 8px;
+                }}
+                img {{ 
+                    margin: 10px 0; 
+                    max-width: 100%;
+                    height: auto;
+                    border-radius: 5px;
+                }}
+                p {{ margin: 10px 0; }}
+                a {{ color: #0066cc; text-decoration: none; }}
+                a:hover {{ text-decoration: underline; }}
+            </style>
+        </head>
+        <body>
+            <h3>{title}</h3>
+            {content}
+            {read_more}
+        </body>
+        </html>
+        """
+
+        self.content_view.setHtml(html_content)
+
+    def get_http_auth_for_feed(self, url):
+        """Retrieve HTTP authentication credentials for a feed."""
+        feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
+        if not feed_data:
+            return None
+        if feed_data.get('http_auth_enabled', False):
+            username = feed_data.get('http_auth_username', '')
+            password = feed_data.get('http_auth_password', '')
+            return (username, password) if username and password else None
+        return None
+
+    def extract_article_content(self, html):
+        """Extract the main content of the article from its HTML."""
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+
+            # Attempt to find the main content block
+            main_content = soup.find('article') or soup.find('div', class_='content') or soup.find('div', id='main')
+            if main_content:
+                return main_content.decode_contents()
+
+            # Fallback: return the entire body if no specific block is found
+            return soup.body.decode_contents() if soup.body else 'No content available.'
+        except Exception as e:
+            return 'No content available.'
 
     def highlight_text(self, text, search_text):
         if not search_text:
@@ -2164,6 +2264,9 @@ class RSSReader(QMainWindow):
         remove_feed_action = QAction("Remove Feed", self)
         remove_feed_action.triggered.connect(self.remove_feed)
         menu.addAction(remove_feed_action)
+        settings_action = QAction("Settings", self)
+        settings_action.triggered.connect(lambda: self.feed_settings_dialog(feed_item))
+        menu.addAction(settings_action)
         menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
 
     def import_feeds(self):
@@ -2261,6 +2364,53 @@ class RSSReader(QMainWindow):
         logging.info("Performing periodic cleanup of old articles.")
         self.prune_old_entries()
         self.statusBar().showMessage("Periodic cleanup completed.")
+
+    def feed_settings_dialog(self, feed_item):
+        feed_url = feed_item.data(0, Qt.UserRole)
+        feed_data = next((feed for feed in self.feeds if feed['url'] == feed_url), None)
+        if not feed_data:
+            QMessageBox.warning(self, "Error", "Feed data not found.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Settings for {feed_data['title']}")
+        layout = QVBoxLayout(dialog)
+
+        http_auth_checkbox = QCheckBox("Enable HTTP Authentication", dialog)
+        http_auth_enabled = feed_data.get('http_auth_enabled', False)
+        http_auth_checkbox.setChecked(http_auth_enabled)
+        layout.addWidget(http_auth_checkbox)
+
+        username_input = QLineEdit(dialog)
+        username_input.setPlaceholderText("Username")
+        username_input.setText(feed_data.get('http_auth_username', ''))
+        layout.addWidget(username_input)
+
+        password_input = QLineEdit(dialog)
+        password_input.setPlaceholderText("Password")
+        password_input.setEchoMode(QLineEdit.Password)
+        password_input.setText(feed_data.get('http_auth_password', ''))
+        layout.addWidget(password_input)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(button_box)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+
+        def toggle_auth_fields():
+            enabled = http_auth_checkbox.isChecked()
+            username_input.setEnabled(enabled)
+            password_input.setEnabled(enabled)
+
+        http_auth_checkbox.toggled.connect(toggle_auth_fields)
+        toggle_auth_fields()
+
+        if dialog.exec_() == QDialog.Accepted:
+            feed_data['http_auth_enabled'] = http_auth_checkbox.isChecked()
+            feed_data['http_auth_username'] = username_input.text().strip()
+            feed_data['http_auth_password'] = password_input.text().strip()
+            self.save_feeds()
+            self.statusBar().showMessage(f"Updated settings for feed: {feed_data['title']}", 5000)
 
 ### Main Function ###
 
