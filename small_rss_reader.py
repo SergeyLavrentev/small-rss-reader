@@ -197,9 +197,9 @@ class FeedsTreeWidget(QTreeWidget):
 class WebEnginePage(QWebEnginePage):
     def acceptNavigationRequest(self, url, _type, isMainFrame):
         if _type == QWebEnginePage.NavigationTypeLinkClicked:
-            QDesktopServices.openUrl(url)
-            return False
-        return True
+            QDesktopServices.openUrl(url)  # Open the link in the default browser
+            return False  # Prevent the WebEngineView from handling the link
+        return super().acceptNavigationRequest(url, _type, isMainFrame)
 
 class AddFeedDialog(QDialog):
     def __init__(self, parent=None):
@@ -1075,6 +1075,7 @@ class RSSReader(QMainWindow):
                     if url:
                         QDesktopServices.openUrl(QUrl(url))
                         self.statusBar().showMessage(f"Opened article: {entry.get('title', 'No Title')}", 5000)
+                        QTimer.singleShot(100, self.activateWindow)  # Keep focus on the application
         else:
             super().keyPressEvent(event)
 
@@ -1113,7 +1114,7 @@ class RSSReader(QMainWindow):
         for entry in feed_entries:
             article_id = self.get_article_id(entry)
             self.read_articles.add(article_id)
-        self.populate_articles()
+        self.populate_articles_ui()
         self.update_feed_bold_status(feed_url)
         self.statusBar().showMessage(f"Marked all articles in '{current_feed['title']}' as read.", 5000)
         logging.info(f"Marked all articles in feed '{current_feed['title']}' as read.")
@@ -1391,7 +1392,7 @@ class RSSReader(QMainWindow):
         if current_feed:
             current_group_name = self.get_group_name_for_feed(current_feed['url'])
             if current_group_name == group_name:
-                self.populate_articles()
+                self.populate_articles_ui()
         for i in range(self.feeds_list.topLevelItemCount()):
             group_item = self.feeds_list.topLevelItem(i)
             if group_item.text(0) == group_name:
@@ -1668,13 +1669,55 @@ class RSSReader(QMainWindow):
         self.populate_articles_ui()
 
     def populate_articles_ui(self):
-        self.articles_tree.setSortingEnabled(False)
+        """Populate the articles UI with the current feed's articles."""
         self.articles_tree.clear()
-        for entry in self.current_entries:
-            self.add_article_to_tree(entry)
-        self.articles_tree.setSortingEnabled(True)
-        self.statusBar().showMessage(f"Loaded {len(self.current_entries)} articles", 5000)
-        logging.info(f"Loaded {len(self.current_entries)} articles into the UI.")
+        current_feed = self.get_current_feed()
+        if not current_feed:
+            return
+
+        for entry in current_feed.get('entries', []):
+            article_id = self.get_article_id(entry)
+            is_unread = article_id not in self.read_articles
+
+            item = QTreeWidgetItem(self.articles_tree)
+            item.setText(0, entry.get('title', 'No Title'))
+            item.setData(0, Qt.UserRole, entry)
+
+            if is_unread:
+                # Add a softer blue circle to indicate unread status
+                soft_blue_circle = QPixmap(10, 10)
+                soft_blue_circle.fill(Qt.transparent)
+                painter = QPainter(soft_blue_circle)
+                painter.setBrush(QBrush(QColor(135, 206, 250)))  # Softer blue color
+                painter.setPen(Qt.NoPen)
+                painter.drawEllipse(0, 0, 10, 10)
+                painter.end()
+                item.setIcon(0, QIcon(soft_blue_circle))
+
+            date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
+            if date_struct:
+                item.setText(1, datetime(*date_struct[:6]).strftime('%Y-%m-%d %H:%M'))
+
+        self.articles_tree.sortItems(1, Qt.DescendingOrder)
+
+        # Connect the item selection signal to mark articles as read
+        self.articles_tree.itemSelectionChanged.connect(self.mark_selected_article_as_read)
+
+    def mark_selected_article_as_read(self):
+        """Mark the currently selected article as read."""
+        selected_items = self.articles_tree.selectedItems()
+        if not selected_items:
+            return
+
+        item = selected_items[0]
+        entry = item.data(0, Qt.UserRole)
+        if not entry:
+            return
+
+        article_id = self.get_article_id(entry)
+        if article_id not in self.read_articles:
+            self.read_articles.add(article_id)
+            item.setIcon(0, QIcon())  # Remove the unread icon
 
     def display_content(self):
         selected_items = self.articles_tree.selectedItems()
@@ -1754,20 +1797,21 @@ class RSSReader(QMainWindow):
         pre { background-color: #f0f0f0; padding: 10px; overflow: auto; border-radius: 4px; }
         </style>
         """
-        read_more = f'<p><a href="{link}">Read more</a></p>' if link else ''
+        read_more = f'<p><a href="{link}" target="_self" rel="noopener noreferrer">Read more</a></p>' if link else ''
         html_content = f"{styles}<h3>{title}</h3>{images_html}{content}{movie_info_html}{read_more}"
         current_feed_item = self.feeds_list.currentItem()
-        if current_feed_item:
-            feed_url = current_feed_item.data(0, Qt.UserRole)
-            self.set_feed_new_icon(feed_url, False)
+        feed_url = current_feed_item.data(0, Qt.UserRole) if current_feed_item else ''  # Ensure feed_url is defined
         self.content_view.setHtml(html_content, baseUrl=QUrl(feed_url))
         self.statusBar().showMessage(f"Displaying article: {title}", 5000)
         article_id = item.data(0, Qt.UserRole + 1)
         if article_id not in self.read_articles:
             self.read_articles.add(article_id)
-            item.setIcon(0, QIcon())
+            font = item.font(0)
+            font.setBold(False)  # Remove bold font for read articles
+            item.setFont(0, font)
+            item.setIcon(0, QIcon())  # Remove unread icon
             logging.debug(f"Marked article as read: {title}")
-    
+
     def highlight_text(self, text, search_text):
         if not search_text:
             return text
@@ -1795,14 +1839,22 @@ class RSSReader(QMainWindow):
         item.setData(0, Qt.UserRole + 1, article_id)
         item.setData(0, Qt.UserRole, entry)
 
+        # Mark unread articles with bold font and an icon
+        if article_id not in self.read_articles:
+            font = item.font(0)
+            font.setBold(True)
+            item.setFont(0, font)
+            unread_icon = QIcon(resource_path('icons/unread_icon.png'))  # Ensure this icon exists
+            item.setIcon(0, unread_icon)
+        else:
+            item.setIcon(0, QIcon())  # No icon for read articles
+
         # Use cached favicon for the feed
         current_feed_item = self.feeds_list.currentItem()
         if current_feed_item:
             feed_url = current_feed_item.data(0, Qt.UserRole)
             if feed_url in self.favicon_cache:
                 item.setIcon(0, self.favicon_cache[feed_url])
-            else:
-                item.setIcon(0, QIcon())  # Default icon if no favicon is cached
 
         self.articles_tree.addTopLevelItem(item)
         self.article_id_to_item[article_id] = item
@@ -1907,7 +1959,7 @@ class RSSReader(QMainWindow):
                 if article_id in self.read_articles:
                     self.read_articles.remove(article_id)
             self.load_articles()
-            self.populate_articles()
+            self.populate_articles_ui()
             logging.info(f"Marked feed '{feed_data['title']}' as unread.")
 
     def filter_articles(self, search_text):
@@ -1963,7 +2015,7 @@ class RSSReader(QMainWindow):
                     break
             current_feed_item = self.feeds_list.currentItem()
             if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
-                self.populate_articles()
+                self.populate_articles_ui()  # Corrected method call
             logging.info(f"Fetched feed: {url} with {len(new_entries)} new articles.")
             self.update_feed_bold_status(url)
         else:
