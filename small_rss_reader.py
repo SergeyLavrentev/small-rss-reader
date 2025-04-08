@@ -60,7 +60,7 @@ def get_user_data_path(filename):
         return os.path.join(os.path.abspath("."), filename)
 
 def fetch_favicon(url):
-    """Fetch the favicon for a given URL."""
+    """Fetch the favicon for a given URL and resize it to a standard size."""
     try:
         domain = urlparse(url).netloc
         favicon_url = f"https://{domain}/favicon.ico"
@@ -70,7 +70,8 @@ def fetch_favicon(url):
             pixmap = QPixmap()
             if pixmap.loadFromData(response.content):
                 logging.debug(f"Successfully loaded favicon for {domain}")
-                return pixmap
+                # Resize the favicon to a standard size (e.g., 16x16)
+                return pixmap.scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             else:
                 logging.warning(f"Failed to load favicon data for {domain}.")
         else:
@@ -78,6 +79,10 @@ def fetch_favicon(url):
     except Exception as e:
         logging.error(f"Error fetching favicon for {domain}: {e}")
     return None
+
+def format_date_column(entry_date):
+    """Format the date column to display only the date."""
+    return entry_date.strftime('%Y-%m-%d')
 
 ### Helper Classes ###
 
@@ -368,6 +373,7 @@ class PopulateArticlesThread(QThread):
             date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
             if date_struct:
                 entry_date = datetime(*date_struct[:6])
+                entry['formatted_date'] = format_date_column(entry_date)
                 if entry_date >= max_days_ago:
                     filtered_entries.append(entry)
             else:
@@ -712,10 +718,11 @@ class RSSReader(QMainWindow):
         articles_layout.setContentsMargins(2, 2, 2, 2)
         articles_layout.setSpacing(2)
         self.articles_tree = QTreeWidget()
-        self.articles_tree.setHeaderLabels(['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director'])
-        header = self.articles_tree.header()
-        header.setSectionResizeMode(QHeaderView.Interactive)
-        header.sectionResized.connect(self.save_column_widths)
+        self.articles_tree.setHeaderLabels(['Title', 'Date'])  # Default columns
+        # Simplified logic to always show all columns
+        all_columns = ['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director']
+        self.articles_tree.setHeaderLabels(all_columns)
+
         articles_layout.addWidget(self.articles_tree)
         self.horizontal_splitter.addWidget(self.articles_panel)
         self.articles_tree.setColumnWidth(0, 200)
@@ -853,6 +860,30 @@ class RSSReader(QMainWindow):
         self.toggle_menubar_action.setChecked(True)
         self.toggle_menubar_action.triggered.connect(self.toggle_menubar_visibility)
         view_menu.addAction(self.toggle_menubar_action)
+        toggle_columns_action = QAction("Select Columns", self)
+        toggle_columns_action.triggered.connect(self.toggle_column_visibility)
+        view_menu.addAction(toggle_columns_action)
+
+    def toggle_column_visibility(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select Columns")
+        layout = QVBoxLayout(dialog)
+
+        checkboxes = []
+        for i, column_name in enumerate(['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director']):
+            checkbox = QCheckBox(column_name, dialog)
+            checkbox.setChecked(self.articles_tree.headerItem().isHidden(i) == False)
+            layout.addWidget(checkbox)
+            checkboxes.append((i, checkbox))
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(button_box)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+
+        if dialog.exec_() == QDialog.Accepted:
+            for i, checkbox in checkboxes:
+                self.articles_tree.setColumnHidden(i, not checkbox.isChecked())
 
     def init_toolbar(self):
         self.toolbar = QToolBar("Main Toolbar")
@@ -1724,6 +1755,10 @@ class RSSReader(QMainWindow):
         if not current_feed:
             return
 
+        visible_columns = current_feed.get('visible_columns', [True] * 6)
+        for i, visible in enumerate(visible_columns):
+            self.articles_tree.setColumnHidden(i, not visible)
+
         for entry in current_feed.get('entries', []):
             article_id = self.get_article_id(entry)
             is_unread = article_id not in self.read_articles
@@ -1733,24 +1768,22 @@ class RSSReader(QMainWindow):
             item.setData(0, Qt.UserRole, entry)
 
             if is_unread:
-                # Add a softer blue circle to indicate unread status
-                soft_blue_circle = QPixmap(10, 10)
-                soft_blue_circle.fill(Qt.transparent)
-                painter = QPainter(soft_blue_circle)
-                painter.setBrush(QBrush(QColor(135, 206, 250)))  # Softer blue color
-                painter.setPen(Qt.NoPen)
-                painter.drawEllipse(0, 0, 10, 10)
-                painter.end()
-                item.setIcon(0, QIcon(soft_blue_circle))
+                font = item.font(0)
+                font.setBold(True)
+                item.setFont(0, font)
 
             date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
             if date_struct:
-                item.setText(1, datetime(*date_struct[:6]).strftime('%Y-%m-%d %H:%M'))
+                date_obj = datetime(*date_struct[:6])
+                item.setText(1, date_obj.strftime('%Y-%m-%d'))
+
+            # Populate OMDB-related columns if data exists
+            movie_data = entry.get('movie_data', {})
+            if movie_data:
+                item.setText(2, movie_data.get('imdbrating', 'N/A'))
+                item.setText(5, movie_data.get('director', ''))
 
         self.articles_tree.sortItems(1, Qt.DescendingOrder)
-
-        # Connect the item selection signal to mark articles as read
-        self.articles_tree.itemSelectionChanged.connect(self.mark_selected_article_as_read)
 
     def mark_selected_article_as_read(self):
         """Mark the currently selected article as read."""
