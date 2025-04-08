@@ -564,6 +564,29 @@ class RSSReader(QMainWindow):
         self.is_quitting = True
         self.quit_flag.set()
         self.statusBar().showMessage("Saving your data before exiting...", 5000)
+
+        # Ensure all threads are terminated
+        for thread in self.threads:
+            if isinstance(thread, QThread):
+                thread.quit()
+                thread.wait()
+                logging.info(f"Thread {thread} terminated.")
+
+        # Stop and clean up PopulateArticlesThread if running
+        if hasattr(self, 'populate_thread') and self.populate_thread.isRunning():
+            self.populate_thread.quit()
+            self.populate_thread.wait()
+            logging.info("PopulateArticlesThread terminated.")
+
+        # Ensure QThreadPool tasks are completed
+        self.thread_pool.waitForDone()
+        logging.info("All QThreadPool tasks completed.")
+
+        # Explicitly delete QWebEngineView to ensure cleanup
+        if hasattr(self, 'content_view'):
+            self.content_view.deleteLater()
+            logging.info("Deleted QWebEngineView to ensure proper cleanup.")
+
         self.close()
 
     def save_font_size(self):
@@ -1091,10 +1114,29 @@ class RSSReader(QMainWindow):
             self.save_font_size()
             if self.data_changed and self.icloud_backup_enabled:
                 self.backup_to_icloud()
-            for thread in self.threads:
-                thread.quit()
-                thread.wait()
-            logging.info("All threads terminated.")
+
+            # Ensure all threads are terminated and deleted
+            if hasattr(self, 'threads'):
+                for thread in self.threads:
+                    if thread.isRunning():
+                        logging.warning(f"Thread {thread} is still running. Attempting to stop.")
+                        thread.quit()
+                        thread.wait()
+                        thread.deleteLater()
+                        logging.info(f"Thread {thread} stopped and deleted.")
+
+            if hasattr(self, 'populate_thread') and self.populate_thread.isRunning():
+                self.populate_thread.quit()
+                self.populate_thread.wait()
+                self.populate_thread.deleteLater()
+                logging.info("Terminated and deleted populate_thread during close event.")
+
+            # Explicitly delete QWebEngineView to ensure cleanup
+            if hasattr(self, 'content_view'):
+                self.content_view.deleteLater()
+                logging.info("Deleted QWebEngineView to ensure proper cleanup.")
+
+            logging.info("All threads and resources terminated.")
             event.accept()
         else:
             event.ignore()
@@ -1308,7 +1350,7 @@ class RSSReader(QMainWindow):
 
     def handle_group_selection(self, group_item):
         self.feeds_list.setCurrentItem(group_item)
-        self.statusBar().showMessage(f"Selected group: {group_item.text(0)}", 5000)
+        self.statusBar().showMessage(f"Selected group: {group_item.text(0)}")
         logging.info(f"Selected group: {group_item.text(0)}")
         if group_item.childCount() > 0:
             first_feed_item = group_item.child(0)
@@ -1659,6 +1701,13 @@ class RSSReader(QMainWindow):
             logging.debug(f"Started thread for feed: {url}")
 
     def populate_articles_in_background(self, entries):
+        # Stop and clean up any existing thread
+        if hasattr(self, 'populate_thread') and self.populate_thread.isRunning():
+            self.populate_thread.quit()
+            self.populate_thread.wait()
+            logging.info("Previous PopulateArticlesThread terminated.")
+
+        # Start a new thread
         self.populate_thread = PopulateArticlesThread(entries, self.read_articles, self.max_days)
         self.populate_thread.articles_ready.connect(self.on_articles_ready)
         self.populate_thread.start()
