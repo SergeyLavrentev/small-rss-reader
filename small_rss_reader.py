@@ -377,7 +377,6 @@ class PopulateArticlesThread(QThread):
         filtered_entries = []
         article_id_to_item = {}
         # Reminder: Do not modify the following line under any circumstances:
-        # cutoff_date = datetime.now() - timedelta(days=self.max_days)
         cutoff_date = datetime.now() - timedelta(days=self.max_days)
 
         for entry in self.entries:
@@ -578,6 +577,19 @@ class RSSReader(QMainWindow):
         self.icloud_backup_enabled = settings.value('icloud_backup_enabled', False, type=bool)
         self.feeds_dirty = False  # Flag to track if feeds need saving
         self.favicon_cache = {}  # Cache for favicons
+        self.blue_dot_icon = self.create_blue_dot_icon()
+
+    def create_blue_dot_icon(self):
+        """Create a reusable blue dot icon."""
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QColor(0, 0, 255))  # Blue color
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(4, 4, 8, 8)
+        painter.end()
+        return QIcon(pixmap)
 
     def quit_app(self):
         self.is_quitting = True
@@ -1842,20 +1854,14 @@ class RSSReader(QMainWindow):
             item.setData(0, Qt.UserRole, entry)
 
             if is_unread:
-                font = item.font(0)
-                font.setBold(True)
-                item.setFont(0, font)
+                item.setIcon(0, self.blue_dot_icon)
 
             date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
             if date_struct:
                 date_obj = datetime(*date_struct[:6])
-                item.setText(1, date_obj.strftime('%Y-%m-%d'))
-
-            # Populate OMDB-related columns if data exists
-            movie_data = entry.get('movie_data', {})
-            if movie_data:
-                item.setText(2, movie_data.get('imdbrating', 'N/A'))
-                item.setText(5, movie_data.get('director', ''))
+                date_formatted = date_obj.strftime('%Y-%m-%d')  # Only show the date
+                item.setText(1, date_formatted)
+                item.setData(1, Qt.UserRole, date_obj)
 
         self.articles_tree.sortItems(1, Qt.DescendingOrder)
 
@@ -1889,83 +1895,349 @@ class RSSReader(QMainWindow):
         article_id = self.get_article_id(entry)
         if article_id not in self.read_articles:
             self.read_articles.add(article_id)
+            item.setIcon(0, QIcon())  # Remove the blue dot icon
 
-        title = entry.get('title', 'No Title')
-        content = ''
+        # Check if preview text is available in the feed
+        preview_text = entry.get('summary', '').strip()
+        description = entry.get('description', '').strip()
+        content = entry.get('content', [{}])[0].get('value', '').strip() if entry.get('content') else ''
+        
+        # Add debug logging to see what content is available
+        logging.debug(f"Article content - Title: {entry.get('title', 'No Title')}")
+        logging.debug(f"Content available: {bool(content)}, length: {len(content)}")
+        logging.debug(f"Description available: {bool(description)}, length: {len(description)}")
+        logging.debug(f"Summary available: {bool(preview_text)}, length: {len(preview_text)}")
+        
+        # Use the best available content from the feed
+        if content:
+            html_content = content
+            logging.debug("Using 'content' for article")
+            self.display_formatted_content(entry, html_content)
+        elif description:
+            html_content = description
+            logging.debug("Using 'description' for article")
+            self.display_formatted_content(entry, html_content)
+        elif preview_text:
+            html_content = preview_text
+            logging.debug("Using 'summary' for article")
+            self.display_formatted_content(entry, html_content)
+        else:
+            # No content available in the feed, try to fetch from URL
+            logging.debug("No content available, attempting to fetch from URL")
+            article_url = entry.get('link', '')
+            if article_url:
+                # Show a loading message while we fetch the content
+                loading_html = """
+                <html>
+                <head>
+                    <style>
+                        body {{ 
+                            font-family: Arial, sans-serif; 
+                            text-align: center; 
+                            margin-top: 50px; 
+                            color: #555; 
+                        }}
+                        .loader {{
+                            border: 5px solid #f3f3f3;
+                            border-radius: 50%;
+                            border-top: 5px solid #3498db;
+                            width: 50px;
+                            height: 50px;
+                            animation: spin 2s linear infinite;
+                            margin: 20px auto;
+                        }}
+                        @keyframes spin {{
+                            0% {{ transform: rotate(0deg); }}
+                            100% {{ transform: rotate(360deg); }}
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <h3>Fetching content...</h3>
+                    <div class="loader"></div>
+                    <p>Loading article from: {0}</p>
+                </body>
+                </html>
+                """.format(article_url)
+                self.content_view.setHtml(loading_html)
+                
+                # Start a background thread to fetch content
+                self.fetch_article_content(entry)
+            else:
+                # No URL available, show placeholder
+                logging.debug("No URL available for article")
+                placeholder_html = """
+                <html>
+                <head>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; color: #555; }}
+                    </style>
+                </head>
+                <body>
+                    <h3>No preview available.</h3>
+                    <p>No URL found for this article.</p>
+                </body>
+                </html>
+                """
+                self.content_view.setHtml(placeholder_html)
 
-        # Try to get content from different possible fields
-        if 'content' in entry and entry['content']:
-            content = entry['content'][0].get('value', '')
-
-        if not content and 'summary_detail' in entry:
-            content = entry['summary_detail'].get('value', '')
-
-        if not content:
-            content = entry.get('summary', '')
-
-        # If content is still empty or contains "No content available.", fetch from URL
-        if not content or content == 'No content available.':
-            link = entry.get('link', '')
-            if link:
-                try:
-                    auth = self.get_http_auth_for_feed(entry.get('link', ''))
-                    response = requests.get(link, timeout=5, auth=auth)
-                    if response.status_code == 200:
-                        self.content_view.setHtml(response.text)  # Render full HTML in the browser
-                        return
-                except Exception as e:
-                    self.statusBar().showMessage(f"Failed to fetch article content from {link}. Error: {str(e)}", 5000)
-
-        # Replace relative image URLs with absolute ones based on the feed URL
-        if content and '<img' in content:
-            base_url = entry.get('link', '')
-            content = re.sub(r'src=["\'](?!http)([^"\']+)', f'src="{base_url}\1"', content)
-
-        # Add "Читать далее" link
-        link = entry.get('link', '')
-        read_more = f'<p style="margin-top: 15px;"><a href="{link}" target="_blank">Читать далее</a></p>' if link else ''
-
-        # Combine all parts into the final HTML
-        html_content = f"""
+    def display_formatted_content(self, entry, html_content):
+        """Display formatted content with consistent styling."""
+        formatted_html = """
         <html>
         <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body {{ 
                     font-family: Arial, sans-serif; 
-                    line-height: 1.6; 
-                    margin: 0; 
-                    padding: 15px; 
+                    margin: 20px; 
                     color: #333; 
-                    font-size: {self.current_font_size}px; 
+                    line-height: 1.6;
+                    max-width: 800px;
+                    margin: 0 auto;
                 }}
-                h3 {{ 
-                    margin-top: 0; 
-                    color: #444; 
-                    border-bottom: 1px solid #ddd;
-                    padding-bottom: 8px;
-                }}
-                img {{ 
-                    margin: 10px 0; 
-                    max-width: 100%;
-                    height: auto;
-                    border-radius: 5px;
-                }}
-                p {{ margin: 10px 0; }}
+                h1, h2, h3 {{ color: #444; }}
+                img {{ max-width: 100%; height: auto; }}
                 a {{ color: #0066cc; text-decoration: none; }}
                 a:hover {{ text-decoration: underline; }}
+                pre, code {{ 
+                    background-color: #f5f5f5; 
+                    padding: 10px; 
+                    border-radius: 5px; 
+                    font-family: monospace; 
+                    overflow-x: auto;
+                }}
+                blockquote {{
+                    border-left: 4px solid #ccc;
+                    margin-left: 0;
+                    padding-left: 15px;
+                    color: #666;
+                }}
+                table {{
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 15px 0;
+                }}
+                th, td {{
+                    border: 1px solid #ddd;
+                    padding: 8px;
+                }}
+                th {{
+                    background-color: #f2f2f2;
+                    text-align: left;
+                }}
             </style>
         </head>
         <body>
-            <h3>{title}</h3>
-            {content}
-            {read_more}
+            <h2>{0}</h2>
+            {1}
+            <p><a href="{2}">Read full article in browser</a></p>
         </body>
         </html>
-        """
+        """.format(entry.get('title', 'No Title'), html_content, entry.get('link', '#'))
+        
+        # Display the content directly
+        self.content_view.setHtml(formatted_html)
+        logging.info(f"Displayed content for article: {entry.get('title', 'No Title')}")
 
-        self.content_view.setHtml(html_content)
+    def fetch_article_content(self, entry):
+        """Fetch article content from the article URL."""
+        class ContentFetchWorker(QObject):
+            content_fetched = pyqtSignal(object, str)
+
+            def __init__(self, entry):
+                super().__init__()
+                self.entry = entry
+
+            def run(self):
+                try:
+                    url = self.entry.get('link', '')
+                    if not url:
+                        raise ValueError("No URL available")
+                    
+                    logging.debug(f"Fetching content from URL: {url}")
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    }
+                    response = requests.get(url, headers=headers, timeout=10)
+                    response.raise_for_status()
+                    
+                    # Try to extract main content
+                    html_content = self.extract_main_content(response.text)
+                    
+                    # Send the content back to the main thread
+                    self.content_fetched.emit(self.entry, html_content)
+                    logging.debug(f"Content fetched successfully from {url}")
+                    
+                except Exception as e:
+                    logging.error(f"Error fetching article content: {e}")
+                    error_html = f"""
+                    <div>
+                        <h3>Failed to load content</h3>
+                        <p>Error: {str(e)}</p>
+                        <p>Please try opening the article in your browser.</p>
+                    </div>
+                    """
+                    self.content_fetched.emit(self.entry, error_html)
+
+            def extract_main_content(self, html):
+                try:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # Remove script and style elements
+                    for script in soup(["script", "style"]):
+                        script.extract()
+                    
+                    # Try different approaches to find the main content
+                    # 1. Try article tag
+                    content = soup.find('article')
+                    if content:
+                        logging.debug("Found content in <article> tag")
+                        return content.decode_contents()
+                    
+                    # 2. Try main tag
+                    content = soup.find('main')
+                    if content:
+                        logging.debug("Found content in <main> tag")
+                        return content.decode_contents()
+                    
+                    # 3. Try div with content-related class/id
+                    for id_value in ['content', 'main-content', 'article-content', 'post-content']:
+                        content = soup.find('div', id=id_value)
+                        if content:
+                            logging.debug(f"Found content in div with id={id_value}")
+                            return content.decode_contents()
+                    
+                    for class_value in ['content', 'article', 'post', 'entry', 'main-content']:
+                        content = soup.find('div', class_=class_value)
+                        if content:
+                            logging.debug(f"Found content in div with class={class_value}")
+                            return content.decode_contents()
+                    
+                    # 4. If nothing else works, get the body content
+                    if soup.body:
+                        logging.debug("Using body content as fallback")
+                        # Try to filter out headers, footers, sidebars
+                        for tag in soup.find_all(['header', 'footer', 'aside', 'nav']):
+                            tag.extract()
+                        
+                        return str(soup.body)
+                    
+                    logging.debug("No specific content container found, returning whole HTML")
+                    return html  # Return the original HTML if all else fails
+                except ImportError:
+                    logging.error("BeautifulSoup is not installed. Please install it with: pip install beautifulsoup4")
+                    return f"""
+                    <div>
+                        <h3>Missing Dependency</h3>
+                        <p>BeautifulSoup is required to extract article content.</p>
+                        <p>Please install it with: pip install beautifulsoup4</p>
+                    </div>
+                    """
+                except Exception as e:
+                    logging.error(f"Error extracting content: {e}")
+                    return html  # Return the original HTML on error
+
+        # Create worker and thread
+        worker = ContentFetchWorker(entry)
+        thread = QThread()
+        worker.moveToThread(thread)
+        
+        # Connect signals
+        thread.started.connect(worker.run)
+        worker.content_fetched.connect(self.on_article_content_fetched)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(worker.deleteLater)
+        
+        # Start thread
+        thread.start()
+        self.threads.append(thread)
+        logging.debug(f"Started thread to fetch content for article: {entry.get('title', 'No Title')}")
+
+    def on_article_content_fetched(self, entry, html_content):
+        """Handle fetched article content."""
+        logging.debug(f"Received fetched content for article: {entry.get('title', 'No Title')}")
+        
+        # Make sure this article is still selected
+        selected_items = self.articles_tree.selectedItems()
+        if not selected_items:
+            logging.debug("No article selected when content was fetched")
+            return
+            
+        item = selected_items[0]
+        current_entry = item.data(0, Qt.UserRole)
+        
+        # Check if the fetched content is for the currently selected article
+        if self.get_article_id(current_entry) == self.get_article_id(entry):
+            logging.debug("Displaying fetched content")
+            self.display_formatted_content(entry, html_content)
+        else:
+            logging.debug("Ignoring fetched content for non-selected article")
+
+    def load_article_content_async(self, entry):
+        """Load article content in a separate thread to prevent UI freezing."""
+        class ContentLoaderWorker(QObject):
+            content_loaded = pyqtSignal(str)
+
+            def __init__(self, entry):
+                super().__init__()
+                self.entry = entry
+
+            def run(self):
+                try:
+                    url = self.entry.get('link', '')
+                    if not url:
+                        raise ValueError("No URL found for the article.")
+
+                    logging.info(f"Fetching content from URL: {url}")
+                    response = requests.get(url, timeout=10)
+                    logging.info(f"Response status code: {response.status_code}")
+                    response.raise_for_status()
+
+                    content = response.text
+                    logging.info(f"Fetched content length: {len(content)}")
+
+                    # Emit the fetched content
+                    self.content_loaded.emit(content)
+                except Exception as e:
+                    logging.error(f"Failed to load article content: {e}")
+                    self.content_loaded.emit("""
+                    <html>
+                    <head>
+                        <style>
+                            body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; color: #555; }
+                        </style>
+                    </head>
+                    <body>
+                        <h3>Failed to load content.</h3>
+                        <p>Please check your internet connection or try again later.</p>
+                    </body>
+                    </html>
+                    """)
+
+        # Create a worker and thread
+        worker = ContentLoaderWorker(entry)
+        thread = QThread()
+        worker.moveToThread(thread)
+
+        # Connect signals
+        worker.content_loaded.connect(self.update_content_view)
+        thread.started.connect(worker.run)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(worker.deleteLater)
+
+        # Start the thread
+        thread.start()
+
+        # Track the thread for cleanup
+        self.threads.append(thread)
+
+    def update_content_view(self, content):
+        """Update the content view with the fetched HTML content."""
+        logging.info(f"update_content_view called. Content length: {len(content)}")
+        if not content.strip():
+            logging.warning("Received empty content to display.")
+        self.content_view.setHtml(content)
 
     def get_http_auth_for_feed(self, url):
         """Retrieve HTTP authentication credentials for a feed."""
@@ -1986,7 +2258,7 @@ class RSSReader(QMainWindow):
 
             # Attempt to find the main content block
             main_content = soup.find('article') or soup.find('div', class_='content') or soup.find('div', id='main')
-            if main_content:
+            if (main_content):
                 return main_content.decode_contents()
 
             # Fallback: return the entire body if no specific block is found
@@ -2127,22 +2399,19 @@ class RSSReader(QMainWindow):
         if item.data(0, Qt.UserRole) is None:
             self.statusBar().showMessage("Please select a feed, not a group.", 5000)
             return
-        url = item.data(0, Qt.UserRole)
-        feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
+        feed_url = item.data(0, Qt.UserRole)
+        feed_data = next((feed for feed in self.feeds if feed['url'] == feed_url), None)
         if not feed_data or 'entries' not in feed_data:
-            self.statusBar().showMessage("No articles found for the selected feed.", 5000)
+            self.statusBar().showMessage("The selected feed has no articles.", 5000)
             return
-        reply = QMessageBox.question(self, 'Mark Feed Unread',
-                                     'Are you sure you want to mark all articles in this feed as unread?',
-                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            for entry in feed_data['entries']:
-                article_id = self.get_article_id(entry)
-                if article_id in self.read_articles:
-                    self.read_articles.remove(article_id)
-            self.load_articles()
-            self.populate_articles_ui()
-            logging.info(f"Marked feed '{feed_data['title']}' as unread.")
+        for entry in feed_data['entries']:
+            article_id = self.get_article_id(entry)
+            if article_id in self.read_articles:
+                self.read_articles.remove(article_id)
+        self.populate_articles_ui()
+        self.update_feed_bold_status(feed_url)
+        self.statusBar().showMessage(f"Marked all articles in '{feed_data['title']}' as unread.", 5000)
+        logging.info(f"Marked all articles in feed '{feed_data['title']}' as unread.")
 
     def filter_articles(self, search_text):
         search_text = search_text.lower().strip()
@@ -2196,7 +2465,7 @@ class RSSReader(QMainWindow):
                     self.mark_feeds_dirty()
                     break
             current_feed_item = self.feeds_list.currentItem()
-            if current_feed_item and current_feed_item.data(0, Qt.UserRole) == url:
+            if (current_feed_item and current_feed_item.data(0, Qt.UserRole) == url):
                 self.populate_articles_ui()  # Corrected method call
             logging.info(f"Fetched feed: {url} with {len(new_entries)} new articles.")
             self.update_feed_bold_status(url)
@@ -2412,12 +2681,85 @@ class RSSReader(QMainWindow):
             self.save_feeds()
             self.statusBar().showMessage(f"Updated settings for feed: {feed_data['title']}", 5000)
 
+    def load_article_content_async(self, entry):
+        """Load article content in a separate thread to prevent UI freezing."""
+        class ContentLoaderWorker(QObject):
+            content_loaded = pyqtSignal(str)
+
+            def __init__(self, entry):
+                super().__init__()
+                self.entry = entry
+
+            def run(self):
+                try:
+                    url = self.entry.get('link', '')
+                    if not url:
+                        raise ValueError("No URL found for the article.")
+
+                    logging.info(f"Fetching content from URL: {url}")
+                    response = requests.get(url, timeout=10)
+                    logging.info(f"Response status code: {response.status_code}")
+                    response.raise_for_status()
+
+                    # Extract main content using BeautifulSoup
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(response.text, 'html.parser')
+
+                    # Attempt to find the main content block
+                    main_content = soup.find('article') or soup.find('div', {'id': 'content'}) or soup.body
+                    content_html = main_content.prettify() if main_content else response.text
+
+                    logging.info(f"Content length: {len(content_html)}")
+                    self.content_loaded.emit(content_html)
+                except Exception as e:
+                    logging.error(f"Failed to load article content: {e}")
+                    self.content_loaded.emit("""
+                    <html>
+                    <head>
+                        <style>
+                            body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; color: #555; }
+                        </style>
+                    </head>
+                    <body>
+                        <h3>Failed to load content.</h3>
+                        <p>Please check your internet connection or try again later.</p>
+                    </body>
+                    </html>
+                    """)
+
+        # Create a worker and thread
+        worker = ContentLoaderWorker(entry)
+        thread = QThread()
+        worker.moveToThread(thread)
+
+        # Connect signals
+        worker.content_loaded.connect(self.update_content_view)
+        thread.started.connect(worker.run)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(worker.deleteLater)
+
+        # Add logging for thread lifecycle
+        thread.started.connect(lambda: logging.info("Thread started."))
+        thread.finished.connect(lambda: logging.info("Thread finished."))
+
+        # Start the thread
+        thread.start()
+
+        # Track the thread for cleanup
+        self.threads.append(thread)
+
+    def update_content_view(self, content):
+        """Update the content view with the fetched HTML content."""
+        logging.info("update_content_view called with content length: %d" % len(content))
+        self.content_view.setHtml(content)
+
 ### Main Function ###
 
 def main():
     parser = argparse.ArgumentParser(description="Small RSS Reader")
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     args = parser.parse_args()
+    
     if getattr(sys, 'frozen', False):
         application_path = os.path.dirname(sys.executable)
     else:
