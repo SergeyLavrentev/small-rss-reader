@@ -207,12 +207,11 @@ class WebEnginePage(QWebEnginePage):
         return super().acceptNavigationRequest(url, _type, isMainFrame)
 
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
-        # Suppress all JavaScript console messages except errors
-        if level == QWebEnginePage.ErrorMessageLevel:
-            logging.error(f"JS Error: {message} (Source: {sourceID}, Line: {lineNumber})")
+        # Completely suppress all JavaScript console messages
+        pass
 
     def handleUnsupportedContent(self, reply):
-        logging.error(f"Unsupported content: {reply.url().toString()}")
+        # Silently handle unsupported content without logging
         reply.abort()
 
 class AddFeedDialog(QDialog):
@@ -942,8 +941,13 @@ class RSSReader(QMainWindow):
         self.add_refresh_buttons()
         self.add_mark_unread_button()
         self.add_mark_feed_read_button()
+        # Add unread checkbox first
+        self.add_show_unread_checkbox()
+        # Add a toolbar separator
+        self.toolbar.addSeparator()
+        # Then add search widget
         self.add_search_widget()
-    
+
     def add_mark_feed_read_button(self):
         mark_read_icon = self.style().standardIcon(QStyle.SP_DialogApplyButton)
         mark_read_action = QAction(mark_read_icon, "Mark Feed as Read", self)
@@ -993,7 +997,7 @@ class RSSReader(QMainWindow):
         search_label = QLabel("Search:")
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search articles...")
-        self.search_input.setFixedWidth(350)
+        self.search_input.setFixedWidth(200)  # Reduced width
         self.search_input.setClearButtonEnabled(True)
         self.search_input.installEventFilter(self)
         self.search_input.textChanged.connect(self.filter_articles)
@@ -1009,6 +1013,25 @@ class RSSReader(QMainWindow):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.toolbar.addWidget(spacer)
+
+    def add_show_unread_checkbox(self):
+        # Add a checkbox to show only unread articles
+        self.show_unread_checkbox = QCheckBox("Show only unread", self.toolbar)
+        settings = QSettings('rocker', 'SmallRSSReader')
+        checked = settings.value('show_only_unread', False, type=bool)
+        self.show_unread_checkbox.setChecked(checked)
+        self.show_unread_checkbox.stateChanged.connect(self.on_show_unread_changed)
+        self.toolbar.addWidget(self.show_unread_checkbox)
+
+    def on_show_unread_changed(self, state):
+        settings = QSettings('rocker', 'SmallRSSReader')
+        settings.setValue('show_only_unread', bool(state))
+        self.populate_articles_ui()
+
+    def get_show_only_unread(self):
+        # Helper to get the current state
+        settings = QSettings('rocker', 'SmallRSSReader')
+        return settings.value('show_only_unread', False, type=bool)
 
     def eventFilter(self, source, event):
         if source == self.search_input:
@@ -1845,24 +1868,23 @@ class RSSReader(QMainWindow):
         for i, visible in enumerate(visible_columns):
             self.articles_tree.setColumnHidden(i, not visible)
 
+        show_only_unread = self.get_show_only_unread()
         for entry in current_feed.get('entries', []):
             article_id = self.get_article_id(entry)
             is_unread = article_id not in self.read_articles
-
+            if show_only_unread and not is_unread:
+                continue
             item = QTreeWidgetItem(self.articles_tree)
             item.setText(0, entry.get('title', 'No Title'))
             item.setData(0, Qt.UserRole, entry)
-
             if is_unread:
                 item.setIcon(0, self.blue_dot_icon)
-
             date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
             if date_struct:
                 date_obj = datetime(*date_struct[:6])
                 date_formatted = date_obj.strftime('%Y-%m-%d')  # Only show the date
                 item.setText(1, date_formatted)
                 item.setData(1, Qt.UserRole, date_obj)
-
         self.articles_tree.sortItems(1, Qt.DescendingOrder)
 
     def mark_selected_article_as_read(self):
@@ -2187,7 +2209,7 @@ class RSSReader(QMainWindow):
                 try:
                     url = self.entry.get('link', '')
                     if not url:
-                        raise ValueError("No URL found for the article.")
+                        raise ValueError("No URL available for the article.")
 
                     logging.info(f"Fetching content from URL: {url}")
                     response = requests.get(url, timeout=10)
@@ -2293,22 +2315,25 @@ class RSSReader(QMainWindow):
         item.setData(0, Qt.UserRole + 1, article_id)
         item.setData(0, Qt.UserRole, entry)
 
+        # Определяем фид для этой статьи
+        feed_url = None
+        for feed in self.feeds:
+            if entry in feed.get('entries', []):
+                feed_url = feed['url']
+                break
+
         # Mark unread articles with bold font and an icon
         if article_id not in self.read_articles:
             font = item.font(0)
             font.setBold(True)
             item.setFont(0, font)
-            unread_icon = QIcon(resource_path('icons/unread_icon.png'))  # Ensure this icon exists
-            item.setIcon(0, unread_icon)
+            item.setIcon(0, self.blue_dot_icon)
         else:
             item.setIcon(0, QIcon())  # No icon for read articles
 
-        # Use cached favicon for the feed
-        current_feed_item = self.feeds_list.currentItem()
-        if current_feed_item:
-            feed_url = current_feed_item.data(0, Qt.UserRole)
-            if feed_url in self.favicon_cache:
-                item.setIcon(0, self.favicon_cache[feed_url])
+        # Устанавливаем иконку фида, если есть
+        if feed_url and feed_url in self.favicon_cache:
+            item.setIcon(0, self.favicon_cache[feed_url])
 
         self.articles_tree.addTopLevelItem(item)
         self.article_id_to_item[article_id] = item
