@@ -434,11 +434,14 @@ class RSSReader(QMainWindow):
                 feeds_updated = True
         if feeds_updated:
             self.mark_feeds_dirty()
+        # После удаления старых статей чистим связанные данные
+        self.cleanup_orphaned_data()
 
     def perform_periodic_cleanup(self):
         logging.info("Performing periodic cleanup of old articles.")
         self.prune_old_entries()
         self.statusBar().showMessage("Periodic cleanup completed.")
+        # После prune_old_entries cleanup_orphaned_data вызовется автоматически
 
     def add_feed(self, feed_name, feed_url):
         if not feed_url:
@@ -2777,6 +2780,36 @@ class RSSReader(QMainWindow):
         """Update the content view with the fetched HTML content."""
         logging.info("update_content_view called with content length: %d" % len(content))
         self.content_view.setHtml(content)
+
+    def cleanup_orphaned_data(self):
+        # Собираем все актуальные article_id
+        all_article_ids = set()
+        for feed in self.feeds:
+            for entry in feed.get('entries', []):
+                all_article_ids.add(self.get_article_id(entry))
+
+        # Очищаем прочитанные статьи
+        before_count = len(self.read_articles)
+        self.read_articles = {aid for aid in self.read_articles if aid in all_article_ids}
+        after_count = len(self.read_articles)
+        if after_count < before_count:
+            logging.info(f"Removed {before_count - after_count} orphaned read_articles entries.")
+            self.save_read_articles()
+
+        # Очищаем кеш фильмов
+        # Собираем все movie_title, которые реально используются
+        used_titles = set()
+        for feed in self.feeds:
+            for entry in feed.get('entries', []):
+                movie_data = entry.get('movie_data')
+                if movie_data and 'title' in movie_data:
+                    used_titles.add(movie_data['title'])
+        before_cache = len(self.movie_data_cache)
+        self.movie_data_cache = {k: v for k, v in self.movie_data_cache.items() if k in used_titles}
+        after_cache = len(self.movie_data_cache)
+        if after_cache < before_cache:
+            logging.info(f"Removed {before_cache - after_cache} orphaned movie_data_cache entries.")
+            self.save_movie_data_cache()
 
 ### Main Function ###
 
