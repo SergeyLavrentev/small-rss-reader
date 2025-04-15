@@ -32,7 +32,9 @@ from PyQt5.QtCore import (
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from pathlib import Path
 
-### Helper Functions ###
+# =========================
+# 1. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И КЛАССЫ
+# =========================
 
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller."""
@@ -83,8 +85,6 @@ def fetch_favicon(url):
 def format_date_column(entry_date):
     """Format the date column to display only the date."""
     return entry_date.strftime('%Y-%m-%d')
-
-### Helper Classes ###
 
 class FetchFeedRunnable(QRunnable):
     def __init__(self, url, worker):
@@ -213,6 +213,10 @@ class WebEnginePage(QWebEnginePage):
     def handleUnsupportedContent(self, reply):
         # Silently handle unsupported content without logging
         reply.abort()
+
+# =========================
+# 2. КЛАССЫ ДИАЛОГОВ И НАСТРОЕК (UI)
+# =========================
 
 class AddFeedDialog(QDialog):
     def __init__(self, parent=None):
@@ -361,7 +365,9 @@ class SettingsDialog(QDialog):
         self.save_settings()
         super().accept()
 
-### Main Application Class ###
+# =========================
+# 3. ОСНОВНОЙ КЛАСС ПРИЛОЖЕНИЯ (ИНТЕРФЕЙС, ЛОГИКА)
+# =========================
 
 class PopulateArticlesThread(QThread):
     articles_ready = pyqtSignal(list, dict)  # Emits (entries, article_id_to_item)
@@ -751,7 +757,7 @@ class RSSReader(QMainWindow):
                 self.set_feed_icon(feed_item, feed['url'])
 
     def on_feed_item_clicked(self, item, column):
-        if item.data(0, Qt.UserRole) is None:
+        if (item.data(0, Qt.UserRole) is None):
             self.handle_group_selection(item)
         else:
             self.handle_feed_selection(item)
@@ -764,7 +770,7 @@ class RSSReader(QMainWindow):
         self.articles_tree = QTreeWidget()
         self.articles_tree.setHeaderLabels(['Title', 'Date'])  # Default columns
         # Simplified logic to always show all columns
-        all_columns = ['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director']
+        all_columns = ['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director', 'Country', 'Actors', 'Poster']
         self.articles_tree.setHeaderLabels(all_columns)
 
         articles_layout.addWidget(self.articles_tree)
@@ -775,6 +781,9 @@ class RSSReader(QMainWindow):
         self.articles_tree.setColumnWidth(3, 100)
         self.articles_tree.setColumnWidth(4, 100)
         self.articles_tree.setColumnWidth(5, 150)
+        self.articles_tree.setColumnWidth(6, 100)
+        self.articles_tree.setColumnWidth(7, 150)
+        self.articles_tree.setColumnWidth(8, 120)
         self.articles_tree.setSortingEnabled(True)
         self.articles_tree.header().setSectionsClickable(True)
         self.articles_tree.header().setSortIndicatorShown(True)
@@ -917,7 +926,7 @@ class RSSReader(QMainWindow):
         layout = QVBoxLayout(dialog)
 
         checkboxes = []
-        for i, column_name in enumerate(['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director']):
+        for i, column_name in enumerate(['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director', 'Country', 'Actors', 'Poster']):
             checkbox = QCheckBox(column_name, dialog)
             checkbox.setChecked(self.articles_tree.headerItem().isHidden(i) == False)
             layout.addWidget(checkbox)
@@ -1073,7 +1082,7 @@ class RSSReader(QMainWindow):
         return False
 
     def filter_articles_by_max_days(self, entries):
-        max_days_ago = datetime.now() - timedelta(days=self.max_days)
+        max_days_ago = datetime.now() - timedelta(days(self.max_days))
         filtered_entries = []
         for entry in entries:
             date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
@@ -1885,10 +1894,32 @@ class RSSReader(QMainWindow):
             date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
             if date_struct:
                 date_obj = datetime(*date_struct[:6])
-                date_formatted = date_obj.strftime('%Y-%m-%d')  # Only show the date
+                date_formatted = date_obj.strftime('%Y-%m-%d')
                 item.setText(1, date_formatted)
                 item.setData(1, Qt.UserRole, date_obj)
+            # OMDb поля если есть
+            movie_data = entry.get('movie_data', {})
+            item.setText(2, movie_data.get('imdbrating', ''))
+            item.setText(3, movie_data.get('released', ''))
+            item.setText(4, movie_data.get('genre', ''))
+            item.setText(5, movie_data.get('director', ''))
+            item.setText(6, movie_data.get('country', ''))
+            item.setText(7, movie_data.get('actors', ''))
+            item.setText(8, movie_data.get('poster', ''))
+            # Гарантированно сохраняем QTreeWidgetItem
+            self.article_id_to_item[article_id] = item
         self.articles_tree.sortItems(1, Qt.DescendingOrder)
+
+        # --- OMDb: запуск потока для подгрузки рейтингов ---
+        group_name = self.get_group_name_for_feed(current_feed['url'])
+        group_settings = self.group_settings.get(group_name, {'omdb_enabled': False})
+        omdb_enabled = group_settings.get('omdb_enabled', False)
+        if omdb_enabled and self.api_key:
+            entries = current_feed.get('entries', [])
+            if entries:
+                self.movie_thread = FetchMovieDataThread(entries, self.api_key, self.movie_data_cache, self.quit_flag)
+                self.movie_thread.movie_data_fetched.connect(self.update_movie_info)
+                self.movie_thread.start()
 
     def mark_selected_article_as_read(self):
         """Mark the currently selected article as read."""
@@ -2300,7 +2331,7 @@ class RSSReader(QMainWindow):
     def add_article_to_tree(self, entry):
         """Add an article to the articles tree."""
         title = entry.get('title', 'No Title')
-        item = ArticleTreeWidgetItem([title, '', '', '', '', ''])
+        item = ArticleTreeWidgetItem([title, '', '', '', '', '', '', '', ''])
         date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
         if date_struct:
             date_obj = datetime(*date_struct[:6])
@@ -2314,6 +2345,9 @@ class RSSReader(QMainWindow):
         item.setText(3, '')
         item.setText(4, '')
         item.setText(5, '')
+        item.setText(6, '')
+        item.setText(7, '')
+        item.setText(8, '')
         article_id = self.get_article_id(entry)
         item.setData(0, Qt.UserRole + 1, article_id)
         item.setData(0, Qt.UserRole, entry)
@@ -2394,11 +2428,22 @@ class RSSReader(QMainWindow):
             release_date = self.parse_release_date(released)
             item.setData(3, Qt.UserRole, release_date)
             item.setText(3, release_date.strftime('%d %b %Y') if release_date != datetime.min else '')
-            genre = movie_data.get('genre', '')
-            director = movie_data.get('director', '')
-            item.setText(4, genre)
-            item.setText(5, director)
+            item.setText(4, movie_data.get('genre', ''))
+            item.setText(5, movie_data.get('director', ''))
+            item.setText(6, movie_data.get('country', ''))
+            item.setText(7, movie_data.get('actors', ''))
+            item.setText(8, movie_data.get('poster', ''))
             entry['movie_data'] = movie_data
+            tooltip = f"Year: {movie_data.get('year', '')}\n" \
+                      f"Country: {movie_data.get('country', '')}\n" \
+                      f"Actors: {movie_data.get('actors', '')}\n" \
+                      f"Writer: {movie_data.get('writer', '')}\n" \
+                      f"Awards: {movie_data.get('awards', '')}\n" \
+                      f"Plot: {movie_data.get('plot', '')}\n" \
+                      f"IMDB Votes: {movie_data.get('imdbvotes', '')}\n" \
+                      f"Type: {movie_data.get('type', '')}\n" \
+                      f"Poster: {movie_data.get('poster', '')}"
+            item.setToolTip(0, tooltip)
         else:
             logging.warning(f"No QTreeWidgetItem found for article ID: {article_id}")
 
@@ -2811,7 +2856,21 @@ class RSSReader(QMainWindow):
             logging.info(f"Removed {before_cache - after_cache} orphaned movie_data_cache entries.")
             self.save_movie_data_cache()
 
-### Main Function ###
+# =========================
+# 4. РАБОТА С RSS, ЗАГРУЗКА, КЭШИРОВАНИЕ
+# =========================
+
+# ...методы RSSReader, связанные с fetch_feed_with_cache, force_refresh_all_feeds, on_feed_fetched, on_feed_fetched_force_refresh, fetch_article_content, load_article_content_async ...
+
+# =========================
+# 5. РАБОТА С ФАЙЛАМИ (ЧТЕНИЕ/ЗАПИСЬ)
+# =========================
+
+# ...методы RSSReader, связанные с load_feeds, save_feeds, load_read_articles, save_read_articles, load_group_settings, save_group_settings, load_movie_data_cache, save_movie_data_cache ...
+
+# =========================
+# 6. ОСНОВНАЯ ФУНКЦИЯ ЗАПУСКА
+# =========================
 
 def main():
     parser = argparse.ArgumentParser(description="Small RSS Reader")
