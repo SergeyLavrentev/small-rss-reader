@@ -1876,9 +1876,22 @@ class RSSReader(QMainWindow):
         if not current_feed:
             return
 
-        visible_columns = current_feed.get('visible_columns', [True] * 6)
-        for i, visible in enumerate(visible_columns):
-            self.articles_tree.setColumnHidden(i, not visible)
+        # Определяем, включен ли OMDb для текущей группы
+        group_name = self.get_group_name_for_feed(current_feed['url'])
+        group_settings = self.group_settings.get(group_name, {'omdb_enabled': False})
+        omdb_enabled = group_settings.get('omdb_enabled', False)
+
+        # Определяем нужные столбцы
+        base_columns = ['Title', 'Date']
+        omdb_columns = ['Rating', 'Released', 'Genre', 'Director', 'Country', 'Actors', 'Poster']
+        if omdb_enabled:
+            all_columns = base_columns + omdb_columns
+        else:
+            all_columns = base_columns
+        self.articles_tree.setHeaderLabels(base_columns + omdb_columns)  # всегда полный набор для совместимости
+        # Скрываем OMDb-столбцы если не нужно
+        for i, col in enumerate(base_columns + omdb_columns):
+            self.articles_tree.setColumnHidden(i, (col in omdb_columns and not omdb_enabled))
 
         show_only_unread = self.get_show_only_unread()
         for entry in current_feed.get('entries', []):
@@ -1897,23 +1910,21 @@ class RSSReader(QMainWindow):
                 date_formatted = date_obj.strftime('%Y-%m-%d')
                 item.setText(1, date_formatted)
                 item.setData(1, Qt.UserRole, date_obj)
-            # OMDb поля если есть
+            # OMDb поля если есть и если omdb_enabled
             movie_data = entry.get('movie_data', {})
-            item.setText(2, movie_data.get('imdbrating', ''))
-            item.setText(3, movie_data.get('released', ''))
-            item.setText(4, movie_data.get('genre', ''))
-            item.setText(5, movie_data.get('director', ''))
-            item.setText(6, movie_data.get('country', ''))
-            item.setText(7, movie_data.get('actors', ''))
-            item.setText(8, movie_data.get('poster', ''))
+            if omdb_enabled:
+                item.setText(2, movie_data.get('imdbrating', ''))
+                item.setText(3, movie_data.get('released', ''))
+                item.setText(4, movie_data.get('genre', ''))
+                item.setText(5, movie_data.get('director', ''))
+                item.setText(6, movie_data.get('country', ''))
+                item.setText(7, movie_data.get('actors', ''))
+                item.setText(8, movie_data.get('poster', ''))
             # Гарантированно сохраняем QTreeWidgetItem
             self.article_id_to_item[article_id] = item
         self.articles_tree.sortItems(1, Qt.DescendingOrder)
 
         # --- OMDb: запуск потока для подгрузки рейтингов ---
-        group_name = self.get_group_name_for_feed(current_feed['url'])
-        group_settings = self.group_settings.get(group_name, {'omdb_enabled': False})
-        omdb_enabled = group_settings.get('omdb_enabled', False)
         if omdb_enabled and self.api_key:
             entries = current_feed.get('entries', [])
             if entries:
