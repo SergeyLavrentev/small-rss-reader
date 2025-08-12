@@ -27,7 +27,8 @@ from PyQt5.QtGui import (
     QCursor, QFont, QIcon, QPixmap, QPainter, QBrush, QColor, QTransform, QDesktopServices
 )
 from PyQt5.QtCore import (
-    Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize, QEvent, QObject, QRunnable, QThreadPool, pyqtSlot
+    Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize, QEvent, QObject, QRunnable, QThreadPool, pyqtSlot,
+    qInstallMessageHandler, QtMsgType
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from pathlib import Path
@@ -115,13 +116,21 @@ class FetchMovieDataThread(QThread):
         self.api_key = api_key
         self.movie_data_cache = cache
         self.quit_flag = quit_flag  # threading.Event for graceful shutdown
+        # Local stop flag to cancel this specific thread without touching global quit_flag
+        self._stop_event = threading.Event()
+
+    def request_stop(self):
+        try:
+            self._stop_event.set()
+        except Exception:
+            pass
 
     def run(self):
         if not self.api_key:
             logging.warning("OMDb API key not provided. Skipping movie data fetching.")
             return
         for index, entry in enumerate(self.entries):
-            if self.quit_flag.is_set():
+            if self.quit_flag.is_set() or self._stop_event.is_set():
                 break
             title = entry.get('title', 'No Title')
             movie_title = self.extract_movie_title(title)
@@ -389,6 +398,15 @@ class PopulateArticlesThread(QThread):
         self.entries = entries
         self.read_articles = read_articles
         self.max_days = max_days
+        # Cooperative stop flag
+        self._stop_event = threading.Event()
+
+    def stop(self):
+        """Request cooperative stop for this thread."""
+        try:
+            self._stop_event.set()
+        except Exception:
+            pass
 
     def run(self):
         filtered_entries = []
@@ -397,6 +415,9 @@ class PopulateArticlesThread(QThread):
         cutoff_date = datetime.now() - timedelta(days=self.max_days)
 
         for entry in self.entries:
+            # Allow cooperative cancellation between items
+            if self._stop_event.is_set():
+                break
             date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
             if date_struct:
                 entry_date = datetime(*date_struct[:6])
@@ -422,19 +443,34 @@ class RSSReader(QMainWindow):
         """Initialize instance variables and timers used across the app."""
         # Lifecycle and threading
         self.is_quitting = False
+        self.is_shutting_down = False
+        self._shutdown_in_progress = False
+        self._shutdown_done = False
         self.threads = []
         self.thread_pool = QThreadPool.globalInstance()
+        # Hold references to threads being stopped to avoid premature GC
+        self._stale_threads = []
+        # Timers
         self.auto_refresh_timer = QTimer(self)
         self.icon_rotation_timer = QTimer(self)
         self.icon_rotation_timer.timeout.connect(self.rotate_refresh_icon)
+        # Flags
         self.is_refreshing = False
         self.refresh_icon_angle = 0
+        # Guard for UI population to debounce clicks during startup/refresh
+        self.is_populating_articles = False
 
         # Debounce for feed selection to avoid thrashing loaders/threads
         self.selection_debounce = QTimer(self)
         self.selection_debounce.setSingleShot(True)
         self.selection_debounce.setInterval(250)
         self.selection_debounce.timeout.connect(self.load_articles)
+
+        # Debounce for article selection to avoid re-entrant content loads
+        self.article_selection_debounce = QTimer(self)
+        self.article_selection_debounce.setSingleShot(True)
+        self.article_selection_debounce.setInterval(150)
+        self.article_selection_debounce.timeout.connect(self.display_content)
 
         # Defaults for settings-dependent values used before load_settings
         self.refresh_interval = 60  # minutes
@@ -472,6 +508,140 @@ class RSSReader(QMainWindow):
         else:
             self.movie_icon = QIcon(movie_pix.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
+        # Content loading tracking (for timeouts/cleanup)
+        self.active_content_loads = {}
+        # Disable hover popups on article items
+        self.tooltips_enabled = False
+
+        # Track threads with names for robust shutdown
+        self.threads = []  # already initialized above; ensure exists
+
+    def register_thread(self, thread: QThread, name: str = ""):
+        """Register a QThread for lifecycle management and add lifecycle logs."""
+        try:
+            if name:
+                thread.setObjectName(name)
+            thread.started.connect(lambda t=thread: logging.debug(f"QThread started: {t.objectName() or t}") )
+            thread.finished.connect(lambda t=thread: logging.debug(f"QThread finished: {t.objectName() or t}"))
+        except Exception:
+            pass
+        self.threads.append(thread)
+
+    def shutdown_threads(self):
+        """Stop all running threads and timers safely before app exit."""
+        # Idempotent & re-entrant safe
+        if getattr(self, '_shutdown_done', False):
+            return
+        if getattr(self, '_shutdown_in_progress', False):
+            logging.info("Shutdown already in progress...")
+            return
+        self._shutdown_in_progress = True
+        self.is_shutting_down = True
+        # Stop timers early to avoid new work
+        try:
+            self.auto_refresh_timer.stop()
+        except Exception:
+            pass
+        try:
+            self.icon_rotation_timer.stop()
+        except Exception:
+            pass
+        try:
+            self.selection_debounce.stop()
+        except Exception:
+            pass
+        try:
+            self.article_selection_debounce.stop()
+        except Exception:
+            pass
+        try:
+            getattr(self, 'cleanup_timer', None) and self.cleanup_timer.stop()
+        except Exception:
+            pass
+        logging.info("Shutting down threads...")
+        # Stop content fetch watchdogs and threads
+        try:
+            for aid in list(self.active_content_loads.keys()):
+                try:
+                    self._on_content_fetch_timeout(aid)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Stop movie thread cooperatively
+        if hasattr(self, 'movie_thread') and isinstance(self.movie_thread, QThread):
+            try:
+                try:
+                    self.movie_thread.movie_data_fetched.disconnect(self.update_movie_info)
+                except Exception:
+                    pass
+                # Prefer cooperative stop if available
+                try:
+                    if hasattr(self.movie_thread, 'request_stop'):
+                        self.movie_thread.request_stop()
+                except Exception:
+                    pass
+                if self.movie_thread.isRunning():
+                    self.movie_thread.quit()
+                    self.movie_thread.wait()
+                self.movie_thread.deleteLater()
+            except Exception:
+                pass
+
+        # Stop PopulateArticlesThread cooperatively
+        if hasattr(self, 'populate_thread') and isinstance(getattr(self, 'populate_thread'), QThread):
+            try:
+                # Use cooperative stop flag instead of quit()
+                try:
+                    self.populate_thread.stop()
+                except Exception:
+                    pass
+                if self.populate_thread.isRunning():
+                    # Give it a moment to observe the flag
+                    if not self.populate_thread.wait(500):
+                        self.populate_thread.quit()
+                        self.populate_thread.wait()
+                self.populate_thread.deleteLater()
+                logging.info("PopulateArticlesThread terminated and deleted.")
+            except Exception:
+                pass
+
+        # Stop any remaining threads that were registered
+        try:
+            for thread in list(self.threads):
+                if isinstance(thread, QThread) and thread.isRunning():
+                    logging.warning(f"Thread still running at shutdown: {thread.objectName() or thread}")
+                    try:
+                        thread.quit()
+                        if not thread.wait(500):
+                            try:
+                                thread.terminate()
+                            except Exception:
+                                pass
+                            thread.wait(500)
+                    finally:
+                        try:
+                            thread.deleteLater()
+                        except Exception:
+                            pass
+                try:
+                    self.threads.remove(thread)
+                except ValueError:
+                    pass
+        except Exception:
+            pass
+
+        # Ensure QThreadPool tasks are completed
+        try:
+            self.thread_pool.waitForDone()
+        except Exception:
+            pass
+        logging.info("All threads and tasks shut down.")
+        # Mark as done
+        self._shutdown_done = True
+        self._shutdown_in_progress = False
+
     # Helpers to avoid modal dialogs in test runs
     def is_test_mode(self):
         try:
@@ -503,6 +673,11 @@ class RSSReader(QMainWindow):
         # Centralized startup: load settings (which loads feeds, read articles, tray, timers)
         self.load_settings()
         self.notify_signal.connect(self.show_notification)
+        # Ensure orderly shutdown on app quit
+        try:
+            QApplication.instance().aboutToQuit.connect(self.shutdown_threads)
+        except Exception:
+            pass
 
     def mark_feeds_dirty(self):
         self.feeds_dirty = True
@@ -597,43 +772,19 @@ class RSSReader(QMainWindow):
 
     def quit_app(self):
         self.is_quitting = True
+        self.is_shutting_down = True
         self.quit_flag.set()
         self.statusBar().showMessage("Saving your data before exiting...", 5000)
-
-        # Ensure all threads are terminated
-        if hasattr(self, 'movie_thread') and isinstance(self.movie_thread, QThread):
-            try:
-                try:
-                    self.movie_thread.movie_data_fetched.disconnect(self.update_movie_info)
-                except Exception:
-                    pass
-                if self.movie_thread.isRunning():
-                    self.movie_thread.quit()
-                    self.movie_thread.wait()
-                self.movie_thread.deleteLater()
-            except Exception:
-                pass
-        for thread in self.threads:
-            if isinstance(thread, QThread):
-                thread.quit()
-                thread.wait()
-                logging.info(f"Thread {thread} terminated.")
-
-        # Stop and clean up PopulateArticlesThread if running
-        if hasattr(self, 'populate_thread') and self.populate_thread.isRunning():
-            self.populate_thread.quit()
-            self.populate_thread.wait()
-            logging.info("PopulateArticlesThread terminated.")
-
-        # Ensure QThreadPool tasks are completed
-        self.thread_pool.waitForDone()
-        logging.info("All QThreadPool tasks completed.")
-
+        # Centralized, robust shutdown
+        self.shutdown_threads()
         # Explicitly delete QWebEngineView to ensure cleanup
-        if hasattr(self, 'content_view'):
-            self.content_view.deleteLater()
-            logging.info("Deleted QWebEngineView to ensure proper cleanup.")
-
+        try:
+            if hasattr(self, 'content_view') and not getattr(self, '_view_deleted', False):
+                self.content_view.deleteLater()
+                self._view_deleted = True
+                logging.info("Deleted QWebEngineView to ensure proper cleanup.")
+        except Exception:
+            pass
         self.close()
 
     def save_font_size(self):
@@ -779,10 +930,16 @@ class RSSReader(QMainWindow):
                 self.set_feed_icon(feed_item, feed['url'])
 
     def on_feed_item_clicked(self, item, column):
+        logging.debug(f"on_feed_item_clicked: text='{item.text(0)}', has_url={bool(item.data(0, Qt.UserRole))}")
         if (item.data(0, Qt.UserRole) is None):
             self.handle_group_selection(item)
         else:
-            self.handle_feed_selection(item)
+            # Let debounced selection handler trigger loading to avoid double-calls
+            try:
+                self.feeds_list.setCurrentItem(item)
+                self.selection_debounce.start()
+            except Exception:
+                self.handle_feed_selection(item)
 
     def init_articles_panel(self):
         self.articles_panel = QWidget()
@@ -974,8 +1131,10 @@ class RSSReader(QMainWindow):
     def on_feed_selection_changed(self):
         # Ignore while signals are blocked (during list rebuild)
         if getattr(self.feeds_list, 'signalsBlocked', lambda: False)():
+            logging.debug("on_feed_selection_changed: signals blocked, ignoring")
             return
         # Restart debounce timer
+        logging.debug("on_feed_selection_changed: starting debounce timer")
         self.selection_debounce.start()
 
     def add_toolbar_buttons(self):
@@ -1280,39 +1439,17 @@ class RSSReader(QMainWindow):
             self.save_font_size()
             if self.data_changed and self.icloud_backup_enabled:
                 self.backup_to_icloud()
-
-            # Ensure all threads are terminated and deleted
-            if hasattr(self, 'movie_thread') and isinstance(self.movie_thread, QThread):
-                try:
-                    try:
-                        self.movie_thread.movie_data_fetched.disconnect(self.update_movie_info)
-                    except Exception:
-                        pass
-                    if self.movie_thread.isRunning():
-                        self.movie_thread.quit()
-                        self.movie_thread.wait()
-                    self.movie_thread.deleteLater()
-                except Exception:
-                    pass
-            if hasattr(self, 'threads'):
-                for thread in self.threads:
-                    if thread.isRunning():
-                        logging.warning(f"Thread {thread} is still running. Attempting to stop.")
-                        thread.quit()
-                        thread.wait()
-                        thread.deleteLater()
-                        logging.info(f"Thread {thread} stopped and deleted.")
-
-            if hasattr(self, 'populate_thread') and self.populate_thread.isRunning():
-                self.populate_thread.quit()
-                self.populate_thread.wait()
-                self.populate_thread.deleteLater()
-                logging.info("Terminated and deleted populate_thread during close event.")
-
+            # Centralized, robust shutdown
+            self.shutdown_threads()
             # Explicitly delete QWebEngineView to ensure cleanup
-            if hasattr(self, 'content_view'):
-                self.content_view.deleteLater()
-                logging.info("Deleted QWebEngineView to ensure proper cleanup.")
+            try:
+                if hasattr(self, 'content_view'):
+                    if not getattr(self, '_view_deleted', False):
+                        self.content_view.deleteLater()
+                        self._view_deleted = True
+                        logging.info("Deleted QWebEngineView to ensure proper cleanup.")
+            except Exception:
+                pass
 
             logging.info("All threads and resources terminated.")
             event.accept()
@@ -1545,7 +1682,11 @@ class RSSReader(QMainWindow):
         if group_item.childCount() > 0:
             first_feed_item = group_item.child(0)
             self.feeds_list.setCurrentItem(first_feed_item)
-            self.load_articles()
+            # Trigger debounced load instead of immediate to avoid UI spikes
+            try:
+                self.selection_debounce.start()
+            except Exception:
+                self.load_articles()
             logging.debug(f"Auto-selected first feed in group '{group_item.text(0)}'")
 
     def handle_feed_selection(self, feed_item):
@@ -1946,15 +2087,39 @@ class RSSReader(QMainWindow):
         self.mark_feeds_dirty()
 
     def load_articles(self):
+        logging.debug("load_articles: invoked")
         selected_items = self.feeds_list.selectedItems()
         if not selected_items:
+            logging.debug("load_articles: no selection, enabling UI and exit")
+            # Nothing selected; ensure UI is interactive
+            try:
+                self.is_populating_articles = False
+            except Exception:
+                pass
             return
         item = selected_items[0]
+        logging.debug(f"load_articles: selected item '{item.text(0)}'")
         if item.data(0, Qt.UserRole) is None:
             self.handle_group_selection(item)
+            # Group selected; no direct population yet
+            try:
+                self.is_populating_articles = False
+            except Exception:
+                pass
             return
         url = item.data(0, Qt.UserRole)
         feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
+        # Begin guarded population for a concrete feed
+        try:
+            self.is_populating_articles = True
+        except Exception:
+            pass
+        logging.debug(f"load_articles: starting population for url={url}, has_cached_entries={bool(feed_data and feed_data.get('entries'))}")
+        # Non-blocking: show a lightweight placeholder instead of disabling UI
+        try:
+            self.show_articles_loading(f"Loading articles from {item.text(0)}…")
+        except Exception:
+            pass
         if feed_data and feed_data.get('entries'):
             self.statusBar().showMessage(f"Loading articles from {item.text(0)}", 5000)
             self.populate_articles_in_background(feed_data['entries'])
@@ -1969,27 +2134,85 @@ class RSSReader(QMainWindow):
     def populate_articles_in_background(self, entries):
         # Stop and clean up any existing thread
         if hasattr(self, 'populate_thread') and self.populate_thread.isRunning():
-            self.populate_thread.quit()
-            self.populate_thread.wait()
-            logging.info("Previous PopulateArticlesThread terminated.")
+            try:
+                # Ask it to stop cooperatively
+                if hasattr(self.populate_thread, 'stop'):
+                    self.populate_thread.stop()
+                # Give it a short time to finish
+                if not self.populate_thread.wait(500):
+                    # Keep reference until finished to avoid destruction while running
+                    self._stale_threads.append(self.populate_thread)
+                    self.populate_thread.finished.connect(lambda thr=self.populate_thread: self._cleanup_stale_thread(thr))
+                logging.info("Previous PopulateArticlesThread termination requested.")
+            except Exception:
+                pass
 
         # Start a new thread
         self.populate_thread = PopulateArticlesThread(entries, self.read_articles, self.max_days)
+        try:
+            self.populate_thread.setObjectName("PopulateArticlesThread")
+        except Exception:
+            pass
         self.populate_thread.articles_ready.connect(self.on_articles_ready)
         self.populate_thread.start()
+        # Register for lifecycle management and logging
+        try:
+            self.register_thread(self.populate_thread, "PopulateArticlesThread")
+        except Exception:
+            pass
 
     def on_articles_ready(self, filtered_entries, article_id_to_item):
+        logging.debug(f"on_articles_ready: got {len(filtered_entries)} entries")
         self.current_entries = filtered_entries
         # article_id_to_item from PopulateArticlesThread contains dict entries, not QTreeWidgetItem
         # The correct article_id_to_item mapping will be created in populate_articles_ui()
         self.populate_articles_ui()
+        # Done populating from background
+        self.is_populating_articles = False
+
+    def show_articles_loading(self, message: str):
+        """Show a lightweight placeholder in the articles list without disabling the widget."""
+        try:
+            prev_block = self.articles_tree.signalsBlocked()
+            self.articles_tree.blockSignals(True)
+            self.articles_tree.clear()
+            placeholder = QTreeWidgetItem(self.articles_tree)
+            placeholder.setText(0, message)
+            try:
+                fnt = placeholder.font(0)
+                fnt.setItalic(True)
+                placeholder.setFont(0, fnt)
+            except Exception:
+                pass
+            # Mark as placeholder to avoid accidental handling
+            placeholder.setData(0, Qt.UserRole + 99, "loading_placeholder")
+            # Non-selectable to keep focus behavior natural
+            placeholder.setFlags(placeholder.flags() & ~Qt.ItemIsSelectable)
+            self.articles_tree.blockSignals(prev_block)
+        except Exception:
+            pass
 
     def populate_articles_ui(self):
         """Populate the articles UI with the current feed's articles."""
+        # Start guarded population to avoid signal storms and click races
+        self.is_populating_articles = True
+        prev_block = self.articles_tree.signalsBlocked()
+        logging.debug("populate_articles_ui: start, blocking signals")
+        try:
+            self.articles_tree.blockSignals(True)
+        except Exception:
+            pass
         self.articles_tree.clear()
         self.article_id_to_item.clear()  # Clear the mapping to prevent old entries
         current_feed = self.get_current_feed()
         if not current_feed:
+            logging.debug("populate_articles_ui: no current feed, restoring UI")
+            # Restore state even on early return
+            try:
+                self.articles_tree.blockSignals(prev_block)
+            except Exception:
+                pass
+            self.is_populating_articles = False
             return
 
         # Определяем, включен ли OMDb для текущей группы
@@ -2037,10 +2260,23 @@ class RSSReader(QMainWindow):
                 item.setText(6, movie_data.get('country', ''))
                 item.setText(7, movie_data.get('actors', ''))
                 item.setText(8, movie_data.get('poster', ''))
+            # Ensure no hover tooltip is shown
+            try:
+                item.setToolTip(0, "")
+            except Exception:
+                pass
             # Гарантированно сохраняем QTreeWidgetItem
             self.article_id_to_item[article_id] = item
             displayed_entries.append(entry)
         self.articles_tree.sortItems(1, Qt.DescendingOrder)
+
+        # Restore signals and interactivity
+        try:
+            self.articles_tree.blockSignals(prev_block)
+        except Exception:
+            pass
+        self.is_populating_articles = False
+        logging.debug("populate_articles_ui: done, UI restored")
 
         # --- OMDb: запуск потока для подгрузки рейтингов ---
         if omdb_enabled and self.api_key:
@@ -2051,8 +2287,13 @@ class RSSReader(QMainWindow):
                         self.movie_thread.movie_data_fetched.disconnect(self.update_movie_info)
                     except Exception:
                         pass
-                    self.movie_thread.quit()
-                    self.movie_thread.wait(2000)
+                    # Request cooperative stop instead of quit() to avoid running thread destruction
+                    if hasattr(self.movie_thread, 'request_stop'):
+                        self.movie_thread.request_stop()
+                    # Wait briefly, then retain reference if still running
+                    if not self.movie_thread.wait(500):
+                        self._stale_threads.append(self.movie_thread)
+                        self.movie_thread.finished.connect(lambda thr=self.movie_thread: self._cleanup_stale_thread(thr))
                 except Exception:
                     pass
             if displayed_entries:
@@ -2061,6 +2302,15 @@ class RSSReader(QMainWindow):
                 self.movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache, self.quit_flag)
                 self.movie_thread.movie_data_fetched.connect(self.update_movie_info)
                 self.movie_thread.start()
+
+    def _cleanup_stale_thread(self, thr: QThread):
+        """Remove finished thread from stale list and delete it later safely."""
+        try:
+            if thr in self._stale_threads:
+                self._stale_threads.remove(thr)
+            thr.deleteLater()
+        except Exception:
+            pass
 
     def mark_selected_article_as_read(self):
         """Mark the currently selected article as read."""
@@ -2079,52 +2329,85 @@ class RSSReader(QMainWindow):
             item.setIcon(0, QIcon())  # Remove the unread icon
 
     def display_content(self):
-        selected_items = self.articles_tree.selectedItems()
-        if not selected_items:
-            return
+        try:
+            if getattr(self, 'is_shutting_down', False) or getattr(self, '_shutdown_in_progress', False):
+                logging.debug("display_content: skipped due to shutdown in progress")
+                return
+            # Ignore clicks while we're refreshing or repopulating the UI
+            if self.is_refreshing or getattr(self, 'is_populating_articles', False):
+                try:
+                    self.statusBar().showMessage("Загрузка… дождитесь окончания обновления", 2000)
+                except Exception:
+                    pass
+                logging.debug(f"display_content: ignored due to is_refreshing={self.is_refreshing}, is_populating={self.is_populating_articles}")
+                return
+            selected_items = self.articles_tree.selectedItems()
+            if not selected_items:
+                logging.debug("display_content: no selected item")
+                return
 
-        item = selected_items[0]
-        entry = item.data(0, Qt.UserRole)
-        if not entry:
-            return
+            item = selected_items[0]
+            entry = item.data(0, Qt.UserRole)
+            if not entry:
+                logging.debug("display_content: selected item has no entry data")
+                return
+            
+            # Mark article as read when displaying content
+            article_id = self.get_article_id(entry)
+            if article_id not in self.read_articles:
+                self.read_articles.add(article_id)
+                item.setIcon(0, QIcon())  # Remove the blue dot icon
 
-        # Mark article as read when displaying content
-        article_id = self.get_article_id(entry)
-        if article_id not in self.read_articles:
-            self.read_articles.add(article_id)
-            item.setIcon(0, QIcon())  # Remove the blue dot icon
+            # Helpers to coerce various feedparser field shapes to plain text safely
+            def _text(v):
+                try:
+                    if isinstance(v, str):
+                        return v
+                    if isinstance(v, dict):
+                        val = v.get('value')
+                        return val if isinstance(val, str) else ''
+                    if isinstance(v, list) and v:
+                        # Common case: list of dicts with 'value'
+                        first = v[0]
+                        if isinstance(first, dict):
+                            val = first.get('value')
+                            return val if isinstance(val, str) else ''
+                        return first if isinstance(first, str) else ''
+                    return str(v) if v is not None else ''
+                except Exception:
+                    return ''
 
-        # Check if preview text is available in the feed
-        preview_text = entry.get('summary', '').strip()
-        description = entry.get('description', '').strip()
-        content = entry.get('content', [{}])[0].get('value', '').strip() if entry.get('content') else ''
-        
-        # Add debug logging to see what content is available
-        logging.debug(f"Article content - Title: {entry.get('title', 'No Title')}")
-        logging.debug(f"Content available: {bool(content)}, length: {len(content)}")
-        logging.debug(f"Description available: {bool(description)}, length: {len(description)}")
-        logging.debug(f"Summary available: {bool(preview_text)}, length: {len(preview_text)}")
-        
-        # Use the best available content from the feed
-        if content:
-            html_content = content
-            logging.debug("Using 'content' for article")
-            self.display_formatted_content(entry, html_content)
-        elif description:
-            html_content = description
-            logging.debug("Using 'description' for article")
-            self.display_formatted_content(entry, html_content)
-        elif preview_text:
-            html_content = preview_text
-            logging.debug("Using 'summary' for article")
-            self.display_formatted_content(entry, html_content)
-        else:
-            # No content available in the feed, try to fetch from URL
-            logging.debug("No content available, attempting to fetch from URL")
-            article_url = entry.get('link', '')
-            if article_url:
-                # Show a loading message while we fetch the content
-                loading_html = """
+            # Check if preview text is available in the feed (robust against non-strings)
+            preview_text = _text(entry.get('summary')).strip()
+            description = _text(entry.get('description')).strip()
+            content = _text(entry.get('content')).strip()
+            
+            # Add debug logging to see what content is available
+            logging.debug(f"Article content - Title: {entry.get('title', 'No Title')}")
+            logging.debug(f"Content available: {bool(content)}, length: {len(content)}")
+            logging.debug(f"Description available: {bool(description)}, length: {len(description)}")
+            logging.debug(f"Summary available: {bool(preview_text)}, length: {len(preview_text)}")
+            
+            # Use the best available content from the feed
+            if content:
+                html_content = content
+                logging.debug("Using 'content' for article")
+                self.display_formatted_content(entry, html_content)
+            elif description:
+                html_content = description
+                logging.debug("Using 'description' for article")
+                self.display_formatted_content(entry, html_content)
+            elif preview_text:
+                html_content = preview_text
+                logging.debug("Using 'summary' for article")
+                self.display_formatted_content(entry, html_content)
+            else:
+                # No content available in the feed, try to fetch from URL
+                logging.debug("No content available, attempting to fetch from URL")
+                article_url = entry.get('link', '')
+                if article_url:
+                    # Show a loading message while we fetch the content
+                    loading_html = """
                 <html>
                 <head>
                     <style>
@@ -2156,14 +2439,14 @@ class RSSReader(QMainWindow):
                 </body>
                 </html>
                 """.format(article_url)
-                self.content_view.setHtml(loading_html)
-                
-                # Start a background thread to fetch content
-                self.fetch_article_content(entry)
-            else:
-                # No URL available, show placeholder
-                logging.debug("No URL available for article")
-                placeholder_html = """
+                    self.content_view.setHtml(loading_html)
+                    
+                    # Start a background thread to fetch content
+                    self.fetch_article_content(entry)
+                else:
+                    # No URL available, show placeholder
+                    logging.debug("No URL available for article")
+                    placeholder_html = """
                 <html>
                 <head>
                     <style>
@@ -2176,10 +2459,19 @@ class RSSReader(QMainWindow):
                 </body>
                 </html>
                 """
-                self.content_view.setHtml(placeholder_html)
+                    self.content_view.setHtml(placeholder_html)
+        except Exception:
+            logging.exception("Error in display_content")
+            try:
+                self.statusBar().showMessage("Error opening article. See log for details.", 5000)
+            except Exception:
+                pass
 
     def display_formatted_content(self, entry, html_content):
         """Display formatted content with consistent styling."""
+        if getattr(self, 'is_shutting_down', False) or getattr(self, '_shutdown_in_progress', False):
+            logging.debug("display_formatted_content: skipped due to shutdown")
+            return
         formatted_html = """
         <html>
         <head>
@@ -2232,12 +2524,18 @@ class RSSReader(QMainWindow):
         </html>
         """.format(entry.get('title', 'No Title'), html_content, entry.get('link', '#'))
         
-        # Display the content directly
-        self.content_view.setHtml(formatted_html)
+        # Display the content directly (guard if view already deleted)
+        try:
+            self.content_view.setHtml(formatted_html)
+        except Exception:
+            logging.debug("content_view is not available to set HTML (probably during shutdown)")
         logging.info(f"Displayed content for article: {entry.get('title', 'No Title')}")
 
     def fetch_article_content(self, entry):
         """Fetch article content from the article URL."""
+        if getattr(self, 'is_shutting_down', False) or getattr(self, '_shutdown_in_progress', False):
+            logging.debug("fetch_article_content: skipped due to shutdown")
+            return
         class ContentFetchWorker(QObject):
             content_fetched = pyqtSignal(object, str)
 
@@ -2336,23 +2634,57 @@ class RSSReader(QMainWindow):
                     return html  # Return the original HTML on error
 
         # Create worker and thread
+        # Avoid duplicate fetch for the same article if one is already active
+        try:
+            current_id = self.get_article_id(entry)
+            if current_id in self.active_content_loads:
+                logging.debug(f"Content fetch already active for article_id={current_id}; skipping duplicate start.")
+                return
+        except Exception:
+            current_id = None
+
         worker = ContentFetchWorker(entry)
         thread = QThread()
+        try:
+            title = entry.get('title', 'No Title')
+            safe_name = f"ContentFetchThread:{hashlib.md5(title.encode('utf-8')).hexdigest()[:8]}"
+            thread.setObjectName(safe_name)
+        except Exception:
+            pass
         worker.moveToThread(thread)
         
         # Connect signals
         thread.started.connect(worker.run)
         worker.content_fetched.connect(self.on_article_content_fetched)
+        # Ensure thread stops and cleanup happens when content is fetched
+        try:
+            article_id = self.get_article_id(entry)
+        except Exception:
+            article_id = None
+        if article_id:
+            worker.content_fetched.connect(lambda _e, _html, aid=article_id: self._complete_content_load(aid))
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(worker.deleteLater)
+        # Remove from self.threads when finished
+        thread.finished.connect(lambda t=thread: self.threads.remove(t) if t in self.threads else None)
         
+        # Register active load with watchdog timer
+        if article_id and not getattr(self, 'is_shutting_down', False):
+            self._register_content_load(article_id, thread, worker)
+
         # Start thread
         thread.start()
-        self.threads.append(thread)
+        try:
+            self.register_thread(thread, thread.objectName() or "ContentFetchThread")
+        except Exception:
+            self.threads.append(thread)
         logging.debug(f"Started thread to fetch content for article: {entry.get('title', 'No Title')}")
 
     def on_article_content_fetched(self, entry, html_content):
         """Handle fetched article content."""
+        if getattr(self, 'is_shutting_down', False) or getattr(self, '_shutdown_in_progress', False) or getattr(self, '_shutdown_done', False):
+            logging.debug("on_article_content_fetched: ignored due to shutdown")
+            return
         logging.debug(f"Received fetched content for article: {entry.get('title', 'No Title')}")
         
         # Make sure this article is still selected
@@ -2371,63 +2703,100 @@ class RSSReader(QMainWindow):
         else:
             logging.debug("Ignoring fetched content for non-selected article")
 
-    def load_article_content_async(self, entry):
-        """Load article content in a separate thread to prevent UI freezing."""
-        class ContentLoaderWorker(QObject):
-            content_loaded = pyqtSignal(str)
+    def _register_content_load(self, article_id: str, thread: QThread, worker: QObject):
+        """Track an active content load and start a watchdog timer to avoid hangs."""
+        if getattr(self, 'is_shutting_down', False) or getattr(self, '_shutdown_in_progress', False):
+            logging.debug("_register_content_load: skipped due to shutdown")
+            return
+        try:
+            # Stop previous timer if exists for same article_id
+            self._complete_content_load(article_id)
+        except Exception:
+            pass
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(15000)  # 15s watchdog
+        timer.timeout.connect(lambda aid=article_id: self._on_content_fetch_timeout(aid))
+        self.active_content_loads[article_id] = {"thread": thread, "worker": worker, "timer": timer}
+        timer.start()
 
-            def __init__(self, entry):
-                super().__init__()
-                self.entry = entry
-
-            def run(self):
+    def _complete_content_load(self, article_id: str):
+        """Cleanup tracking and stop the background thread for a finished/aborted load."""
+        info = self.active_content_loads.pop(article_id, None)
+        if not info:
+            return
+        try:
+            timer = info.get("timer")
+            if timer:
+                timer.stop()
                 try:
-                    url = self.entry.get('link', '')
-                    if not url:
-                        raise ValueError("No URL available for the article.")
+                    timer.deleteLater()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        thread = info.get("thread")
+        try:
+            if thread:
+                # Ask the thread to stop its event loop if it's still running
+                if thread.isRunning():
+                    thread.quit()
+                    if not thread.wait(500):
+                        # Keep a reference and clean up later on finish to avoid premature destruction
+                        logging.warning(f"Content fetch thread didn't stop in time; deferring cleanup: {thread.objectName() or thread}")
+                        try:
+                            self._stale_threads.append(thread)
+                            thread.finished.connect(lambda thr=thread: self._cleanup_stale_thread(thr))
+                        except Exception:
+                            pass
+                        return
+                # Only remove from registry after it has fully stopped
+                try:
+                    if thread in self.threads:
+                        self.threads.remove(thread)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
-                    logging.info(f"Fetching content from URL: {url}")
-                    response = requests.get(url, timeout=10)
-                    logging.info(f"Response status code: {response.status_code}")
-                    response.raise_for_status()
+    def _on_content_fetch_timeout(self, article_id: str):
+        """Handle content fetch timeout: show a message if the article is still selected and cleanup."""
+        info = self.active_content_loads.get(article_id)
+        if not info:
+            return
+        # If this article is still selected, show timeout message
+        try:
+            selected_items = self.articles_tree.selectedItems()
+            if selected_items:
+                current_entry = selected_items[0].data(0, Qt.UserRole)
+                if self.get_article_id(current_entry) == article_id:
+                    timeout_html = f"""
+                    <div>
+                        <h3>Failed to load content</h3>
+                        <p>Error: timed out while fetching the article content.</p>
+                        <p>Please try opening the article in your browser.</p>
+                    </div>
+                    """
+                    self.display_formatted_content(current_entry, timeout_html)
+        except Exception:
+            pass
+        # Try to stop the background thread
+        thread = info.get("thread")
+        try:
+            if thread and thread.isRunning():
+                thread.quit()
+                if not thread.wait(300):
+                    # Forcefully terminate as a last resort
+                    try:
+                        thread.terminate()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Final cleanup
+        self._complete_content_load(article_id)
 
-                    content = response.text
-                    logging.info(f"Fetched content length: {len(content)}")
-
-                    # Emit the fetched content
-                    self.content_loaded.emit(content)
-                except Exception as e:
-                    logging.error(f"Failed to load article content: {e}")
-                    self.content_loaded.emit("""
-                    <html>
-                    <head>
-                        <style>
-                            body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; color: #555; }
-                        </style>
-                    </head>
-                    <body>
-                        <h3>Failed to load content.</h3>
-                        <p>Please check your internet connection or try again later.</p>
-                    </body>
-                    </html>
-                    """)
-
-        # Create a worker and thread
-        worker = ContentLoaderWorker(entry)
-        thread = QThread()
-        worker.moveToThread(thread)
-
-        # Connect signals
-        worker.content_loaded.connect(self.update_content_view)
-        thread.started.connect(worker.run)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(worker.deleteLater)
-
-        # Start the thread
-        thread.start()
-
-        # Track the thread for cleanup
-        self.threads.append(thread)
+    pass
 
     def update_content_view(self, content):
         """Update the content view with the fetched HTML content."""
@@ -2586,16 +2955,17 @@ class RSSReader(QMainWindow):
             entry = item.data(0, Qt.UserRole)
             if isinstance(entry, dict):
                 entry['movie_data'] = movie_data
-            tooltip = f"Year: {movie_data.get('year', '')}\n" \
-                      f"Country: {movie_data.get('country', '')}\n" \
-                      f"Actors: {movie_data.get('actors', '')}\n" \
-                      f"Writer: {movie_data.get('writer', '')}\n" \
-                      f"Awards: {movie_data.get('awards', '')}\n" \
-                      f"Plot: {movie_data.get('plot', '')}\n" \
-                      f"IMDB Votes: {movie_data.get('imdbvotes', '')}\n" \
-                      f"Type: {movie_data.get('type', '')}\n" \
-                      f"Poster: {movie_data.get('poster', '')}"
-            item.setToolTip(0, tooltip)
+            if getattr(self, 'tooltips_enabled', False):
+                tooltip = f"Year: {movie_data.get('year', '')}\n" \
+                          f"Country: {movie_data.get('country', '')}\n" \
+                          f"Actors: {movie_data.get('actors', '')}\n" \
+                          f"Writer: {movie_data.get('writer', '')}\n" \
+                          f"Awards: {movie_data.get('awards', '')}\n" \
+                          f"Plot: {movie_data.get('plot', '')}\n" \
+                          f"IMDB Votes: {movie_data.get('imdbvotes', '')}\n" \
+                          f"Type: {movie_data.get('type', '')}\n" \
+                          f"Poster: {movie_data.get('poster', '')}"
+                item.setToolTip(0, tooltip)
         except RuntimeError:
             # Item was deleted due to UI refresh; ignore
             logging.debug("Skipped movie info update: item was deleted")
@@ -2694,6 +3064,8 @@ class RSSReader(QMainWindow):
             current_feed_item = self.feeds_list.currentItem()
             if (current_feed_item and current_feed_item.data(0, Qt.UserRole) == url):
                 self.populate_articles_ui()  # Corrected method call
+                # Done populating for current feed via network
+                self.is_populating_articles = False
             logging.info(f"Fetched feed: {url} with {len(new_entries)} new articles.")
             self.update_feed_bold_status(url)
         else:
@@ -2922,72 +3294,7 @@ class RSSReader(QMainWindow):
         logging.info(f"Updated feed URL: {old_url} -> {new_url}")
         return True
 
-    def load_article_content_async(self, entry):
-        """Load article content in a separate thread to prevent UI freezing."""
-        class ContentLoaderWorker(QObject):
-            content_loaded = pyqtSignal(str)
-
-            def __init__(self, entry):
-                super().__init__()
-                self.entry = entry
-
-            def run(self):
-                try:
-                    url = self.entry.get('link', '')
-                    if not url:
-                        raise ValueError("No URL found for the article.")
-
-                    logging.info(f"Fetching content from URL: {url}")
-                    response = requests.get(url, timeout=10)
-                    logging.info(f"Response status code: {response.status_code}")
-                    response.raise_for_status()
-
-                    # Extract main content using BeautifulSoup
-                    from bs4 import BeautifulSoup
-                    soup = BeautifulSoup(response.text, 'html.parser')
-
-                    # Attempt to find the main content block
-                    main_content = soup.find('article') or soup.find('div', {'id': 'content'}) or soup.body
-                    content_html = main_content.prettify() if main_content else response.text
-
-                    logging.info(f"Content length: {len(content_html)}")
-                    self.content_loaded.emit(content_html)
-                except Exception as e:
-                    logging.error(f"Failed to load article content: {e}")
-                    self.content_loaded.emit("""
-                    <html>
-                    <head>
-                        <style>
-                            body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; color: #555; }
-                        </style>
-                    </head>
-                    <body>
-                        <h3>Failed to load content.</h3>
-                        <p>Please check your internet connection or try again later.</p>
-                    </body>
-                    </html>
-                    """)
-
-        # Create a worker and thread
-        worker = ContentLoaderWorker(entry)
-        thread = QThread()
-        worker.moveToThread(thread)
-
-        # Connect signals
-        worker.content_loaded.connect(self.update_content_view)
-        thread.started.connect(worker.run)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(worker.deleteLater)
-
-        # Add logging for thread lifecycle
-        thread.started.connect(lambda: logging.info("Thread started."))
-        thread.finished.connect(lambda: logging.info("Thread finished."))
-
-        # Start the thread
-        thread.start()
-
-        # Track the thread for cleanup
-        self.threads.append(thread)
+    
 
     def update_content_view(self, content):
         """Update the content view with the fetched HTML content."""
@@ -3061,6 +3368,34 @@ def main():
             logging.StreamHandler(sys.stdout)
         ]
     )
+    # Install global exception hook
+    def excepthook(exc_type, exc_value, exc_traceback):
+        logging.exception("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+        try:
+            from PyQt5.QtWidgets import QApplication
+            QApplication.instance() and QApplication.instance().quit()
+        except Exception:
+            pass
+    sys.excepthook = excepthook
+
+    # Install Qt message handler for warnings/errors from Qt
+    def qt_message_handler(mode, context, message):
+        try:
+            level = {
+                QtMsgType.QtDebugMsg: logging.DEBUG,
+                QtMsgType.QtInfoMsg: logging.INFO,
+                QtMsgType.QtWarningMsg: logging.WARNING,
+                QtMsgType.QtCriticalMsg: logging.ERROR,
+                QtMsgType.QtFatalMsg: logging.CRITICAL,
+            }.get(mode, logging.INFO)
+            logging.log(level, f"Qt: {message}")
+        except Exception:
+            pass
+    try:
+        qInstallMessageHandler(qt_message_handler)
+    except Exception:
+        pass
+
     app = QApplication(sys.argv)
     app.setOrganizationName("rocker")
     app.setApplicationName("SmallRSSReader")

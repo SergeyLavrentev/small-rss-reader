@@ -1,6 +1,6 @@
 # Makefile
 
-.PHONY: build clean run rebuild install codesign full-install full-rebuild
+.PHONY: venv build clean run rebuild install codesign full-install full-rebuild
 
 # Variables
 APP_NAME=SmallRSSReader
@@ -16,10 +16,20 @@ INSTALL_PATH=/Applications/
 # security find-identity -v -p codesigning
 SIGN_IDENTITY="Developer ID Application: Rocker (TEAMID)"  # <-- Replace with your actual code signing identity
 
+# venv management
+VENV=venv
+PY=$(VENV)/bin/python
+PIP=$(VENV)/bin/pip
+
+venv:
+	@test -d $(VENV) || python3 -m venv $(VENV)
+	$(PY) -m pip install --upgrade pip
+	$(PIP) install -r requirements.txt
+
 # Build the application using PyInstaller and the spec file
-build:
+build: venv
 	# pyinstaller --clean --noconfirm $(SPEC_FILE)
-	python setup.py py2app
+	$(PY) setup.py py2app
 
 # Clean up build artifacts created by PyInstaller
 clean:
@@ -28,8 +38,8 @@ clean:
 	rm -fr .eggs
 
 # Run the application directly using Python (for development/testing)
-run:
-	python small_rss_reader.py
+run: venv
+	$(PY) small_rss_reader.py --debug
 
 # Rebuild the application: clean then build
 rebuild: clean build
