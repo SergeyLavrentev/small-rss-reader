@@ -3,6 +3,7 @@ logs/
 dist
 build
 .eggs
+__pycache__/
 
 # Ignore all .log files
 *.log
