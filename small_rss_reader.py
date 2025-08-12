@@ -642,8 +642,18 @@ class RSSReader(QMainWindow):
 
     def apply_font_size(self):
         font = QFont(self.default_font.family(), self.current_font_size)
-        self.articles_tree.setFont(font)
-        self.content_view.setFont(font)
+        try:
+            self.articles_tree.setFont(font)
+        except Exception:
+            pass
+        try:
+            self.content_view.setFont(font)
+        except Exception:
+            pass
+        try:
+            self.feeds_list.setFont(font)
+        except Exception:
+            pass
         self.statusBar().showMessage(f"Font: {font.family()}, Size: {font.pointSize()}")
 
     def increase_font_size(self):
@@ -668,7 +678,11 @@ class RSSReader(QMainWindow):
 
     def show_notification(self, title, subtitle, message, link):
         full_message = f"{subtitle}\n\n{message}" if subtitle else message
-        self.tray_icon.showMessage(title, full_message, QSystemTrayIcon.Information, 5000)
+        try:
+            if self.tray_icon and QSystemTrayIcon.isSystemTrayAvailable():
+                self.tray_icon.showMessage(title, full_message, QSystemTrayIcon.Information, 5000)
+        except Exception:
+            pass
 
     def send_notification(self, feed_title, entry):
         group_name = self.get_group_name_for_feed(entry.get('link', ''))
@@ -1084,6 +1098,8 @@ class RSSReader(QMainWindow):
         self.restore_geometry_and_state(settings)
         self.load_api_key_and_refresh_interval(settings)
         self.load_ui_visibility_settings(settings)
+        # Load persisted font settings before applying them
+        self.load_font_settings(settings)
         self.load_movie_data_cache()
         self.load_group_settings(settings)
         self.load_read_articles()
@@ -1093,6 +1109,24 @@ class RSSReader(QMainWindow):
         self.init_tray_icon()
         QTimer.singleShot(1000, self.force_refresh_all_feeds)
         self.select_first_feed()
+
+    def load_font_settings(self, settings: QSettings):
+        """Load and clamp font settings from QSettings."""
+        try:
+            font_name = settings.value('font_name', self.default_font.family())
+            raw_size = settings.value('font_size', self.current_font_size)
+            try:
+                font_size = int(raw_size)
+            except Exception:
+                font_size = self.current_font_size
+            if not font_name:
+                font_name = self.default_font.family()
+            font_size = max(8, min(48, font_size))
+            self.default_font = QFont(font_name, font_size)
+            self.current_font_size = font_size
+            logging.info(f"Loaded font settings: {font_name} {font_size}pt")
+        except Exception as e:
+            logging.warning(f"Failed to load font settings, using defaults: {e}")
 
     def has_unread_articles(self, feed_data):
         for entry in feed_data.get('entries', []):
@@ -1309,7 +1343,8 @@ class RSSReader(QMainWindow):
         # Idempotent init: reuse existing tray icon if present
         if getattr(self, 'tray_icon', None) is None:
             self.tray_icon = QSystemTrayIcon(self)
-        if getattr(self, 'tray_icon_enabled', True):
+        system_tray_ok = QSystemTrayIcon.isSystemTrayAvailable()
+        if getattr(self, 'tray_icon_enabled', True) and system_tray_ok:
             tray_icon_pixmap = QPixmap(resource_path('icons/rss_tray_icon.png'))
             self.tray_icon.setIcon(QIcon(tray_icon_pixmap))
             self.tray_icon.setToolTip("Small RSS Reader")
