@@ -1,6 +1,6 @@
 # Makefile
 
-.PHONY: venv build clean run rebuild install codesign full-install full-rebuild
+.PHONY: venv build clean run rebuild install codesign full-install full-rebuild test
 
 # Variables
 APP_NAME=SmallRSSReader
@@ -64,3 +64,9 @@ full-install: build install codesign
 # Full rebuild process: clean, build, install, and codesign
 full-rebuild: clean build install codesign
 	@echo "Cleaned, built, installed, and signed $(DISPLAY_NAME) successfully."
+
+# Run tests with venv python, verbose output, and headless Qt
+test: venv
+	QT_QPA_PLATFORM=offscreen \
+	QTWEBENGINE_CHROMIUM_FLAGS="--headless --disable-gpu" \
+	PYTHONPATH=. $(PY) -m pytest -vv -s
