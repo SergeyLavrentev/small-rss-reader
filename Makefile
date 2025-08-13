@@ -1,6 +1,6 @@
 # Makefile
 
-.PHONY: venv build clean run rebuild install codesign full-install full-rebuild
+.PHONY: build clean run rebuild install codesign full-install full-rebuild test test-all test-network
 
 # Variables
 APP_NAME=SmallRSSReader
@@ -16,7 +16,7 @@ INSTALL_PATH=/Applications/
 # security find-identity -v -p codesigning
 SIGN_IDENTITY="Developer ID Application: Rocker (TEAMID)"  # <-- Replace with your actual code signing identity
 
-# venv management
+# venv management (use only venv)
 VENV=venv
 PY=$(VENV)/bin/python
 PIP=$(VENV)/bin/pip
@@ -64,3 +64,21 @@ full-install: build install codesign
 # Full rebuild process: clean, build, install, and codesign
 full-rebuild: clean build install codesign
 	@echo "Cleaned, built, installed, and signed $(DISPLAY_NAME) successfully."
+
+# Run tests with venv python, verbose output, and headless Qt
+test: venv
+	QT_QPA_PLATFORM=offscreen \
+	QTWEBENGINE_CHROMIUM_FLAGS="--headless --disable-gpu" \
+	PYTHONPATH=. $(PY) -m pytest -vv -s
+
+# Run all tests including network-marked ones
+test-all: venv
+	QT_QPA_PLATFORM=offscreen \
+	QTWEBENGINE_CHROMIUM_FLAGS="--headless --disable-gpu" \
+	PYTHONPATH=. $(PY) -m pytest -vv -s -m ""
+
+# Run only network tests
+test-network: venv
+	QT_QPA_PLATFORM=offscreen \
+	QTWEBENGINE_CHROMIUM_FLAGS="--headless --disable-gpu" \
+	PYTHONPATH=. $(PY) -m pytest -vv -s -m network

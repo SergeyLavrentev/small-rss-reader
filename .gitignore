@@ -17,3 +17,7 @@ group_settings.json
 venv/
 ENV/
 env/
+.venv/
+
+# Ignore local SQLite database
+db.sqlite3
