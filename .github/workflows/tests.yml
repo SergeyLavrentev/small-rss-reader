@@ -1,0 +1,28 @@
+name: tests
+
+on:
+  push:
+    branches: [ feature/**, main, master ]
+  pull_request:
+
+jobs:
+  macos-tests:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          ./venv/bin/python -m pip install --upgrade pip
+          ./venv/bin/pip install -r requirements.txt
+      - name: Run tests (headless)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QTWEBENGINE_CHROMIUM_FLAGS: --headless --disable-gpu
+          PYTHONPATH: .
+        run: |
+          ./venv/bin/python -m pytest -vv -s

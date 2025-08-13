@@ -6,8 +6,6 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
 
 ## Features
 
-## Features
-
 - **Manage Feeds**: Add, remove, and reorder RSS feeds with smart, domain-based grouping.
 - **Article Viewing**: Browse articles with titles, dates, summaries, images, and links.
 - **Search**: Quickly find articles using keywords across titles, summaries, and content.
@@ -16,7 +14,7 @@ A minimalistic RSS Reader application built with Python and PyQt5. This applicat
 - **OMDb Integration**: Optionally fetch and display movie data for relevant articles.
 - **Customizable Interface**: Toggle the toolbar, status bar, and menu bar; adjust fonts and display settings.
 - **Settings**: Configure OMDb API key, refresh intervals, notifications, tray icon behavior, and iCloud backup.
-- **Import/Export**: Backup and restore feeds and settings via JSON files.
+- **Import/Export**: Backup and restore feeds and settings via iCloud or JSON files.
 - **Auto Refresh**: Automatically update feeds at set intervals.
 - **System Tray Integration**: Minimize the application to the system tray for a clutter-free experience.
 - **iCloud Backup & Restore**: Automatically backup and restore feeds and user settings to/from iCloud.
@@ -79,16 +77,28 @@ To enable the movie data fetching feature, you need to obtain an API key from [O
 
 ## Data Management
 
-### JSON Files
+### Storage: SQLite (with safe JSON migration)
 
-The application uses JSON files to store and manage data.
+- App data now lives in a SQLite database at `db.sqlite3` (in the user data directory). On first run, legacy JSON files (`feeds.json`, `read_articles.json`, `group_settings.json`, `movie_data_cache.json`) are imported automatically and safely removed once the import succeeds.
+- A favicon cache is also stored in SQLite to avoid repeated network requests.
 
-- **`feeds.json`**
-  - **Purpose:** Stores your subscribed RSS feeds and their articles.
-  - **Location:** Application's working directory.
+### Backup & Restore
 
-- **`movie_data_cache.json`**
-  - **Purpose:** Caches movie data fetched from the OMDb API to optimize performance.
-  - **Location:** Application's working directory.
+- iCloud backup stores `db.sqlite3` and legacy JSONs (for compatibility) at:
+   `~/Library/Mobile Documents/com~apple~CloudDocs/SmallRSSReaderBackup/`
+- You can restore from the same folder via the app's settings.
 
-*These files are managed automatically. Avoid manual edits to prevent data corruption.*
+## Testing
+
+- Default (no network):
+   make test
+
+- Run only network tests:
+   make test-network
+
+- Run all tests:
+   make test-all
+
+Notes:
+- Tests run headless with `QT_QPA_PLATFORM=offscreen` and WebEngine disabled flags.
+- Network-marked tests are skipped by default. Use markers to include them when needed.
