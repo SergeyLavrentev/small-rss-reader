@@ -3,6 +3,7 @@ import sys
 import os
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import feedparser
 import signal
 import re
@@ -16,7 +17,7 @@ import requests
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from omdbapi.movie_search import GetMovie
-from PyQt5.QtWidgets import QFontComboBox
+from PyQt5.QtWidgets import QFontComboBox, QComboBox
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTreeWidget, QTreeWidgetItem, QSplitter, QMessageBox, QAction, QFileDialog, QMenu, QToolBar,
@@ -346,6 +347,14 @@ class SettingsDialog(QDialog):
         self.restore_backup_button = QPushButton("Restore from iCloud", self)
         self.restore_backup_button.clicked.connect(self.restore_backup)
         layout.addRow("", self.restore_backup_button)
+        # Log level selector
+        self.log_level_combo = QComboBox(self)
+        self.log_level_combo.addItems(["ERROR", "WARNING", "INFO", "DEBUG"]) 
+        current_level = settings.value('log_level', 'INFO')
+        if current_level not in ["ERROR", "WARNING", "INFO", "DEBUG"]:
+            current_level = 'INFO'
+        self.log_level_combo.setCurrentText(current_level)
+        layout.addRow("Log level:", self.log_level_combo)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -3570,14 +3579,24 @@ def main():
     else:
         application_path = os.path.dirname(os.path.abspath(__file__))
     os.chdir(application_path)
-    logging_level = logging.DEBUG if args.debug else logging.INFO
+    # Determine logging level: --debug has priority, otherwise from Settings
+    if args.debug:
+        logging_level = logging.DEBUG
+    else:
+        try:
+            level_name = QSettings('rocker', 'SmallRSSReader').value('log_level', 'INFO')
+            level_map = {'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WARNING, 'ERROR': logging.ERROR}
+            logging_level = level_map.get(str(level_name).upper(), logging.INFO)
+        except Exception:
+            logging_level = logging.INFO
     log_path = get_user_data_path('rss_reader.log')
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    file_handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=3, encoding='utf-8')
     logging.basicConfig(
         level=logging_level,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(log_path),
+            file_handler,
             logging.StreamHandler(sys.stdout)
         ]
     )
