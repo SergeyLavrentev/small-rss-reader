@@ -36,7 +36,7 @@ from pathlib import Path
 from storage import Storage
 
 # =========================
-# 1. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И КЛАССЫ
+# 1. Helper functions and classes
 # =========================
 
 def resource_path(relative_path):
@@ -703,6 +703,10 @@ class RSSReader(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        # Headless mode for tests (no WebEngine/tray, no modals)
+        self.headless = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        if self.headless:
+            self.suppress_modals = True
         self.data_changed = False  # Track if data has been modified
         self.feed_cache = {}  # Cache for feed data with timestamps
         self.cache_expiry = timedelta(minutes=5)
@@ -941,13 +945,16 @@ class RSSReader(QMainWindow):
         self.main_splitter.setHandleWidth(1)
         self.main_splitter.setStyleSheet("QSplitter::handle { background-color: #ccc; width: 1px; }")
         main_layout.addWidget(self.main_splitter)
+
         self.horizontal_splitter = QSplitter(Qt.Horizontal)
         self.horizontal_splitter.setHandleWidth(1)
         self.horizontal_splitter.setStyleSheet("QSplitter::handle { background-color: #ccc; width: 1px; }")
         self.main_splitter.addWidget(self.horizontal_splitter)
+
         self.init_feeds_panel()
         self.init_articles_panel()
         self.init_content_panel()
+
         self.horizontal_splitter.setStretchFactor(0, 1)
         self.horizontal_splitter.setStretchFactor(1, 3)
         self.main_splitter.setStretchFactor(0, 3)
@@ -1007,9 +1014,7 @@ class RSSReader(QMainWindow):
         # Simplified logic to always show all columns
         all_columns = ['Title', 'Date', 'Rating', 'Released', 'Genre', 'Director', 'Country', 'Actors', 'Poster']
         self.articles_tree.setHeaderLabels(all_columns)
-
-        articles_layout.addWidget(self.articles_tree)
-        self.horizontal_splitter.addWidget(self.articles_panel)
+        
         self.articles_tree.setColumnWidth(0, 200)
         self.articles_tree.setColumnWidth(1, 100)
         self.articles_tree.setColumnWidth(2, 80)
@@ -1039,13 +1044,17 @@ class RSSReader(QMainWindow):
         content_layout = QVBoxLayout(self.content_panel)
         content_layout.setContentsMargins(2, 2, 2, 2)
         content_layout.setSpacing(2)
-        self.content_view = QWebEngineView()
-        # Safer defaults for content rendering
-        self.content_view.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, False)
-        self.content_view.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, False)
-        self.content_view.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-        self.content_view.settings().setAttribute(QWebEngineSettings.PluginsEnabled, False)
-        self.content_view.setPage(WebEnginePage(self.content_view))
+        if self.headless:
+            # Lightweight placeholder widget in tests
+            self.content_view = QWidget()
+        else:
+            self.content_view = QWebEngineView()
+            # Safer defaults for content rendering
+            self.content_view.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, False)
+            self.content_view.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, False)
+            self.content_view.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
+            self.content_view.settings().setAttribute(QWebEngineSettings.PluginsEnabled, False)
+            self.content_view.setPage(WebEnginePage(self.content_view))
         content_layout.addWidget(self.content_view)
         self.main_splitter.addWidget(self.content_panel)
 
@@ -1091,6 +1100,17 @@ class RSSReader(QMainWindow):
             pass
         # Schedule async fetch; avoid duplicate work by marking placeholder
         self.favicon_cache.setdefault(domain, QIcon())
+        # In headless/test mode, do not perform any network fetch to avoid hangs
+        try:
+            if getattr(self, 'headless', False) or os.environ.get('PYTEST_CURRENT_TEST'):
+                # Use placeholder (empty) icon; it can be updated later in real runs
+                try:
+                    item.setIcon(0, self.favicon_cache.get(domain, QIcon()))
+                except Exception:
+                    pass
+                return
+        except Exception:
+            pass
         try:
             self.thread_pool.start(FaviconFetchRunnable(domain, self))
         except Exception:
@@ -1340,8 +1360,9 @@ class RSSReader(QMainWindow):
         self.load_feeds()
         self.apply_font_size()
         self.tray_icon_enabled = settings.value('tray_icon_enabled', True, type=bool)
-        self.init_tray_icon()
-        QTimer.singleShot(1000, self.force_refresh_all_feeds)
+        if not self.headless:
+            self.init_tray_icon()
+            QTimer.singleShot(1000, self.force_refresh_all_feeds)
         self.select_first_feed()
 
     def load_font_settings(self, settings: QSettings):
@@ -2558,7 +2579,7 @@ class RSSReader(QMainWindow):
             # Ignore clicks while we're refreshing or repopulating the UI
             if self.is_refreshing or getattr(self, 'is_populating_articles', False):
                 try:
-                    self.statusBar().showMessage("Загрузка… дождитесь окончания обновления", 2000)
+                    self.statusBar().showMessage("Loading… please wait for refresh to complete", 2000)
                 except Exception:
                     pass
                 logging.debug(f"display_content: ignored due to is_refreshing={self.is_refreshing}, is_populating={self.is_populating_articles}")
@@ -3520,7 +3541,8 @@ class RSSReader(QMainWindow):
 
     def update_content_view(self, content):
         """Update the content view with the fetched HTML content."""
-        logging.info("update_content_view called with content length: %d" % len(content))
+        logging.info("update_content_view called wit" \
+        "h content length: %d" % len(content))
         self.content_view.setHtml(content)
 
     def cleanup_orphaned_data(self):
@@ -3554,19 +3576,19 @@ class RSSReader(QMainWindow):
             self.save_movie_data_cache()
 
 # =========================
-# 4. РАБОТА С RSS, ЗАГРУЗКА, КЭШИРОВАНИЕ
+# 4. RSS operations: fetching and caching
 # =========================
 
 # ...методы RSSReader, связанные с fetch_feed_with_cache, force_refresh_all_feeds, on_feed_fetched, on_feed_fetched_force_refresh, fetch_article_content, load_article_content_async ...
 
 # =========================
-# 5. РАБОТА С ФАЙЛАМИ (ЧТЕНИЕ/ЗАПИСЬ)
+# 5. File operations (I/O)
 # =========================
 
 # ...методы RSSReader, связанные с load_feeds, save_feeds, load_read_articles, save_read_articles, load_group_settings, save_group_settings, load_movie_data_cache, save_movie_data_cache ...
 
 # =========================
-# 6. ОСНОВНАЯ ФУНКЦИЯ ЗАПУСКА
+# 6. Main entrypoint
 # =========================
 
 def main():

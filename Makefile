@@ -1,6 +1,6 @@
 # Makefile
 
-.PHONY: venv build clean run rebuild install codesign full-install full-rebuild test
+.PHONY: build clean run rebuild install codesign full-install full-rebuild test test-all test-network
 
 # Variables
 APP_NAME=SmallRSSReader
@@ -70,3 +70,15 @@ test: venv
 	QT_QPA_PLATFORM=offscreen \
 	QTWEBENGINE_CHROMIUM_FLAGS="--headless --disable-gpu" \
 	PYTHONPATH=. $(PY) -m pytest -vv -s
+
+# Run all tests including network-marked ones
+test-all: venv
+	QT_QPA_PLATFORM=offscreen \
+	QTWEBENGINE_CHROMIUM_FLAGS="--headless --disable-gpu" \
+	PYTHONPATH=. $(PY) -m pytest -vv -s -m ""
+
+# Run only network tests
+test-network: venv
+	QT_QPA_PLATFORM=offscreen \
+	QTWEBENGINE_CHROMIUM_FLAGS="--headless --disable-gpu" \
+	PYTHONPATH=. $(PY) -m pytest -vv -s -m network
