@@ -22,16 +22,12 @@ def app(qtbot, tmp_path, monkeypatch):
     return w
 
 
-def test_backup_and_restore_includes_sqlite_and_json(app, tmp_path, monkeypatch):
-    # Prepare sample files to backup
-    user_files = ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json', 'db.sqlite3']
+def test_backup_and_restore_sqlite_only(app, tmp_path, monkeypatch):
+    # Prepare sqlite file to backup
+    user_files = ['db.sqlite3']
     for name in user_files:
         p = tmp_path / name
-        if name.endswith('.json'):
-            p.write_text('{}')
-        else:
-            # Create a tiny sqlite file or marker
-            p.write_bytes(b'\x00')
+        p.write_bytes(b'\x00')
 
     # iCloud backup path redirected into temp dir
     monkeypatch.setattr(Path, 'home', lambda: tmp_path)
@@ -45,9 +41,12 @@ def test_backup_and_restore_includes_sqlite_and_json(app, tmp_path, monkeypatch)
 
     app.backup_to_icloud()
 
-    # All files should be present in backup
+    # Only db.sqlite3 should be present in backup
     for name in user_files:
         assert (icloud_path / name).exists()
+    # Ensure legacy JSON files are NOT backed up
+    for legacy in ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json']:
+        assert not (icloud_path / legacy).exists()
 
     # Remove originals, then restore back
     for name in user_files:
@@ -59,3 +58,6 @@ def test_backup_and_restore_includes_sqlite_and_json(app, tmp_path, monkeypatch)
 
     for name in user_files:
         assert (tmp_path / name).exists()
+    # And JSONs should not be created by restore
+    for legacy in ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json']:
+        assert not (tmp_path / legacy).exists()

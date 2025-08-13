@@ -64,6 +64,41 @@ def get_user_data_path(filename):
     else:
         return os.path.join(os.path.abspath("."), filename)
 
+def _strip_www(domain: str) -> str:
+    try:
+        return domain[4:] if domain.lower().startswith('www.') else domain
+    except Exception:
+        return domain
+
+def _base_domain(domain: str) -> str:
+    """Heuristic to get base domain without heavy deps (tldextract).
+    - If TLD length is 2 (e.g., .uk) and second-level is short (<=3), take last 3 labels.
+    - Else take last 2 labels.
+    """
+    try:
+        parts = [p for p in domain.split('.') if p]
+        if len(parts) <= 2:
+            return domain
+        if len(parts[-1]) == 2 and len(parts[-2]) <= 3:
+            return '.'.join(parts[-3:])
+        return '.'.join(parts[-2:])
+    except Exception:
+        return domain
+
+def _domain_variants(domain: str):
+    try:
+        d = _strip_www(domain)
+        base = _base_domain(d)
+        variants = [d]
+        if base != d:
+            variants.append(base)
+        www_base = f"www.{base}"
+        if www_base not in variants:
+            variants.append(www_base)
+        return variants
+    except Exception:
+        return [domain]
+
 def fetch_favicon(url):
     """Fetch the favicon for a given URL and resize it to a standard size."""
     try:
@@ -212,8 +247,25 @@ class FaviconFetchRunnable(QRunnable):
                         return
                 except Exception:
                     continue
+            # Fallback to Google S2 favicon service
+            try:
+                s2 = f"https://www.google.com/s2/favicons?sz=64&domain={self.domain}"
+                resp = requests.get(s2, timeout=5)
+                if resp.status_code == 200 and resp.content:
+                    self.reader.icon_fetched.emit(self.domain, resp.content)
+                    return
+            except Exception:
+                pass
+            # All attempts failed
+            try:
+                self.reader.icon_fetch_failed.emit(self.domain)
+            except Exception:
+                pass
         except Exception:
-            pass
+            try:
+                self.reader.icon_fetch_failed.emit(self.domain)
+            except Exception:
+                pass
 
 
 class ArticleTreeWidgetItem(QTreeWidgetItem):
@@ -479,6 +531,8 @@ class RSSReader(QMainWindow):
     REFRESH_ALL_ICON = QStyle.SP_DialogResetButton
     notify_signal = pyqtSignal(str, str, str, str)  # title, subtitle, message, link
     icon_fetched = pyqtSignal(str, bytes)  # domain, icon bytes
+    # Emitted when favicon fetch fails; used to clear in-flight guards so we can retry later
+    icon_fetch_failed = pyqtSignal(str)  # domain
 
     def initialize_variables(self):
         """Initialize instance variables and timers used across the app."""
@@ -500,6 +554,8 @@ class RSSReader(QMainWindow):
         self.refresh_icon_angle = 0
         # Guard for UI population to debounce clicks during startup/refresh
         self.is_populating_articles = False
+        # Track domains with an in-flight favicon fetch to avoid duplicates
+        self._favicon_fetching = set()
 
         # Debounce for feed selection to avoid thrashing loaders/threads
         self.selection_debounce = QTimer(self)
@@ -555,7 +611,7 @@ class RSSReader(QMainWindow):
         self.tooltips_enabled = False
 
         # Track threads with names for robust shutdown
-        self.threads = []  # already initialized above; ensure exists
+        self.threads = self.threads  # ensure attribute exists
 
     def register_thread(self, thread: QThread, name: str = ""):
         """Register a QThread for lifecycle management and add lifecycle logs."""
@@ -736,6 +792,8 @@ class RSSReader(QMainWindow):
         # Connect favicon signal
         try:
             self.icon_fetched.connect(self.on_icon_fetched)
+            # Ensure we clear in-flight guards on failure to allow retry
+            self.icon_fetch_failed.connect(lambda d: self._favicon_fetching.discard(d))
         except Exception:
             pass
 
@@ -793,12 +851,14 @@ class RSSReader(QMainWindow):
         self.save_feeds()
         self.load_feeds()
 
-    def remove_feed(self):
-        selected_items = self.feeds_list.selectedItems()
-        if not selected_items:
-            self.statusBar().showMessage("Please select a feed to remove.", 5000)
-            return
-        item = selected_items[0]
+    def remove_feed(self, item=None):
+        # Allow calling from context menu with the clicked item or fallback to current selection
+        if item is None:
+            selected_items = self.feeds_list.selectedItems()
+            if not selected_items:
+                self.statusBar().showMessage("Please select a feed to remove.", 5000)
+                return
+            item = selected_items[0]
         if item.data(0, Qt.UserRole) is None:
             self.statusBar().showMessage("Please select a feed, not a group.", 5000)
             return
@@ -807,15 +867,43 @@ class RSSReader(QMainWindow):
         if not feed_data:
             self.statusBar().showMessage("Feed data not found.", 5000)
             return
-        reply = QMessageBox.question(self, "Remove Feed",
-                                     f"Are you sure you want to remove '{feed_data['title']}'?",
-                                     QMessageBox.Yes | QMessageBox.No)
-        if reply != QMessageBox.Yes:
-            return
-        # Remove feed and associated read markers
+    # Skip modal in tests/headless
+        if not self.is_test_mode():
+            reply = QMessageBox.question(self, "Remove Feed",
+                                         f"Are you sure you want to remove '{feed_data['title']}'?",
+                                         QMessageBox.Yes | QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+    # Remove feed and associated read markers
         self.feeds = [f for f in self.feeds if f['url'] != feed_url]
+        try:
+            # Remove entries and feed from storage if available
+            if getattr(self, 'storage', None):
+                try:
+                    # Remove the feed and cascade delete entries
+                    self.storage.remove_feed(feed_url)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Remove read markers for this feed's articles
+        try:
+            to_remove = []
+            for entry in feed_data.get('entries', []):
+                aid = self.get_article_id(entry)
+                if aid in self.read_articles:
+                    to_remove.append(aid)
+            for aid in to_remove:
+                self.read_articles.discard(aid)
+        except Exception:
+            pass
         self.save_feeds()
         self.load_feeds()
+        # Select the first available feed after deletion
+        try:
+            self.select_first_feed()
+        except Exception:
+            pass
         self.statusBar().showMessage(f"Removed feed: {feed_data['title']}", 5000)
 
     def create_blue_dot_icon(self):
@@ -1064,7 +1152,8 @@ class RSSReader(QMainWindow):
                 if has_new:
                     self.set_feed_icon(item, url)  # Устанавливаем фавикон вместо синего кружка
                 else:
-                    item.setIcon(0, QIcon())
+                    # Не сбрасываем иконку: фавикон должен оставаться всегда
+                    pass
                 return True
             return False
 
@@ -1081,25 +1170,34 @@ class RSSReader(QMainWindow):
             domain = urlparse(url).netloc
         except Exception:
             domain = url
-        # In-memory cache by domain
-        if domain in self.favicon_cache:
-            item.setIcon(0, self.favicon_cache[domain])
-            return
-        # Storage cache
+        # In-memory cache by domain (with variants)
+        for d in _domain_variants(domain):
+            if d in self.favicon_cache:
+                logging.debug(f"favicon cache hit: {d}")
+                item.setIcon(0, self.favicon_cache[d])
+                return
+        # Storage cache (try variants)
         try:
             if getattr(self, 'storage', None):
-                data = self.storage.get_icon(domain)
-                if data:
-                    pm = QPixmap()
-                    if pm.loadFromData(data):
-                        icon = QIcon(pm)
-                        self.favicon_cache[domain] = icon
-                        item.setIcon(0, icon)
-                        return
+                for d in _domain_variants(domain):
+                    data = self.storage.get_icon(d)
+                    if data:
+                        pm = QPixmap()
+                        if pm.loadFromData(data):
+                            pm = pm.scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                            icon = QIcon(pm)
+                            self.favicon_cache[d] = icon
+                            logging.debug(f"favicon storage hit: {d}")
+                            item.setIcon(0, icon)
+                            return
         except Exception:
             pass
-        # Schedule async fetch; avoid duplicate work by marking placeholder
+        # Set a neutral placeholder while real favicon is being fetched
         self.favicon_cache.setdefault(domain, QIcon())
+        try:
+            item.setIcon(0, self.favicon_cache[domain])
+        except Exception:
+            pass
         # In headless/test mode, do not perform any network fetch to avoid hangs
         try:
             if getattr(self, 'headless', False) or os.environ.get('PYTEST_CURRENT_TEST'):
@@ -1112,12 +1210,14 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
         try:
-            self.thread_pool.start(FaviconFetchRunnable(domain, self))
+            if domain not in self._favicon_fetching:
+                self._favicon_fetching.add(domain)
+                logging.debug(f"favicon fetch start: {domain}")
+                self.thread_pool.start(FaviconFetchRunnable(domain, self))
+            else:
+                logging.debug(f"favicon in-flight, skip: {domain}")
         except Exception:
-            pass
-        else:
-            logging.info(f"No favicon found for {url}, using default icon.")
-            self.favicon_cache[url] = QIcon()  # Cache default icon
+            logging.debug("Failed to start favicon fetch thread", exc_info=True)
 
     def init_menu(self):
         menu = self.menuBar()
@@ -1450,86 +1550,28 @@ class RSSReader(QMainWindow):
         self.toggle_menubar_action.setChecked(menubar_visible)
 
     def load_movie_data_cache(self):
-        if getattr(self, 'storage', None):
-            try:
-                self.movie_data_cache = self.storage.load_movie_cache()
-                logging.info(f"Loaded movie data cache from SQLite with {len(self.movie_data_cache)} entries.")
-                return
-            except Exception as e:
-                logging.warning(f"Failed to load movie cache from SQLite: {e}")
-        cache_path = get_user_data_path('movie_data_cache.json')
-        if os.path.exists(cache_path):
-            try:
-                with open(cache_path, 'r') as f:
-                    self.movie_data_cache = json.load(f)
-                    logging.info(f"Loaded movie data cache with {len(self.movie_data_cache)} entries.")
-            except json.JSONDecodeError:
-                self.statusBar().showMessage("Failed to parse movie_data_cache.json.", 5000)
-                logging.error("Failed to parse movie_data_cache.json.")
-                self.movie_data_cache = {}
-            except Exception as e:
-                self.statusBar().showMessage(f"Unexpected error: {e}", 5000)
-                logging.error(f"Unexpected error while loading movie data cache: {e}")
-                self.movie_data_cache = {}
-        else:
+        try:
+            self.movie_data_cache = self.storage.load_movie_cache() if getattr(self, 'storage', None) else {}
+            logging.info(f"Loaded movie data cache from SQLite with {len(self.movie_data_cache)} entries.")
+        except Exception as e:
+            logging.warning(f"Failed to load movie cache from SQLite: {e}")
             self.movie_data_cache = {}
-            self.save_movie_data_cache()
-            logging.info("Created empty movie_data_cache.json.")
 
     def load_group_settings(self, settings):
-        if getattr(self, 'storage', None):
-            try:
-                self.group_settings = self.storage.load_group_settings()
-                logging.info(f"Loaded group settings from SQLite: {len(self.group_settings)} groups.")
-                return
-            except Exception as e:
-                logging.warning(f"Failed to load group settings from SQLite: {e}")
-        group_settings_path = get_user_data_path('group_settings.json')
-        if os.path.exists(group_settings_path):
-            try:
-                with open(group_settings_path, 'r') as f:
-                    self.group_settings = json.load(f)
-                    logging.info(f"Loaded group settings with {len(self.group_settings)} groups.")
-            except json.JSONDecodeError:
-                self.statusBar().showMessage("Failed to parse group_settings.json.", 5000)
-                logging.error("Failed to parse group_settings.json.")
-                self.group_settings = {}
-            except Exception as e:
-                self.statusBar().showMessage(f"Unexpected error: {e}", 5000)
-                logging.error(f"Unexpected error while loading group settings: {e}")
-                self.group_settings = {}
-        else:
+        try:
+            self.group_settings = self.storage.load_group_settings() if getattr(self, 'storage', None) else {}
+            logging.info(f"Loaded group settings from SQLite: {len(self.group_settings)} groups.")
+        except Exception as e:
+            logging.warning(f"Failed to load group settings from SQLite: {e}")
             self.group_settings = {}
-            self.save_group_settings()
-            logging.info("Created empty group_settings.json.")
 
     def load_read_articles(self):
-        # Prefer SQLite storage; fallback to legacy JSON if storage unavailable
         try:
-            if getattr(self, 'storage', None):
-                ids = self.storage.load_read_articles()
-                self.read_articles = set(ids)
-                logging.info(f"Loaded {len(self.read_articles)} read articles from SQLite.")
-                return
+            ids = self.storage.load_read_articles() if getattr(self, 'storage', None) else []
+            self.read_articles = set(ids)
+            logging.info(f"Loaded {len(self.read_articles)} read articles from SQLite.")
         except Exception as e:
             logging.warning(f"Failed to load read articles from SQLite: {e}")
-        # Fallback JSON path
-        try:
-            read_articles_path = get_user_data_path('read_articles.json')
-            if os.path.exists(read_articles_path):
-                with open(read_articles_path, 'r') as f:
-                    self.read_articles = set(json.load(f))
-                    logging.info(f"Loaded {len(self.read_articles)} read articles.")
-            else:
-                self.read_articles = set()
-                logging.info("Created empty read_articles.json.")
-        except json.JSONDecodeError:
-            self.statusBar().showMessage("Failed to parse read_articles.json.", 5000)
-            logging.error("Failed to parse read_articles.json.")
-            self.read_articles = set()
-        except Exception as e:
-            self.statusBar().showMessage(f"Unexpected error: {e}", 5000)
-            logging.error(f"Unexpected error while loading read articles: {e}")
             self.read_articles = set()
 
     def keyPressEvent(self, event):
@@ -1704,17 +1746,8 @@ class RSSReader(QMainWindow):
             if getattr(self, 'storage', None):
                 self.storage.save_movie_cache(self.movie_data_cache)
                 logging.info("Movie data cache saved to SQLite.")
-                return
         except Exception as e:
-            logging.warning(f"Failed to save movie cache to SQLite, falling back: {e}")
-        try:
-            cache_path = get_user_data_path('movie_data_cache.json')
-            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-            with open(cache_path, 'w') as f:
-                json.dump(self.movie_data_cache, f, indent=4)
-            logging.info("Movie data cache saved successfully.")
-        except Exception as e:
-            logging.error(f"Failed to save movie data cache: {e}")
+            logging.warning(f"Failed to save movie cache to SQLite: {e}")
 
     def save_group_settings(self):
         try:
@@ -1722,18 +1755,8 @@ class RSSReader(QMainWindow):
                 self.storage.save_group_settings(self.group_settings)
                 self.data_changed = True
                 logging.info("Group settings saved successfully to SQLite.")
-                return
         except Exception as e:
-            logging.warning(f"Failed to save group settings to SQLite, falling back: {e}")
-        try:
-            group_settings_path = get_user_data_path('group_settings.json')
-            os.makedirs(os.path.dirname(group_settings_path), exist_ok=True)
-            with open(group_settings_path, 'w') as f:
-                json.dump(self.group_settings, f, indent=4)
-            logging.info("Group settings saved successfully.")
-            self.data_changed = True  # Mark data as changed
-        except Exception as e:
-            logging.error(f"Failed to save group settings: {e}")
+            logging.warning(f"Failed to save group settings to SQLite: {e}")
 
     def save_read_articles(self):
         try:
@@ -1741,34 +1764,23 @@ class RSSReader(QMainWindow):
                 self.storage.save_read_articles(list(self.read_articles))
                 self.data_changed = True
                 logging.info(f"Saved {len(self.read_articles)} read articles to SQLite.")
-                return
         except Exception as e:
-            logging.warning(f"Failed to save read articles to SQLite, falling back: {e}")
-        try:
-            read_articles_path = get_user_data_path('read_articles.json')
-            os.makedirs(os.path.dirname(read_articles_path), exist_ok=True)
-            with open(read_articles_path, 'w') as f:
-                json.dump(list(self.read_articles), f, indent=4)
-            logging.info(f"Saved {len(self.read_articles)} read articles.")
-            self.data_changed = True  # Mark data as changed
-        except Exception as e:
-            logging.error(f"Failed to save read articles: {e}")
+            logging.warning(f"Failed to save read articles to SQLite: {e}")
 
     def save_feeds(self):
         try:
-            feeds_data = {
-                'feeds': self.feeds,
-                'column_widths': self.column_widths,
-            }
-            feeds_path = get_user_data_path('feeds.json')
-            os.makedirs(os.path.dirname(feeds_path), exist_ok=True)
-            with open(feeds_path, 'w') as f:
-                json.dump(feeds_data, f, indent=4)
-            logging.info("Feeds saved successfully.")
-            self.data_changed = True  # Mark data as changed
-            self.statusBar().showMessage("Feeds saved successfully.", 5000)
+            if getattr(self, 'storage', None):
+                # Persist feeds and column widths in SQLite
+                # Assuming storage has appropriate upsert/replace methods
+                for feed in self.feeds:
+                    self.storage.upsert_feed(feed['title'], feed['url'])
+                    self.storage.replace_entries(feed['url'], feed.get('entries', []))
+                self.storage.save_column_widths(self.column_widths)
+                logging.info("Feeds saved successfully to SQLite.")
+                self.data_changed = True
+                self.statusBar().showMessage("Feeds saved successfully.", 5000)
         except Exception as e:
-            logging.error(f"Failed to save feeds: {e}")
+            logging.error(f"Failed to save feeds to SQLite: {e}")
             self.statusBar().showMessage("Error saving feeds. Check logs for details.", 5000)
 
     def toggle_toolbar_visibility(self):
@@ -2005,119 +2017,24 @@ class RSSReader(QMainWindow):
         settings.setValue('group_name_mapping', json.dumps(self.group_name_mapping))
 
     def load_feeds(self):
-        """Loads feeds and sets favicons efficiently."""
-        # If storage is available, try loading from SQLite first
+        """Loads feeds from SQLite and sets favicons efficiently. No JSON fallbacks."""
+        self.feeds = []
+        self.column_widths = {}
         if getattr(self, 'storage', None):
             try:
                 self.feeds = self.storage.get_all_feeds()
-                # Column widths
                 try:
                     self.column_widths = self.storage.load_column_widths()
                 except Exception:
                     self.column_widths = {}
                 logging.info(f"Loaded {len(self.feeds)} feeds from SQLite.")
-                # If DB seems empty or contains placeholder dev/test data, try importing JSON sources
-                need_alt_import = False
-                try:
-                    if len(self.feeds) == 0:
-                        need_alt_import = True
-                    elif (not getattr(sys, 'frozen', False)) and sys.platform == 'darwin' and len(self.feeds) <= 2:
-                        # dev-mode heuristic: likely placeholder/test feeds
-                        need_alt_import = True
-                except Exception:
-                    pass
-                if not need_alt_import:
-                    self._rebuild_feeds_tree()
-                    return
-                logging.info("Attempting to import feeds from JSON sources due to empty/suspect DB...")
             except Exception as e:
-                logging.warning(f"Failed to load feeds from SQLite, will try JSON import: {e}")
-        feeds_path = get_user_data_path('feeds.json')
-        logging.debug(f"Loading feeds from: {feeds_path}")
-        if os.path.exists(feeds_path):
-            try:
-                with open(feeds_path, 'r') as f:
-                    data = json.load(f)
-                    if isinstance(data, dict):
-                        self.feeds = data.get('feeds', [])
-                        self.column_widths = data.get('column_widths', {})
-                        logging.info(f"Loaded {len(self.feeds)} feeds.")
-                    elif isinstance(data, list):
-                        self.feeds = data
-                        self.column_widths = {}
-                    else:
-                        self.feeds = []
-                        self.column_widths = {}
-                # Fallback: if user feeds.json exists but has zero feeds, try to import bundled feeds.json
-                if not self.feeds:
-                    try:
-                        bundled_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'feeds.json')
-                        if os.path.exists(bundled_path):
-                            with open(bundled_path, 'r') as bf:
-                                bundled = json.load(bf)
-                                if isinstance(bundled, dict):
-                                    imported_feeds = bundled.get('feeds', [])
-                                    imported_widths = bundled.get('column_widths', {})
-                                elif isinstance(bundled, list):
-                                    imported_feeds = bundled
-                                    imported_widths = {}
-                                else:
-                                    imported_feeds = []
-                                    imported_widths = {}
-                            if imported_feeds:
-                                self.feeds = imported_feeds
-                                # don't overwrite existing widths if present; only set if empty
-                                if not self.column_widths:
-                                    self.column_widths = imported_widths
-                                self.mark_feeds_dirty()
-                                self.save_feeds()
-                                self.statusBar().showMessage("Imported feeds from bundled file.", 5000)
-                                logging.info(f"Imported {len(self.feeds)} feeds from bundled feeds.json: {bundled_path}")
-                    except Exception as imp_e:
-                        logging.warning(f"Failed to import bundled feeds.json: {imp_e}")
-                # macOS dev-mode migration: if running unfrozen on macOS and we have very few feeds,
-                # try to import a richer feeds.json from Application Support (used by packaged app)
-                try:
-                    if (not getattr(sys, 'frozen', False)) and sys.platform == 'darwin':
-                        try_alt = len(self.feeds) <= 2  # heuristic: likely placeholder/sample
-                        if try_alt:
-                            alt_path = os.path.join(Path.home(), "Library", "Application Support", "SmallRSSReader", 'feeds.json')
-                            if os.path.exists(alt_path):
-                                with open(alt_path, 'r') as af:
-                                    alt_data = json.load(af)
-                                if isinstance(alt_data, dict):
-                                    alt_feeds = alt_data.get('feeds', [])
-                                    alt_widths = alt_data.get('column_widths', {})
-                                elif isinstance(alt_data, list):
-                                    alt_feeds = alt_data
-                                    alt_widths = {}
-                                else:
-                                    alt_feeds = []
-                                    alt_widths = {}
-                                if len(alt_feeds) > len(self.feeds):
-                                    self.feeds = alt_feeds
-                                    if not self.column_widths:
-                                        self.column_widths = alt_widths
-                                    self.mark_feeds_dirty()
-                                    self.save_feeds()
-                                    self.statusBar().showMessage("Imported feeds from Application Support.", 5000)
-                                    logging.info(f"Imported {len(self.feeds)} feeds from: {alt_path}")
-                except Exception as alt_e:
-                    logging.warning(f"Failed to import feeds from Application Support: {alt_e}")
-                self.prune_old_entries()
-            except json.JSONDecodeError:
-                self.statusBar().showMessage("Failed to parse feeds.json.", 5000)
-                logging.error("Failed to parse feeds.json.")
-                self.feeds = []
-                self.column_widths = {}
-            except Exception as e:
-                self.statusBar().showMessage(f"Unexpected error: {e}", 5000)
-                logging.error(f"Unexpected error while loading feeds: {e}")
-                self.feeds = []
-                self.column_widths = {}
-        else:
+                logging.error(f"Failed to load feeds from SQLite: {e}")
+
+        # If DB is empty, seed with a couple of defaults and persist to SQLite
+        if not self.feeds:
             self.column_widths = {}
-            self.feeds = [
+            defaults = [
                 {
                     'title': 'BBC News',
                     'url': 'http://feeds.bbci.co.uk/news/rss.xml',
@@ -2135,16 +2052,16 @@ class RSSReader(QMainWindow):
                     'visible_columns': [True] * 6
                 }
             ]
-            self.mark_feeds_dirty()
-            self.save_feeds()
-            logging.info("Created default feeds.json with initial feeds.")
-        # If we came here because DB was empty/placeholder, and we imported from JSON/bundled/Application Support,
-        # ensure we persist back to SQLite if storage exists
-        try:
-            if getattr(self, 'storage', None):
-                self.save_feeds()
-        except Exception:
-            pass
+            self.feeds = defaults
+            try:
+                if getattr(self, 'storage', None):
+                    for feed in defaults:
+                        self.storage.upsert_feed(feed['title'], feed['url'], feed.get('sort_column', 1), feed.get('sort_order', 0))
+                    self.storage.save_column_widths(self.column_widths)
+                logging.info("Seeded default feeds into SQLite.")
+            except Exception as e:
+                logging.warning(f"Failed to seed defaults into SQLite: {e}")
+
         self._rebuild_feeds_tree()
 
     def _rebuild_feeds_tree(self):
@@ -2190,6 +2107,8 @@ class RSSReader(QMainWindow):
                         font = feed_item.font(0)
                         font.setBold(True)
                         feed_item.setFont(0, font)
+                    # Ensure each child feed node also gets an icon
+                    self.set_feed_icon(feed_item, feed_data['url'])
 
         self.feeds_list.expandAll()
         self.feeds_list.blockSignals(prev_block)
@@ -2197,30 +2116,28 @@ class RSSReader(QMainWindow):
     def backup_to_icloud(self):
         backup_folder = os.path.join(Path.home(), "Library", "Mobile Documents", "com~apple~CloudDocs", "SmallRSSReaderBackup")
         os.makedirs(backup_folder, exist_ok=True)
-        files_to_backup = ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json', 'db.sqlite3']
-        for filename in files_to_backup:
-            source = get_user_data_path(filename)
-            dest = os.path.join(backup_folder, filename)
-            if os.path.exists(source):
-                try:
-                    shutil.copy2(source, dest)
-                    logging.info(f"Backed up {filename} to iCloud.")
-                except Exception as e:
-                    logging.error(f"Failed to backup {filename}: {e}")
+        filename = 'db.sqlite3'
+        source = get_user_data_path(filename)
+        dest = os.path.join(backup_folder, filename)
+        if os.path.exists(source):
+            try:
+                shutil.copy2(source, dest)
+                logging.info("Backed up db.sqlite3 to iCloud.")
+            except Exception as e:
+                logging.error(f"Failed to backup db.sqlite3: {e}")
         self.statusBar().showMessage("Backup to iCloud completed successfully.", 5000)
 
     def restore_from_icloud(self):
         backup_folder = os.path.join(Path.home(), "Library", "Mobile Documents", "com~apple~CloudDocs", "SmallRSSReaderBackup")
-        files_to_restore = ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json', 'db.sqlite3']
-        for filename in files_to_restore:
-            backup_file = os.path.join(backup_folder, filename)
-            if os.path.exists(backup_file):
-                dest = get_user_data_path(filename)
-                try:
-                    shutil.copy2(backup_file, dest)
-                    logging.info(f"Restored {filename} from iCloud.")
-                except Exception as e:
-                    logging.error(f"Failed to restore {filename}: {e}")
+        filename = 'db.sqlite3'
+        backup_file = os.path.join(backup_folder, filename)
+        if os.path.exists(backup_file):
+            dest = get_user_data_path(filename)
+            try:
+                shutil.copy2(backup_file, dest)
+                logging.info("Restored db.sqlite3 from iCloud.")
+            except Exception as e:
+                logging.error(f"Failed to restore db.sqlite3: {e}")
         self.load_group_settings(QSettings('rocker', 'SmallRSSReader'))
         self.load_read_articles()
         self.load_feeds()
@@ -2229,8 +2146,14 @@ class RSSReader(QMainWindow):
     def on_icon_fetched(self, domain: str, data: bytes):
         """Handle favicon fetched in the background: cache, persist, and update tree icons for this domain."""
         try:
+            # Clear in-flight marker
+            try:
+                self._favicon_fetching.discard(domain)
+            except Exception:
+                pass
             if getattr(self, 'storage', None):
                 try:
+                    # Persist only under the original domain to keep storage canonical
                     self.storage.save_icon(domain, data)
                 except Exception:
                     pass
@@ -2240,7 +2163,8 @@ class RSSReader(QMainWindow):
             # Scale to 16x16 for consistency
             pm = pm.scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             icon = QIcon(pm)
-            self.favicon_cache[domain] = icon
+            for d in _domain_variants(domain):
+                self.favicon_cache[d] = icon
             # Update all items for this domain
             for i in range(self.feeds_list.topLevelItemCount()):
                 top_item = self.feeds_list.topLevelItem(i)
@@ -2251,7 +2175,7 @@ class RSSReader(QMainWindow):
                         for j in range(top_item.childCount()):
                             child = top_item.child(j)
                             url = child.data(0, Qt.UserRole) or ''
-                            if urlparse(url).netloc == domain:
+                            if urlparse(url).netloc in _domain_variants(domain):
                                 top_item.setIcon(0, icon)
                                 child.setIcon(0, icon)
                         continue
@@ -2260,7 +2184,7 @@ class RSSReader(QMainWindow):
                 # Single feed node
                 url = top_item.data(0, Qt.UserRole) or ''
                 try:
-                    if url and urlparse(url).netloc == domain:
+                    if url and urlparse(url).netloc in _domain_variants(domain):
                         top_item.setIcon(0, icon)
                 except Exception:
                     pass
@@ -2268,7 +2192,6 @@ class RSSReader(QMainWindow):
             pass
 
     def save_feeds(self):
-        # Prefer SQLite storage
         try:
             if getattr(self, 'storage', None):
                 # Upsert feeds and replace entries
@@ -2287,24 +2210,8 @@ class RSSReader(QMainWindow):
                 logging.info("Feeds saved successfully to SQLite.")
                 self.data_changed = True
                 self.statusBar().showMessage("Feeds saved successfully.", 5000)
-                return
         except Exception as e:
-            logging.warning(f"Failed to save feeds to SQLite, falling back: {e}")
-        # Fallback to JSON
-        try:
-            feeds_data = {
-                'feeds': self.feeds,
-                'column_widths': self.column_widths,
-            }
-            feeds_path = get_user_data_path('feeds.json')
-            os.makedirs(os.path.dirname(feeds_path), exist_ok=True)
-            with open(feeds_path, 'w') as f:
-                json.dump(feeds_data, f, indent=4)
-            logging.info("Feeds saved successfully.")
-            self.data_changed = True  # Mark data as changed
-            self.statusBar().showMessage("Feeds saved successfully.", 5000)
-        except Exception as e:
-            logging.error(f"Failed to save feeds: {e}")
+            logging.error(f"Failed to save feeds to SQLite: {e}")
             self.statusBar().showMessage("Error saving feeds. Check logs for details.", 5000)
 
     def update_feed_titles(self):
@@ -3112,9 +3019,17 @@ class RSSReader(QMainWindow):
         else:
             item.setIcon(0, QIcon())  # No icon for read articles
 
-        # Устанавливаем иконку фида, если есть
-        if feed_url and feed_url in self.favicon_cache:
-            item.setIcon(0, self.favicon_cache[feed_url])
+        # Устанавливаем иконку фида, если есть (ищем по доменным вариантам)
+        try:
+            if feed_url:
+                domain = urlparse(feed_url).netloc or feed_url
+                for d in _domain_variants(domain):
+                    icon = self.favicon_cache.get(d)
+                    if icon:
+                        item.setIcon(0, icon)
+                        break
+        except Exception:
+            pass
 
         self.articles_tree.addTopLevelItem(item)
         self.article_id_to_item[article_id] = item
@@ -3373,7 +3288,7 @@ class RSSReader(QMainWindow):
         rename_feed_action.triggered.connect(self.rename_feed)
         menu.addAction(rename_feed_action)
         remove_feed_action = QAction("Remove Feed", self)
-        remove_feed_action.triggered.connect(self.remove_feed)
+        remove_feed_action.triggered.connect(lambda: self.remove_feed(feed_item))
         menu.addAction(remove_feed_action)
         settings_action = QAction("Settings", self)
         settings_action.triggered.connect(lambda: self.feed_settings_dialog(feed_item))

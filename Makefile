@@ -16,8 +16,8 @@ INSTALL_PATH=/Applications/
 # security find-identity -v -p codesigning
 SIGN_IDENTITY="Developer ID Application: Rocker (TEAMID)"  # <-- Replace with your actual code signing identity
 
-# venv management (prefer .venv if present)
-VENV?=$(if $(wildcard .venv/bin/python),.venv,venv)
+# venv management (use only venv)
+VENV=venv
 PY=$(VENV)/bin/python
 PIP=$(VENV)/bin/pip
 
