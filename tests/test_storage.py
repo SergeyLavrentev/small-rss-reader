@@ -1,10 +1,5 @@
-import os
 import json
 import hashlib
-from datetime import datetime
-
-import pytest
-
 from storage import Storage, compute_article_id
 
 
@@ -86,40 +81,4 @@ def test_storage_icon_cache_roundtrip(tmp_path):
     assert s.get_icon("example.org") == data
 
 
-def test_migrate_from_json_if_needed_imports_and_deletes(tmp_path):
-    # Prepare legacy JSON files
-    feeds_json = tmp_path / "feeds.json"
-    read_json = tmp_path / "read_articles.json"
-    groups_json = tmp_path / "group_settings.json"
-    movie_json = tmp_path / "movie_data_cache.json"
-
-    entry = make_entry(title="Title1", link="https://ex/1")
-    feeds_payload = {
-        "feeds": [
-            {"title": "F1", "url": "https://ex/feed", "entries": [entry], "sort_column": 1, "sort_order": 0}
-        ],
-        "column_widths": {"https://ex/feed": [100, 120]}
-    }
-    feeds_json.write_text(json.dumps(feeds_payload))
-    read_json.write_text(json.dumps([compute_article_id(entry)]))
-    groups_json.write_text(json.dumps({"ex": {"omdb_enabled": True, "notifications_enabled": False}}))
-    movie_json.write_text(json.dumps({"Inception": {"imdbrating": "8.8/10"}}))
-
-    s = Storage(str(tmp_path / "db.sqlite3"))
-    s.migrate_from_json_if_needed(str(tmp_path))
-
-    # JSON files should be removed
-    for p in [feeds_json, read_json, groups_json, movie_json]:
-        assert not p.exists()
-
-    # Data should be present in SQLite
-    feeds = s.get_all_feeds()
-    assert len(feeds) == 1 and feeds[0]["url"] == "https://ex/feed"
-    assert len(feeds[0]["entries"]) == 1
-    assert set(s.load_read_articles()) == {compute_article_id(entry)}
-    gs = s.load_group_settings()
-    assert gs.get("ex", {}).get("omdb_enabled") is True
-    cw = s.load_column_widths()
-    assert cw.get("https://ex/feed") == [100, 120]
-    mc = s.load_movie_cache()
-    assert "Inception" in mc
+## Legacy JSON migration test removed: storage is SQLite-only now.

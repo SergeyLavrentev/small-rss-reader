@@ -47,6 +47,8 @@ rebuild: clean build
 # Install the application to /Applications/
 install:
 	@echo "Installing $(DISPLAY_NAME) to /Applications/"
+	# Remove existing app to avoid stale files (e.g., legacy JSON symlinks)
+	rm -rf $(INSTALL_PATH)/$(APP_NAME).app
 	cp -a $(APP_BUNDLE) $(INSTALL_PATH)
 	codesign --force --deep --sign - $(INSTALL_PATH)/$(APP_NAME).app
 	@echo "Installed $(DISPLAY_NAME) to /Applications/"

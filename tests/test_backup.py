@@ -44,9 +44,6 @@ def test_backup_and_restore_sqlite_only(app, tmp_path, monkeypatch):
     # Only db.sqlite3 should be present in backup
     for name in user_files:
         assert (icloud_path / name).exists()
-    # Ensure legacy JSON files are NOT backed up
-    for legacy in ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json']:
-        assert not (icloud_path / legacy).exists()
 
     # Remove originals, then restore back
     for name in user_files:
@@ -58,6 +55,3 @@ def test_backup_and_restore_sqlite_only(app, tmp_path, monkeypatch):
 
     for name in user_files:
         assert (tmp_path / name).exists()
-    # And JSONs should not be created by restore
-    for legacy in ['feeds.json', 'read_articles.json', 'group_settings.json', 'movie_data_cache.json']:
-        assert not (tmp_path / legacy).exists()
