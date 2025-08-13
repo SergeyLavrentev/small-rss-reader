@@ -14,6 +14,8 @@ import sqlite3
 import shutil
 import threading
 import requests
+import subprocess
+import plistlib
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from omdbapi.movie_search import GetMovie
@@ -34,6 +36,15 @@ from PyQt5.QtCore import (
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from pathlib import Path
 from storage import Storage
+try:
+    # Build-time constants injected by setup.py
+    from app_version import VERSION as APP_VERSION, TAG as APP_TAG, COMMIT as APP_COMMIT, ORIGIN as APP_ORIGIN
+except Exception:
+    APP_VERSION = APP_TAG = APP_COMMIT = ""
+    APP_ORIGIN = "https://github.com/SergeyLavrentev/small-rss-reader"
+
+# Fallback URL of the remote repository (used when .git is unavailable in packaged app)
+REMOTE_REPO_FALLBACK = "https://github.com/SergeyLavrentev/small-rss-reader"
 
 # =========================
 # 1. Helper functions and classes
@@ -1238,10 +1249,110 @@ class RSSReader(QMainWindow):
         reset_font_action.setShortcut("Cmd+0" if sys.platform == 'darwin' else "Ctrl+0")
         reset_font_action.triggered.connect(self.reset_font_size)
         font_size_menu.addAction(reset_font_action)
-        quit_action = QAction("Quit", self)
-        quit_action.setShortcut("Cmd+Q" if sys.platform == 'darwin' else "Ctrl+Q")
-        quit_action.triggered.connect(self.quit_app)
-        file_menu.addAction(quit_action)
+        # Help menu with app information
+        help_menu = menu.addMenu("Help")
+        # Visible in Help menu
+        info_action = QAction("App Info…", self)
+        info_action.setMenuRole(QAction.NoRole)
+        info_action.triggered.connect(self.show_help_info)
+        help_menu.addAction(info_action)
+        # About action (moved to Application menu on macOS automatically)
+        about_action = QAction("About Small RSS Reader", self)
+        about_action.setMenuRole(QAction.AboutRole)
+        about_action.triggered.connect(self.show_help_info)
+        help_menu.addAction(about_action)
+
+    def _git_command(self, args):
+        """Run a git command in the repository directory if available."""
+        try:
+            # Determine probable repo root: in dev __file__ dir; in packaged, no .git
+            repo_dir = os.path.dirname(os.path.abspath(__file__))
+            # Fast-exit if no .git nearby
+            if not os.path.isdir(os.path.join(repo_dir, '.git')):
+                return None
+            result = subprocess.run(["git", *args], cwd=repo_dir, capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            return None
+        return None
+
+    def get_version_string(self) -> str:
+        """Best-effort version string based on tag and commit.
+        Priority:
+        1) Build-time injected APP_VERSION or TAG+COMMIT.
+        2) git describe (dev only). 3) Info.plist (packaged). 4) commit only. 5) 'unknown'.
+        """
+        # Prefer build-time injected values
+        if APP_VERSION:
+            return APP_VERSION
+        if APP_TAG and APP_COMMIT:
+            return f"{APP_TAG} ({APP_COMMIT})"
+        if APP_COMMIT:
+            return APP_COMMIT
+        describe = self._git_command(["describe", "--tags", "--dirty", "--always"]) or ""
+        if describe:
+            return describe
+        # Try separate tag and commit
+        tag = self._git_command(["describe", "--tags", "--abbrev=0"]) or ""
+        commit = self._git_command(["rev-parse", "--short", "HEAD"]) or ""
+        if tag and commit:
+            return f"{tag} ({commit})"
+        if commit:
+            return commit
+        # Try reading Info.plist if running from a macOS app bundle
+        try:
+            if getattr(sys, 'frozen', False) and sys.platform == 'darwin':
+                app_exe = sys.executable
+                contents = os.path.abspath(os.path.join(app_exe, '..', '..'))
+                info_plist = os.path.join(contents, 'Info.plist')
+                if os.path.exists(info_plist):
+                    with open(info_plist, 'rb') as f:
+                        info = plistlib.load(f)
+                    ver = info.get('CFBundleShortVersionString') or info.get('CFBundleVersion')
+                    if ver:
+                        return str(ver)
+        except Exception:
+            pass
+        return "unknown"
+
+    def get_remote_repo_url(self) -> str:
+        """Return remote 'origin' URL from git if available, else fallback constant."""
+        # Prefer build-time injected ORIGIN
+        if APP_ORIGIN:
+            return APP_ORIGIN
+        url = self._git_command(["remote", "get-url", "origin"]) or ""
+        if url:
+            return url
+        return REMOTE_REPO_FALLBACK
+
+    def show_help_info(self):
+        """Show a compact dialog with version, log/db paths, and remote repo URL."""
+        log_path = get_user_data_path('rss_reader.log')
+        db_path = get_user_data_path('db.sqlite3')
+        version = self.get_version_string()
+        remote = self.get_remote_repo_url()
+        msg = (
+            f"Version: {version}\n\n"
+            f"Log file: {log_path}\n"
+            f"SQLite DB: {db_path}\n"
+            f"Remote repo: {remote}"
+        )
+        logging.info(f"Help Info: {msg.replace(os.path.expanduser('~'), '~')}")
+        if self.is_test_mode():
+            # In tests, avoid modal dialogs
+            try:
+                self.statusBar().showMessage(f"Version: {version}", 5000)
+            except Exception:
+                pass
+            return
+        try:
+            QMessageBox.information(self, "Small RSS Reader — Info", msg)
+        except Exception:
+            try:
+                self.statusBar().showMessage(f"Version: {version}", 5000)
+            except Exception:
+                pass
 
     def open_article_url(self, item, column):
         entry = item.data(0, Qt.UserRole)
@@ -3569,6 +3680,11 @@ def main():
     app.setOrganizationName("rocker")
     app.setApplicationName("SmallRSSReader")
     app.setApplicationDisplayName("Small RSS Reader")
+    try:
+        if APP_VERSION:
+            app.setApplicationVersion(APP_VERSION)
+    except Exception:
+        pass
     app.setWindowIcon(QIcon(resource_path('icons/rss_icon.png')))
     app.setAttribute(Qt.AA_DontShowIconsInMenus, False)
     app.setAttribute(Qt.AA_UseHighDpiPixmaps)
