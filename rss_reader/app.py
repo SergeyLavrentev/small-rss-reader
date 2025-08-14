@@ -313,6 +313,8 @@ class RSSReader(QMainWindow):
         self.actRefreshFeed.triggered.connect(self.refresh_selected_feed)
         self.actMarkAllRead = QAction("Пометить все как прочитанные", self)
         self.actMarkAllRead.triggered.connect(self.mark_all_as_read)
+        self.actMarkAllUnread = QAction("Пометить все как непрочитанные", self)
+        self.actMarkAllUnread.triggered.connect(self.mark_all_as_unread)
         self.actSettings = QAction("Настройки", self)
         self.actSettings.triggered.connect(self.open_settings)
         self.actBackup = QAction("Backup в iCloud", self)
@@ -336,6 +338,16 @@ class RSSReader(QMainWindow):
         try:
             from PyQt5.QtGui import QKeySequence
             self.actRefreshAll.setShortcut(QKeySequence.Refresh)
+        except Exception:
+            pass
+        # Additional shortcuts (best-effort, safe)
+        try:
+            self.actQuit.setShortcut('Ctrl+Q')
+            self.actAddFeed.setShortcut('Ctrl+N')
+            self.actRemoveFeed.setShortcut('Delete')
+            self.actOnlyUnread.setShortcut('Ctrl+U')
+            self.actMarkAllRead.setShortcut('Ctrl+Shift+R')
+            self.actMarkAllUnread.setShortcut('Ctrl+Shift+U')
         except Exception:
             pass
         # Help/About
@@ -365,6 +377,7 @@ class RSSReader(QMainWindow):
         act_menu.addAction(self.actRefreshAll)
         act_menu.addAction(self.actRefreshFeed)
         act_menu.addAction(self.actMarkAllRead)
+        act_menu.addAction(self.actMarkAllUnread)
         act_menu.addAction(self.actOnlyUnread)
 
         settings_menu = mb.addMenu("Настройки")
@@ -667,6 +680,26 @@ class RSSReader(QMainWindow):
             return
         for e in feed.get('entries', []) or []:
             self.read_articles.add(self.get_article_id(e))
+        if self.storage:
+            try:
+                self.storage.save_read_articles(list(self.read_articles))
+            except Exception:
+                pass
+        self._on_feed_selected()
+        self._update_tray()
+
+    def mark_all_as_unread(self) -> None:
+        item = self.feedsTree.currentItem()
+        if not item:
+            return
+        url = item.data(0, Qt.UserRole)
+        feed = next((f for f in self.feeds if f.get('url') == url), None)
+        if not feed:
+            return
+        for e in feed.get('entries', []) or []:
+            aid = self.get_article_id(e)
+            if aid in self.read_articles:
+                self.read_articles.remove(aid)
         if self.storage:
             try:
                 self.storage.save_read_articles(list(self.read_articles))
