@@ -164,6 +164,19 @@ class RSSReader(QMainWindow):
         self._load_state_from_storage()
         self.update_refresh_timer()
         self._init_tray_icon()
+        
+        # Restore window geometry/state
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            geom = settings.value('window_geometry')
+            state = settings.value('window_state')
+            if geom:
+                self.restoreGeometry(geom)
+            if state:
+                self.restoreState(state)
+        except Exception:
+            pass
 
     # ---- IDs / dates ----
     def get_article_id(self, entry: Dict[str, Any]) -> str:
@@ -325,6 +338,11 @@ class RSSReader(QMainWindow):
             self.actRefreshAll.setShortcut(QKeySequence.Refresh)
         except Exception:
             pass
+        # Help/About
+        self.actAbout = QAction("О программе", self)
+        self.actAbout.triggered.connect(self.show_about)
+        self.actAboutQt = QAction("О Qt", self)
+        self.actAboutQt.triggered.connect(lambda: QMessageBox.aboutQt(self))
 
     def _create_menu(self) -> None:
         mb = self.menuBar()
@@ -351,6 +369,10 @@ class RSSReader(QMainWindow):
 
         settings_menu = mb.addMenu("Настройки")
         settings_menu.addAction(self.actSettings)
+
+        help_menu = mb.addMenu("Справка")
+        help_menu.addAction(self.actAbout)
+        help_menu.addAction(self.actAboutQt)
 
     # ----------------- Storage & state -----------------
     def _load_state_from_storage(self) -> None:
@@ -879,4 +901,25 @@ class RSSReader(QMainWindow):
                 self.backup_to_icloud()
         except Exception:
             pass
+        # save window geometry/state
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            settings.setValue('window_geometry', self.saveGeometry())
+            settings.setValue('window_state', self.saveState())
+        except Exception:
+            pass
         super().closeEvent(event)
+
+    # ----------------- About -----------------
+    def show_about(self) -> None:
+        try:
+            from app_version import VERSION
+        except Exception:
+            VERSION = "dev"
+        text = (
+            f"Small RSS Reader\n\n"
+            f"Версия: {VERSION}\n"
+            f"Небольшой быстрый RSS-ридер на PyQt5."
+        )
+        QMessageBox.about(self, "О программе", text)
