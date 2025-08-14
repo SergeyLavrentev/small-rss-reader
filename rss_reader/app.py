@@ -743,67 +743,80 @@ class RSSReader(QMainWindow):
         if not path:
             return
         try:
-            import json
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            # Accept either list of feeds or dict with 'feeds' and optional 'column_widths'
-            if isinstance(data, dict):
-                feeds = data.get('feeds', [])
-                col_widths = data.get('column_widths', {})
-            else:
-                feeds = data or []
-                col_widths = {}
-
-            added = 0
-            for feed in feeds:
-                url = (feed.get('url') or '').strip()
-                title = (feed.get('title') or url).strip()
-                if not url or any(f['url'] == url for f in self.feeds):
-                    continue
-                # persist feed
-                if self.storage:
-                    try:
-                        self.storage.upsert_feed(title, url, int(feed.get('sort_column', 1)), int(feed.get('sort_order', 0)))
-                        if feed.get('entries'):
-                            self.storage.replace_entries(url, feed.get('entries') or [])
-                    except Exception:
-                        pass
-                self.feeds.append({'title': title, 'url': url, 'entries': feed.get('entries', [])})
-                self._add_feed_item(title, url)
-                added += 1
-
-            # column widths if present
-            if col_widths and isinstance(col_widths, dict):
-                try:
-                    # merge and persist
-                    self.column_widths.update(col_widths)
-                    if self.storage:
-                        self.storage.save_column_widths(self.column_widths)
-                except Exception:
-                    pass
-
+            added = self.import_json_from_path(path)
             self.statusBar().showMessage(f"Импортировано лент: {added}", 3000)
             self._update_tray()
         except Exception:
             self.warn("Ошибка", "Не удалось импортировать JSON")
+
+    def import_json_from_path(self, path: str) -> int:
+        """Импорт лент и настроек из JSON-файла. Возвращает количество добавленных лент.
+
+        Форматы поддерживаются:
+        - Список лент: [{"title": str, "url": str, "entries": [...]}, ...]
+        - Объект: {"feeds": [...], "column_widths": {...}}
+        """
+        import json
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        if isinstance(data, dict):
+            feeds = data.get('feeds', [])
+            col_widths = data.get('column_widths', {})
+        else:
+            feeds = data or []
+            col_widths = {}
+
+        added = 0
+        for feed in feeds:
+            url = (feed.get('url') or '').strip()
+            title = (feed.get('title') or url).strip()
+            if not url or any(f['url'] == url for f in self.feeds):
+                continue
+            if self.storage:
+                try:
+                    self.storage.upsert_feed(title, url, int(feed.get('sort_column', 1)), int(feed.get('sort_order', 0)))
+                    if feed.get('entries'):
+                        self.storage.replace_entries(url, feed.get('entries') or [])
+                except Exception:
+                    pass
+            self.feeds.append({'title': title, 'url': url, 'entries': feed.get('entries', [])})
+            # UI tree might be absent in tests
+            try:
+                self._add_feed_item(title, url)
+            except Exception:
+                pass
+            added += 1
+
+        if col_widths and isinstance(col_widths, dict):
+            try:
+                self.column_widths.update(col_widths)
+                if self.storage:
+                    self.storage.save_column_widths(self.column_widths)
+            except Exception:
+                pass
+
+        return added
 
     def export_json_feeds(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Экспорт JSON", "feeds.json", "JSON Files (*.json)")
         if not path:
             return
         try:
-            import json
-            # Save feeds as a list; keep entries if уже загружены
-            payload = {
-                'feeds': self.feeds,
-                'column_widths': self.column_widths,
-            }
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
+            self.export_json_to_path(path)
             self.statusBar().showMessage("Экспортировано JSON", 3000)
         except Exception:
             self.warn("Ошибка", "Не удалось экспортировать JSON")
+
+    def export_json_to_path(self, path: str) -> None:
+        """Экспорт текущих лент и ширин колонок в JSON-файл."""
+        import json
+        payload = {
+            'feeds': self.feeds,
+            'column_widths': self.column_widths,
+        }
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
 
     # ----------------- Tray & notifications -----------------
     def _init_tray_icon(self) -> None:
