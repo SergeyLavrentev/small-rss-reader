@@ -137,25 +137,7 @@ def format_date_column(entry_date):
     """Format the date column to display only the date."""
     return entry_date.strftime('%Y-%m-%d')
 
-class FetchFeedRunnable(QRunnable):
-    def __init__(self, url, worker):
-        super().__init__()
-        self.url = url
-        self.worker = worker
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            feed = feedparser.parse(self.url)
-            if feed.bozo and feed.bozo_exception:
-                raise feed.bozo_exception
-            self.worker.feed_fetched.emit(self.url, feed)
-        except Exception as e:
-            logging.error(f"Failed to fetch feed {self.url}: {e}")
-            self.worker.feed_fetched.emit(self.url, None)
-
-class Worker(QObject):
-    feed_fetched = pyqtSignal(str, object)  # Emits (url, feed)
+from rss_reader.services.feeds import Worker, FetchFeedRunnable
 
 class FetchMovieDataThread(QThread):
     movie_data_fetched = pyqtSignal(int, str, dict)
@@ -240,45 +222,7 @@ class FetchMovieDataThread(QThread):
             else:
                 logging.error(f"Failed to fetch movie data for '{movie_title}': {e}")
             return {}
-class FaviconFetchRunnable(QRunnable):
-    """Background task to fetch a site's favicon by domain."""
-    def __init__(self, domain: str, reader: 'RSSReader'):
-        super().__init__()
-        self.domain = domain
-        self.reader = reader
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            # Try https first, then http
-            for scheme in ("https", "http"):
-                url = f"{scheme}://{self.domain}/favicon.ico"
-                try:
-                    resp = requests.get(url, timeout=5)
-                    if resp.status_code == 200 and resp.content:
-                        self.reader.icon_fetched.emit(self.domain, resp.content)
-                        return
-                except Exception:
-                    continue
-            # Fallback to Google S2 favicon service
-            try:
-                s2 = f"https://www.google.com/s2/favicons?sz=64&domain={self.domain}"
-                resp = requests.get(s2, timeout=5)
-                if resp.status_code == 200 and resp.content:
-                    self.reader.icon_fetched.emit(self.domain, resp.content)
-                    return
-            except Exception:
-                pass
-            # All attempts failed
-            try:
-                self.reader.icon_fetch_failed.emit(self.domain)
-            except Exception:
-                pass
-        except Exception:
-            try:
-                self.reader.icon_fetch_failed.emit(self.domain)
-            except Exception:
-                pass
+from rss_reader.services.favicons import FaviconFetchRunnable
 
 
 class ArticleTreeWidgetItem(QTreeWidgetItem):
