@@ -2653,3 +2653,20 @@ class RSSReader(QMainWindow):
                 self.update_content_view(content)
         except Exception:
             logging.debug("display_content failed", exc_info=True)
+
+# Optional: CLI entrypoint kept for compatibility
+
+def main():
+    app = QApplication(sys.argv)
+    w = RSSReader()
+    w.show()
+    return app.exec_()
+
+# Re-export application API for external imports (temporary)
+try:
+    from rss_reader.app import get_user_data_path as _app_user_data_path  # noqa: F401
+except Exception:
+    pass
+
+if __name__ == "__main__":
+    sys.exit(main())
