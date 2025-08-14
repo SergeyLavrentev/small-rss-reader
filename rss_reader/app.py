@@ -13,6 +13,7 @@ import sys
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
+import webbrowser
 
 from PyQt5.QtGui import QIcon, QPixmap, QFont, QCloseEvent
 from PyQt5.QtWidgets import (
@@ -126,6 +127,8 @@ class RSSReader(QMainWindow):
         self.articlesTree.setHeaderLabels(["Title", "Date"])
         self.articlesTree.setObjectName("articlesTree")
         self.articlesTree.itemSelectionChanged.connect(self._on_article_selected)
+        # Open in browser on activation (double-click or Enter/Return)
+        self.articlesTree.itemActivated.connect(lambda _i, _c: self._open_current_article_in_browser())
         self.articlesTree.setRootIsDecorated(False)
         self.articlesTree.setAlternatingRowColors(True)
         self.articlesTree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -259,6 +262,22 @@ class RSSReader(QMainWindow):
         icon = QIcon(pm)
         for d in _domain_variants(domain):
             self.favicon_cache[d] = icon
+        # Update tree icons for matching feeds (single-level tree in refactor build)
+        try:
+            top_count = self.feedsTree.topLevelItemCount()
+            for i in range(top_count):
+                item = self.feedsTree.topLevelItem(i)
+                url = item.data(0, Qt.UserRole) or ""
+                if not url:
+                    continue
+                try:
+                    feed_domain = urlparse(url).netloc or url
+                    if feed_domain in _domain_variants(domain):
+                        item.setIcon(0, icon)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     # Helper for optional UI refresh in update_feed_url
     def set_feed_icon_placeholder(self, item, url: str) -> None:
@@ -539,6 +558,19 @@ class RSSReader(QMainWindow):
         # notifications (optional)
         self._notify_new_read()
 
+    def _open_current_article_in_browser(self) -> None:
+        """Open the currently selected article's link in the system browser."""
+        item = self.articlesTree.currentItem()
+        if not item:
+            return
+        entry = item.data(0, Qt.UserRole) or {}
+        link = entry.get('link')
+        if link:
+            try:
+                webbrowser.open(link)
+            except Exception:
+                pass
+
     # ----------------- Favicons -----------------
     def _ensure_favicon_for_url(self, url: str) -> None:
         domain = urlparse(url).netloc or url
@@ -626,7 +658,6 @@ class RSSReader(QMainWindow):
             link = entry.get('link')
             if link:
                 try:
-                    import webbrowser
                     webbrowser.open(link)
                 except Exception:
                     pass
@@ -644,6 +675,16 @@ class RSSReader(QMainWindow):
                 self._update_tray()
         elif action == actAllRead:
             self.mark_all_as_read()
+
+    # ----------------- Key handling -----------------
+    def keyPressEvent(self, event):  # noqa: N802
+        try:
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                self._open_current_article_in_browser()
+                return
+        except Exception:
+            pass
+        super().keyPressEvent(event)
 
     # ----------------- OPML import/export -----------------
     def export_opml(self) -> None:
