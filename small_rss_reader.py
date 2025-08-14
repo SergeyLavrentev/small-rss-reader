@@ -37,7 +37,13 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEng
 from PyQt5.QtWidgets import QShortcut
 from pathlib import Path
 from storage import Storage
-from rss_reader.utils.net import compute_article_id as _compute_article_id
+from rss_reader.utils.net import compute_article_id as get_article_id
+from rss_reader.utils.paths import resource_path, get_user_data_path
+from rss_reader.utils.domains import _strip_www, _base_domain, _domain_variants
+
+# Backward-compat alias after refactor
+_compute_article_id = get_article_id
+
 try:
     # Build-time constants injected by setup.py
     from app_version import VERSION as APP_VERSION, TAG as APP_TAG, COMMIT as APP_COMMIT, ORIGIN as APP_ORIGIN
@@ -1848,19 +1854,6 @@ class RSSReader(QMainWindow):
                 group_item.setIcon(0, self.movie_icon if omdb_enabled else QIcon())
                 break
 
-    def get_group_name_for_feed(self, feed_url):
-        for i in range(self.feeds_list.topLevelItemCount()):
-            top_item = self.feeds_list.topLevelItem(i)
-            if top_item.data(0, Qt.UserRole):
-                if top_item.data(0, Qt.UserRole) == feed_url:
-                    return None
-            else:
-                for j in range(top_item.childCount()):
-                    feed_item = top_item.child(j)
-                    if feed_item.data(0, Qt.UserRole) == feed_url:
-                        return top_item.text(0)
-        return None
-
     def rename_group(self, group_item):
         current_group_name = group_item.text(0)
         new_group_name, ok = QInputDialog.getText(
@@ -2124,868 +2117,6 @@ class RSSReader(QMainWindow):
         except Exception as e:
             logging.error(f"Failed to save feeds to SQLite: {e}")
             self.statusBar().showMessage("Error saving feeds. Check logs for details.", 5000)
-
-    def update_feed_titles(self):
-        for feed in self.feeds:
-            if feed['title'] == feed['url']:
-                try:
-                    parsed_feed = feedparser.parse(feed['url'])
-                    if parsed_feed.bozo and parsed_feed.bozo_exception:
-                        raise parsed_feed.bozo_exception
-                    feed_title = parsed_feed.feed.get('title', feed['url'])
-                    feed['title'] = feed_title
-                    parsed_url = urlparse(feed['url'])
-                    domain = parsed_url.netloc or 'Unknown Domain'
-                    group_name = self.group_name_mapping.get(domain, domain)
-                    group = self.find_or_create_group(group_name, domain)
-                    for j in range(group.childCount()):
-                        child = group.child(j)
-                        if child.data(0, Qt.UserRole) == feed['url']:
-                            child.setText(0, feed_title)
-                            break
-                except Exception as e:
-                    logging.error(f"Error updating feed title for {feed['url']}: {e}")
-        self.mark_feeds_dirty()
-
-    def load_articles(self):
-        logging.debug("load_articles: invoked")
-        selected_items = self.feeds_list.selectedItems()
-        if not selected_items:
-            logging.debug("load_articles: no selection, enabling UI and exit")
-            # Nothing selected; ensure UI is interactive
-            try:
-                self.is_populating_articles = False
-            except Exception:
-                pass
-            return
-        item = selected_items[0]
-        logging.debug(f"load_articles: selected item '{item.text(0)}'")
-        if item.data(0, Qt.UserRole) is None:
-            self.handle_group_selection(item)
-            # Group selected; no direct population yet
-            try:
-                self.is_populating_articles = False
-            except Exception:
-                pass
-            return
-        url = item.data(0, Qt.UserRole)
-        feed_data = next((feed for feed in self.feeds if feed['url'] == url), None)
-        # Begin guarded population for a concrete feed
-        try:
-            self.is_populating_articles = True
-        except Exception:
-            pass
-        logging.debug(f"load_articles: starting population for url={url}, has_cached_entries={bool(feed_data and feed_data.get('entries'))}")
-        # Non-blocking: show a lightweight placeholder instead of disabling UI
-        try:
-            self.show_articles_loading(f"Loading articles from {item.text(0)}…")
-        except Exception:
-            pass
-        if feed_data and feed_data.get('entries'):
-            self.statusBar().showMessage(f"Loading articles from {item.text(0)}", 5000)
-            self.populate_articles_in_background(feed_data['entries'])
-        else:
-            self.statusBar().showMessage(f"Loading articles from {item.text(0)}", 5000)
-            worker = Worker()
-            worker.feed_fetched.connect(self.on_feed_fetched)
-            runnable = FetchFeedRunnable(url, worker)
-            self.thread_pool.start(runnable)
-            logging.debug(f"Started thread for feed: {url}")
-
-    def populate_articles_in_background(self, entries):
-        # Stop and clean up any existing thread
-        if hasattr(self, 'populate_thread') and self.populate_thread.isRunning():
-            try:
-                # Ask it to stop cooperatively
-                if hasattr(self.populate_thread, 'stop'):
-                    self.populate_thread.stop()
-                # Give it a short time to finish
-                if not self.populate_thread.wait(500):
-                    # Keep reference until finished to avoid destruction while running
-                    self._stale_threads.append(self.populate_thread)
-                    self.populate_thread.finished.connect(lambda thr=self.populate_thread: self._cleanup_stale_thread(thr))
-                logging.info("Previous PopulateArticlesThread termination requested.")
-            except Exception:
-                pass
-
-        # Start a new thread
-        self.populate_thread = PopulateArticlesThread(entries, self.read_articles, self.max_days)
-        try:
-            self.populate_thread.setObjectName("PopulateArticlesThread")
-        except Exception:
-            pass
-        self.populate_thread.articles_ready.connect(self.on_articles_ready)
-        self.populate_thread.start()
-        # Register for lifecycle management and logging
-        try:
-            self.register_thread(self.populate_thread, "PopulateArticlesThread")
-        except Exception:
-            pass
-
-    def on_articles_ready(self, filtered_entries, article_id_to_item):
-        logging.debug(f"on_articles_ready: got {len(filtered_entries)} entries")
-        self.current_entries = filtered_entries
-        # article_id_to_item from PopulateArticlesThread contains dict entries, not QTreeWidgetItem
-        # The correct article_id_to_item mapping will be created in populate_articles_ui()
-        self.populate_articles_ui()
-        # Done populating from background
-        self.is_populating_articles = False
-
-    def show_articles_loading(self, message: str):
-        """Show a lightweight placeholder in the articles list without disabling the widget."""
-        try:
-            prev_block = self.articles_tree.signalsBlocked()
-            self.articles_tree.blockSignals(True)
-            self.articles_tree.clear()
-            placeholder = QTreeWidgetItem(self.articles_tree)
-            placeholder.setText(0, message)
-            try:
-                fnt = placeholder.font(0)
-                fnt.setItalic(True)
-                placeholder.setFont(0, fnt)
-            except Exception:
-                pass
-            # Mark as placeholder to avoid accidental handling
-            placeholder.setData(0, Qt.UserRole + 99, "loading_placeholder")
-            # Non-selectable to keep focus behavior natural
-            placeholder.setFlags(placeholder.flags() & ~Qt.ItemIsSelectable)
-            self.articles_tree.blockSignals(prev_block)
-        except Exception:
-            pass
-
-    def populate_articles_ui(self):
-        """Populate the articles UI with the current feed's articles."""
-        # Start guarded population to avoid signal storms and click races
-        self.is_populating_articles = True
-        prev_block = self.articles_tree.signalsBlocked()
-        logging.debug("populate_articles_ui: start, blocking signals")
-        try:
-            self.articles_tree.blockSignals(True)
-        except Exception:
-            pass
-        self.articles_tree.clear()
-        self.article_id_to_item.clear()  # Clear the mapping to prevent old entries
-        current_feed = self.get_current_feed()
-        if not current_feed:
-            logging.debug("populate_articles_ui: no current feed, restoring UI")
-            # Restore state even on early return
-            try:
-                self.articles_tree.blockSignals(prev_block)
-            except Exception:
-                pass
-            self.is_populating_articles = False
-            return
-
-        # Определяем, включен ли OMDb для текущей группы
-        group_name = self.get_group_name_for_feed(current_feed['url'])
-        group_settings = self.group_settings.get(group_name, {'omdb_enabled': False})
-        omdb_enabled = group_settings.get('omdb_enabled', False)
-
-        # Определяем нужные столбцы
-        base_columns = ['Title', 'Date']
-        omdb_columns = ['Rating', 'Released', 'Genre', 'Director', 'Country', 'Actors', 'Poster']
-        if omdb_enabled:
-            all_columns = base_columns + omdb_columns
-        else:
-            all_columns = base_columns
-        self.articles_tree.setHeaderLabels(base_columns + omdb_columns)  # всегда полный набор для совместимости
-        # Скрываем OMDb-столбцы если не нужно
-        for i, col in enumerate(base_columns + omdb_columns):
-            self.articles_tree.setColumnHidden(i, (col in omdb_columns and not omdb_enabled))
-
-        show_only_unread = self.get_show_only_unread()
-        displayed_entries = []
-        for entry in current_feed.get('entries', []):
-            article_id = self.get_article_id(entry)
-            is_unread = article_id not in self.read_articles
-            if show_only_unread and not is_unread:
-                continue
-            item = QTreeWidgetItem(self.articles_tree)
-            item.setText(0, entry.get('title', 'No Title'))
-            item.setData(0, Qt.UserRole, entry)
-            if is_unread:
-                item.setIcon(0, self.blue_dot_icon)
-            date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
-            if date_struct:
-                date_obj = datetime(*date_struct[:6])
-                date_formatted = date_obj.strftime('%Y-%m-%d')
-                item.setText(1, date_formatted)
-                item.setData(1, Qt.UserRole, date_obj)
-            # OMDb поля если есть и если omdb_enabled
-            movie_data = entry.get('movie_data', {})
-            if omdb_enabled:
-                item.setText(2, movie_data.get('imdbrating', ''))
-                item.setText(3, movie_data.get('released', ''))
-                item.setText(4, movie_data.get('genre', ''))
-                item.setText(5, movie_data.get('director', ''))
-                item.setText(6, movie_data.get('country', ''))
-                item.setText(7, movie_data.get('actors', ''))
-                item.setText(8, movie_data.get('poster', ''))
-            # Ensure no hover tooltip is shown
-            try:
-                item.setToolTip(0, "")
-            except Exception:
-                pass
-            # Гарантированно сохраняем QTreeWidgetItem
-            self.article_id_to_item[article_id] = item
-            displayed_entries.append(entry)
-        self.articles_tree.sortItems(1, Qt.DescendingOrder)
-
-        # Restore signals and interactivity
-        try:
-            self.articles_tree.blockSignals(prev_block)
-        except Exception:
-            pass
-        self.is_populating_articles = False
-        logging.debug("populate_articles_ui: done, UI restored")
-
-        # Auto-select the first article if any
-        try:
-            if self.articles_tree.topLevelItemCount() > 0:
-                first = self.articles_tree.topLevelItem(0)
-                self.articles_tree.setCurrentItem(first)
-        except Exception:
-            pass
-
-        # --- OMDb: запуск потока для подгрузки рейтингов ---
-        if omdb_enabled and self.api_key:
-            # Stop previous movie thread if any
-            if hasattr(self, 'movie_thread') and self.movie_thread.isRunning():
-                try:
-                    try:
-                        self.movie_thread.movie_data_fetched.disconnect(self.update_movie_info)
-                    except Exception:
-                        pass
-                    # Request cooperative stop instead of quit() to avoid running thread destruction
-                    if hasattr(self.movie_thread, 'request_stop'):
-                        self.movie_thread.request_stop()
-                    # Wait briefly, then retain reference if still running
-                    if not self.movie_thread.wait(500):
-                        self._stale_threads.append(self.movie_thread)
-                        self.movie_thread.finished.connect(lambda thr=self.movie_thread: self._cleanup_stale_thread(thr))
-                except Exception:
-                    pass
-            if displayed_entries:
-                # Ensure current_entries matches displayed items order
-                self.current_entries = list(displayed_entries)
-                self.movie_thread = FetchMovieDataThread(self.current_entries, self.api_key, self.movie_data_cache, self.quit_flag)
-                self.movie_thread.movie_data_fetched.connect(self.update_movie_info)
-                self.movie_thread.start()
-
-    def _cleanup_stale_thread(self, thr: QThread):
-        """Remove finished thread from stale list and delete it later safely."""
-        try:
-            if thr in self._stale_threads:
-                self._stale_threads.remove(thr)
-            thr.deleteLater()
-        except Exception:
-            pass
-
-    def mark_selected_article_as_read(self):
-        """Mark the currently selected article as read."""
-        selected_items = self.articles_tree.selectedItems()
-        if not selected_items:
-            return
-
-        item = selected_items[0]
-        entry = item.data(0, Qt.UserRole)
-        if not entry:
-            return
-
-        article_id = self.get_article_id(entry)
-        if article_id not in self.read_articles:
-            self.read_articles.add(article_id)
-            item.setIcon(0, QIcon())  # Remove the unread icon
-
-    def display_content(self):
-        try:
-            if getattr(self, 'is_shutting_down', False) or getattr(self, '_shutdown_in_progress', False):
-                logging.debug("display_content: skipped due to shutdown in progress")
-                return
-            # Ignore clicks while we're refreshing or repopulating the UI
-            if self.is_refreshing or getattr(self, 'is_populating_articles', False):
-                try:
-                    self.statusBar().showMessage("Loading… please wait for refresh to complete", 2000)
-                except Exception:
-                    pass
-                logging.debug(f"display_content: ignored due to is_refreshing={self.is_refreshing}, is_populating={self.is_populating_articles}")
-                return
-            selected_items = self.articles_tree.selectedItems()
-            if not selected_items:
-                logging.debug("display_content: no selected item")
-                return
-
-            item = selected_items[0]
-            entry = item.data(0, Qt.UserRole)
-            if not entry:
-                logging.debug("display_content: selected item has no entry data")
-                return
-            
-            # Mark article as read when displaying content
-            article_id = self.get_article_id(entry)
-            if article_id not in self.read_articles:
-                self.read_articles.add(article_id)
-                item.setIcon(0, QIcon())  # Remove the blue dot icon
-
-            # Helpers to coerce various feedparser field shapes to plain text safely
-            def _text(v):
-                try:
-                    if isinstance(v, str):
-                        return v
-                    if isinstance(v, dict):
-                        val = v.get('value')
-                        return val if isinstance(val, str) else ''
-                    if isinstance(v, list) and v:
-                        # Common case: list of dicts with 'value'
-                        first = v[0]
-                        if isinstance(first, dict):
-                            val = first.get('value')
-                            return val if isinstance(val, str) else ''
-                        return first if isinstance(first, str) else ''
-                    return str(v) if v is not None else ''
-                except Exception:
-                    return ''
-
-            # Check if preview text is available in the feed (robust against non-strings)
-            preview_text = _text(entry.get('summary')).strip()
-            description = _text(entry.get('description')).strip()
-            content = _text(entry.get('content')).strip()
-            
-            # Add debug logging to see what content is available
-            logging.debug(f"Article content - Title: {entry.get('title', 'No Title')}")
-            logging.debug(f"Content available: {bool(content)}, length: {len(content)}")
-            logging.debug(f"Description available: {bool(description)}, length: {len(description)}")
-            logging.debug(f"Summary available: {bool(preview_text)}, length: {len(preview_text)}")
-            
-            # Use the best available content from the feed
-            if content:
-                html_content = content
-                logging.debug("Using 'content' for article")
-                self.display_formatted_content(entry, html_content)
-            elif description:
-                html_content = description
-                logging.debug("Using 'description' for article")
-                self.display_formatted_content(entry, html_content)
-            elif preview_text:
-                html_content = preview_text
-                logging.debug("Using 'summary' for article")
-                self.display_formatted_content(entry, html_content)
-            else:
-                # No content available in the feed, try to fetch from URL
-                logging.debug("No content available, attempting to fetch from URL")
-                article_url = entry.get('link', '')
-                if article_url:
-                    # Show a loading message while we fetch the content
-                    loading_html = """
-                <html>
-                <head>
-                    <style>
-                        body {{ 
-                            font-family: Arial, sans-serif; 
-                            text-align: center; 
-                            margin-top: 50px; 
-                            color: #555; 
-                        }}
-                        .loader {{
-                            border: 5px solid #f3f3f3;
-                            border-radius: 50%;
-                            border-top: 5px solid #3498db;
-                            width: 50px;
-                            height: 50px;
-                            animation: spin 2s linear infinite;
-                            margin: 20px auto;
-                        }}
-                        @keyframes spin {{
-                            0% {{ transform: rotate(0deg); }}
-                            100% {{ transform: rotate(360deg); }}
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <h3>Fetching content...</h3>
-                    <div class="loader"></div>
-                    <p>Loading article from: {0}</p>
-                </body>
-                </html>
-                """.format(article_url)
-                    self.content_view.setHtml(loading_html)
-                    
-                    # Start a background thread to fetch content
-                    self.fetch_article_content(entry)
-                else:
-                    # No URL available, show placeholder
-                    logging.debug("No URL available for article")
-                    placeholder_html = """
-                <html>
-                <head>
-                    <style>
-                        body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; color: #555; }}
-                    </style>
-                </head>
-                <body>
-                    <h3>No preview available.</h3>
-                    <p>No URL found for this article.</p>
-                </body>
-                </html>
-                """
-                    self.content_view.setHtml(placeholder_html)
-        except Exception:
-            logging.exception("Error in display_content")
-            try:
-                self.statusBar().showMessage("Error opening article. See log for details.", 5000)
-            except Exception:
-                pass
-
-    def display_formatted_content(self, entry, html_content):
-        """Display formatted content with consistent styling."""
-        if getattr(self, 'is_shutting_down', False) or getattr(self, '_shutdown_in_progress', False):
-            logging.debug("display_formatted_content: skipped due to shutdown")
-            return
-        formatted_html = """
-        <html>
-        <head>
-            <style>
-                body {{ 
-                    font-family: Arial, sans-serif; 
-                    margin: 20px; 
-                    color: #333; 
-                    line-height: 1.6;
-                    max-width: 800px;
-                    margin: 0 auto;
-                }}
-                h1, h2, h3 {{ color: #444; }}
-                img {{ max-width: 100%; height: auto; }}
-                a {{ color: #0066cc; text-decoration: none; }}
-                a:hover {{ text-decoration: underline; }}
-                pre, code {{ 
-                    background-color: #f5f5f5; 
-                    padding: 10px; 
-                    border-radius: 5px; 
-                    font-family: monospace; 
-                    overflow-x: auto;
-                }}
-                blockquote {{
-                    border-left: 4px solid #ccc;
-                    margin-left: 0;
-                    padding-left: 15px;
-                    color: #666;
-                }}
-                table {{
-                    border-collapse: collapse;
-                    width: 100%;
-                    margin: 15px 0;
-                }}
-                th, td {{
-                    border: 1px solid #ddd;
-                    padding: 8px;
-                }}
-                th {{
-                    background-color: #f2f2f2;
-                    text-align: left;
-                }}
-            </style>
-        </head>
-        <body>
-            <h2>{0}</h2>
-            {1}
-            <p><a href="{2}">Read full article in browser</a></p>
-        </body>
-        </html>
-        """.format(entry.get('title', 'No Title'), html_content, entry.get('link', '#'))
-        
-        # Display the content directly (guard if view already deleted)
-        try:
-            self.content_view.setHtml(formatted_html)
-        except Exception:
-            logging.debug("content_view is not available to set HTML (probably during shutdown)")
-        logging.info(f"Displayed content for article: {entry.get('title', 'No Title')}")
-
-    def fetch_article_content(self, entry):
-        """Fetch article content from the article URL."""
-        if getattr(self, 'is_shutting_down', False) or getattr(self, '_shutdown_in_progress', False):
-            logging.debug("fetch_article_content: skipped due to shutdown")
-            return
-        class ContentFetchWorker(QObject):
-            content_fetched = pyqtSignal(object, str)
-
-            def __init__(self, entry):
-                super().__init__()
-                self.entry = entry
-
-            def run(self):
-                try:
-                    url = self.entry.get('link', '')
-                    if not url:
-                        raise ValueError("No URL available")
-                    
-                    logging.debug(f"Fetching content from URL: {url}")
-                    headers = {
-                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                    }
-                    response = requests.get(url, headers=headers, timeout=10)
-                    response.raise_for_status()
-                    
-                    # Try to extract main content
-                    html_content = self.extract_main_content(response.text)
-                    
-                    # Send the content back to the main thread
-                    self.content_fetched.emit(self.entry, html_content)
-                    logging.debug(f"Content fetched successfully from {url}")
-                    
-                except Exception as e:
-                    logging.error(f"Error fetching article content: {e}")
-                    error_html = f"""
-                    <div>
-                        <h3>Failed to load content</h3>
-                        <p>Error: {str(e)}</p>
-                        <p>Please try opening the article in your browser.</p>
-                    </div>
-                    """
-                    self.content_fetched.emit(self.entry, error_html)
-
-            def extract_main_content(self, html):
-                try:
-                    from bs4 import BeautifulSoup
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # Remove script and style elements
-                    for script in soup(["script", "style"]):
-                        script.extract()
-                    
-                    # Try different approaches to find the main content
-                    # 1. Try article tag
-                    content = soup.find('article')
-                    if content:
-                        logging.debug("Found content in <article> tag")
-                        return content.decode_contents()
-                    
-                    # 2. Try main tag
-                    content = soup.find('main')
-                    if content:
-                        logging.debug("Found content in <main> tag")
-                        return content.decode_contents()
-                    
-                    # 3. Try div with content-related class/id
-                    for id_value in ['content', 'main-content', 'article-content', 'post-content']:
-                        content = soup.find('div', id=id_value)
-                        if content:
-                            logging.debug(f"Found content in div with id={id_value}")
-                            return content.decode_contents()
-                    
-                    for class_value in ['content', 'article', 'post', 'entry', 'main-content']:
-                        content = soup.find('div', class_=class_value)
-                        if content:
-                            logging.debug(f"Found content in div with class={class_value}")
-                            return content.decode_contents()
-                    
-                    # 4. If nothing else works, get the body content
-                    if soup.body:
-                        logging.debug("Using body content as fallback")
-                        # Try to filter out headers, footers, sidebars
-                        for tag in soup.find_all(['header', 'footer', 'aside', 'nav']):
-                            tag.extract()
-                        
-                        return str(soup.body)
-                    
-                    logging.debug("No specific content container found, returning whole HTML")
-                    return html  # Return the original HTML if all else fails
-                except ImportError:
-                    logging.error("BeautifulSoup is not installed. Please install it with: pip install beautifulsoup4")
-                    return f"""
-                    <div>
-                        <h3>Missing Dependency</h3>
-                        <p>BeautifulSoup is required to extract article content.</p>
-                        <p>Please install it with: pip install beautifulsoup4</p>
-                    </div>
-                    """
-                except Exception as e:
-                    logging.error(f"Error extracting content: {e}")
-                    return html  # Return the original HTML on error
-
-        # Create worker and thread
-        # Avoid duplicate fetch for the same article if one is already active
-        try:
-            current_id = self.get_article_id(entry)
-            if current_id in self.active_content_loads:
-                logging.debug(f"Content fetch already active for article_id={current_id}; skipping duplicate start.")
-                return
-        except Exception:
-            current_id = None
-
-        worker = ContentFetchWorker(entry)
-        thread = QThread()
-        try:
-            title = entry.get('title', 'No Title')
-            safe_name = f"ContentFetchThread:{hashlib.md5(title.encode('utf-8')).hexdigest()[:8]}"
-            thread.setObjectName(safe_name)
-        except Exception:
-            pass
-        worker.moveToThread(thread)
-        
-        # Connect signals
-        thread.started.connect(worker.run)
-        worker.content_fetched.connect(self.on_article_content_fetched)
-        # Ensure thread stops and cleanup happens when content is fetched
-        try:
-            article_id = self.get_article_id(entry)
-        except Exception:
-            article_id = None
-        if article_id:
-            worker.content_fetched.connect(lambda _e, _html, aid=article_id: self._complete_content_load(aid))
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(worker.deleteLater)
-        # Remove from self.threads when finished
-        thread.finished.connect(lambda t=thread: self.threads.remove(t) if t in self.threads else None)
-        
-        # Register active load with watchdog timer
-        if article_id and not getattr(self, 'is_shutting_down', False):
-            self._register_content_load(article_id, thread, worker)
-
-        # Start thread
-        thread.start()
-        try:
-            self.register_thread(thread, thread.objectName() or "ContentFetchThread")
-        except Exception:
-            self.threads.append(thread)
-        logging.debug(f"Started thread to fetch content for article: {entry.get('title', 'No Title')}")
-
-    def on_article_content_fetched(self, entry, html_content):
-        """Handle fetched article content."""
-        if getattr(self, 'is_shutting_down', False) or getattr(self, '_shutdown_in_progress', False) or getattr(self, '_shutdown_done', False):
-            logging.debug("on_article_content_fetched: ignored due to shutdown")
-            return
-        logging.debug(f"Received fetched content for article: {entry.get('title', 'No Title')}")
-        
-        # Make sure this article is still selected
-        selected_items = self.articles_tree.selectedItems()
-        if not selected_items:
-            logging.debug("No article selected when content was fetched")
-            return
-            
-        item = selected_items[0]
-        current_entry = item.data(0, Qt.UserRole)
-        
-        # Check if the fetched content is for the currently selected article
-        if self.get_article_id(current_entry) == self.get_article_id(entry):
-            logging.debug("Displaying fetched content")
-            self.display_formatted_content(entry, html_content)
-        else:
-            logging.debug("Ignoring fetched content for non-selected article")
-
-    def _register_content_load(self, article_id: str, thread: QThread, worker: QObject):
-        """Track an active content load and start a watchdog timer to avoid hangs."""
-        if getattr(self, 'is_shutting_down', False) or getattr(self, '_shutdown_in_progress', False):
-            logging.debug("_register_content_load: skipped due to shutdown")
-            return
-        try:
-            # Stop previous timer if exists for same article_id
-            self._complete_content_load(article_id)
-        except Exception:
-            pass
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-        timer.setInterval(15000)  # 15s watchdog
-        timer.timeout.connect(lambda aid=article_id: self._on_content_fetch_timeout(aid))
-        self.active_content_loads[article_id] = {"thread": thread, "worker": worker, "timer": timer}
-        timer.start()
-
-    def _complete_content_load(self, article_id: str):
-        """Cleanup tracking and stop the background thread for a finished/aborted load."""
-        info = self.active_content_loads.pop(article_id, None)
-        if not info:
-            return
-        try:
-            timer = info.get("timer")
-            if timer:
-                timer.stop()
-                try:
-                    timer.deleteLater()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        thread = info.get("thread")
-        try:
-            if thread:
-                # Ask the thread to stop its event loop if it's still running
-                if thread.isRunning():
-                    thread.quit()
-                    if not thread.wait(500):
-                        # Keep a reference and clean up later on finish to avoid premature destruction
-                        logging.warning(f"Content fetch thread didn't stop in time; deferring cleanup: {thread.objectName() or thread}")
-                        try:
-                            self._stale_threads.append(thread)
-                            thread.finished.connect(lambda thr=thread: self._cleanup_stale_thread(thr))
-                        except Exception:
-                            pass
-                        return
-                # Only remove from registry after it has fully stopped
-                try:
-                    if thread in self.threads:
-                        self.threads.remove(thread)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    def _on_content_fetch_timeout(self, article_id: str):
-        """Handle content fetch timeout: show a message if the article is still selected and cleanup."""
-        info = self.active_content_loads.get(article_id)
-        if not info:
-            return
-        # If this article is still selected, show timeout message
-        try:
-            selected_items = self.articles_tree.selectedItems()
-            if selected_items:
-                current_entry = selected_items[0].data(0, Qt.UserRole)
-                if self.get_article_id(current_entry) == article_id:
-                    timeout_html = f"""
-                    <div>
-                        <h3>Failed to load content</h3>
-                        <p>Error: timed out while fetching the article content.</p>
-                        <p>Please try opening the article in your browser.</p>
-                    </div>
-                    """
-                    self.display_formatted_content(current_entry, timeout_html)
-        except Exception:
-            pass
-        # Try to stop the background thread
-        thread = info.get("thread")
-        try:
-            if thread and thread.isRunning():
-                thread.quit()
-                if not thread.wait(300):
-                    # Forcefully terminate as a last resort
-                    try:
-                        thread.terminate()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        # Final cleanup
-        self._complete_content_load(article_id)
-
-    pass
-
-    def update_content_view(self, content):
-        """Update the content view with the fetched HTML content."""
-        logging.info(f"update_content_view called. Content length: {len(content)}")
-        if not content.strip():
-            logging.warning("Received empty content to display.")
-        self.content_view.setHtml(content)
-
-    # HTTP auth has been removed from the application.
-
-    def extract_article_content(self, html):
-        """Extract the main content of the article from its HTML."""
-        try:
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(html, 'html.parser')
-
-            # Attempt to find the main content block
-            main_content = soup.find('article') or soup.find('div', class_='content') or soup.find('div', id='main')
-            if (main_content):
-                return main_content.decode_contents()
-
-            # Fallback: return the entire body if no specific block is found
-            return soup.body.decode_contents() if soup.body else 'No content available.'
-        except Exception as e:
-            return 'No content available.'
-
-    def highlight_text(self, text, search_text):
-        if not search_text:
-            return text
-        highlighted = f'<span style="background-color: yellow;">{search_text}</span>'
-        return re.sub(re.escape(search_text), highlighted, text, flags=re.IGNORECASE)
-
-    def add_article_to_tree(self, entry):
-        """Add an article to the articles tree."""
-        title = entry.get('title', 'No Title')
-        item = ArticleTreeWidgetItem([title, '', '', '', '', '', '', '', ''])
-        date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
-        if date_struct:
-            date_obj = datetime(*date_struct[:6])
-            date_formatted = date_obj.strftime('%d-%m-%Y')
-        else:
-            date_obj = datetime.min
-            date_formatted = 'No Date'
-        item.setText(1, date_formatted)
-        item.setData(1, Qt.UserRole, date_obj)
-        item.setText(2, 'N/A')
-        item.setText(3, '')
-        item.setText(4, '')
-        item.setText(5, '')
-        item.setText(6, '')
-        item.setText(7, '')
-        item.setText(8, '')
-        article_id = self.get_article_id(entry)
-        item.setData(0, Qt.UserRole + 1, article_id)
-        item.setData(0, Qt.UserRole, entry)
-
-        # Определяем фид для этой статьи
-        feed_url = None
-        for feed in self.feeds:
-            if entry in feed.get('entries', []):
-                feed_url = feed['url']
-                break
-
-        # Mark unread articles with bold font and an icon
-        if article_id not in self.read_articles:
-            font = item.font(0)
-            font.setBold(True)
-            item.setFont(0, font)
-            item.setIcon(0, self.blue_dot_icon)
-        else:
-            item.setIcon(0, QIcon())  # No icon for read articles
-
-        # Устанавливаем иконку фида, если есть (ищем по доменным вариантам)
-        try:
-            if feed_url:
-                domain = urlparse(feed_url).netloc or feed_url
-                for d in _domain_variants(domain):
-                    icon = self.favicon_cache.get(d)
-                    if icon:
-                        item.setIcon(0, icon)
-                        break
-        except Exception:
-            pass
-
-        self.articles_tree.addTopLevelItem(item)
-        self.article_id_to_item[article_id] = item
-
-    def update_article_in_tree(self, item, entry):
-        title = entry.get('title', 'No Title')
-        item.setText(0, title)
-        date_struct = entry.get('published_parsed', entry.get('updated_parsed', None))
-        if date_struct:
-            date_obj = datetime(*date_struct[:6])
-            date_formatted = date_obj.strftime('%d-%m-%Y')
-        else:
-            date_obj = datetime.min
-            date_formatted = 'No Date'
-        item.setText(1, date_formatted)
-        item.setData(1, Qt.UserRole, date_obj)
-
-    def get_all_tree_items(self, tree_widget):
-        items = []
-        for index in range(tree_widget.topLevelItemCount()):
-            items.append(tree_widget.topLevelItem(index))
-        return items
-
-    def get_current_feed(self):
-        selected_items = self.feeds_list.selectedItems()
-        if not selected_items:
-            return None
-        item = selected_items[0]
-        if item.data(0, Qt.UserRole) is None:
-            return None
-        url = item.data(0, Qt.UserRole)
-        return next((feed for feed in self.feeds if feed['url'] == url), None)
-
-    def remove_thread(self, thread):
-        if thread in self.threads:
-            self.threads.remove(thread)
-            logging.debug("Removed a thread.")
 
     def update_movie_info(self, index, article_id, movie_data):
         # Guard if called too early
@@ -3371,8 +2502,6 @@ class RSSReader(QMainWindow):
         logging.info(f"Updated feed URL: {old_url} -> {new_url}")
         return True
 
-    
-
     def update_content_view(self, content):
         """Update the content view with the fetched HTML content."""
         logging.info("update_content_view called wit" \
@@ -3409,112 +2538,118 @@ class RSSReader(QMainWindow):
             logging.info(f"Removed {before_cache - after_cache} orphaned movie_data_cache entries.")
             self.save_movie_data_cache()
 
-# =========================
-# 4. RSS operations: fetching and caching
-# =========================
-
-# ...методы RSSReader, связанные с fetch_feed_with_cache, force_refresh_all_feeds, on_feed_fetched, on_feed_fetched_force_refresh, fetch_article_content, load_article_content_async ...
-
-# =========================
-# 5. File operations (I/O)
-# =========================
-
-# ...методы RSSReader, связанные с load_feeds, save_feeds, load_read_articles, save_read_articles, load_group_settings, save_group_settings, load_movie_data_cache, save_movie_data_cache ...
-
-# =========================
-# 6. Main entrypoint
-# =========================
-
-def main():
-    parser = argparse.ArgumentParser(description="Small RSS Reader")
-    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
-    args = parser.parse_args()
-    
-    if getattr(sys, 'frozen', False):
-        application_path = os.path.dirname(sys.executable)
-    else:
-        application_path = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(application_path)
-    # Determine logging level: --debug has priority, otherwise from Settings
-    if args.debug:
-        logging_level = logging.DEBUG
-    else:
+    # -----------------------------
+    # Missing UI helpers (restored)
+    # -----------------------------
+    def get_current_feed(self):
+        """Return feed dict for the currently selected feed item.
+        If a group is selected, try its first child. Returns None if not found.
+        """
         try:
-            level_name = QSettings('rocker', 'SmallRSSReader').value('log_level', 'INFO')
-            level_map = {'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WARNING, 'ERROR': logging.ERROR}
-            logging_level = level_map.get(str(level_name).upper(), logging.INFO)
+            selected = self.feeds_list.selectedItems()
+            if not selected:
+                return None
+            item = selected[0]
+            url = item.data(0, Qt.UserRole)
+            # If group selected, pick first child
+            if url is None and item.childCount() > 0:
+                url = item.child(0).data(0, Qt.UserRole)
+            if not url:
+                return None
+            for f in self.feeds:
+                if f.get('url') == url:
+                    return f
+            return None
         except Exception:
-            logging_level = logging.INFO
-    log_path = get_user_data_path('rss_reader.log')
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
-    file_handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=3, encoding='utf-8')
-    logging.basicConfig(
-        level=logging_level,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            file_handler,
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
-    # Install global exception hook
-    def excepthook(exc_type, exc_value, exc_traceback):
-        logging.exception("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+            return None
+
+    def add_article_to_tree(self, entry):
+        """Create a tree item for the entry and update mappings."""
         try:
-            from PyQt5.QtWidgets import QApplication
-            QApplication.instance() and QApplication.instance().quit()
+            # Prefer custom item for better sorting if available
+            try:
+                item = ArticleTreeWidgetItem(self.articles_tree)
+            except Exception:
+                item = QTreeWidgetItem(self.articles_tree)
+            title = entry.get('title', 'No Title')
+            # Date
+            date_struct = entry.get('published_parsed') or entry.get('updated_parsed')
+            if date_struct:
+                dt = datetime(*date_struct[:6])
+                date_text = dt.strftime('%Y-%m-%d')
+            else:
+                date_text = ''
+            # Set columns we know; leave others empty
+            item.setText(0, title)
+            item.setText(1, date_text)
+            # Store entry for later use
+            item.setData(0, Qt.UserRole, entry)
+            # Map by article id for movie updates
+            aid = self.get_article_id(entry)
+            self.article_id_to_item[aid] = item
+            # Bold unread
+            if aid not in self.read_articles:
+                f = item.font(0)
+                f.setBold(True)
+                item.setFont(0, f)
+            return item
         except Exception:
-            pass
-    sys.excepthook = excepthook
+            return None
 
-    # Install Qt message handler for warnings/errors from Qt
-    def qt_message_handler(mode, context, message):
+    def populate_articles_ui(self):
+        """Populate the articles tree for the currently selected feed."""
         try:
-            level = {
-                QtMsgType.QtDebugMsg: logging.DEBUG,
-                QtMsgType.QtInfoMsg: logging.INFO,
-                QtMsgType.QtWarningMsg: logging.WARNING,
-                QtMsgType.QtCriticalMsg: logging.ERROR,
-                QtMsgType.QtFatalMsg: logging.CRITICAL,
-            }.get(mode, logging.INFO)
-            logging.log(level, f"Qt: {message}")
+            self.is_populating_articles = True
+            self.articles_tree.clear()
+            current = self.get_current_feed()
+            if not current:
+                self.current_entries = []
+                self.is_populating_articles = False
+                return
+            entries = current.get('entries', [])
+            # Apply max-days filter
+            entries = self.filter_articles_by_max_days(entries)
+            # Apply unread filter if enabled
+            if self.get_show_only_unread():
+                entries = [e for e in entries if self.get_article_id(e) not in self.read_articles]
+            # Keep for movie/info updates
+            self.current_entries = entries
+            # Rebuild mapping
+            self.article_id_to_item = {}
+            for e in entries:
+                self.add_article_to_tree(e)
+            # Restore column widths for this feed if available
+            try:
+                url = current.get('url')
+                widths = (self.column_widths or {}).get(url, [])
+                for i, w in enumerate(widths):
+                    if w:
+                        self.articles_tree.setColumnWidth(i, int(w))
+            except Exception:
+                pass
+        finally:
+            self.is_populating_articles = False
+
+    def load_articles(self):
+        """Debounced handler to populate the articles view for selected feed."""
+        try:
+            self.populate_articles_ui()
         except Exception:
-            pass
-    try:
-        qInstallMessageHandler(qt_message_handler)
-    except Exception:
-        pass
+            logging.debug("load_articles failed", exc_info=True)
 
-    app = QApplication(sys.argv)
-    app.setOrganizationName("rocker")
-    app.setApplicationName("SmallRSSReader")
-    app.setApplicationDisplayName("Small RSS Reader")
-    try:
-        if APP_VERSION:
-            app.setApplicationVersion(APP_VERSION)
-    except Exception:
-        pass
-    app.setWindowIcon(QIcon(resource_path('icons/rss_icon.png')))
-    app.setAttribute(Qt.AA_DontShowIconsInMenus, False)
-    app.setAttribute(Qt.AA_UseHighDpiPixmaps)
-    app.setQuitOnLastWindowClosed(True)
-    splash_pix = QPixmap(resource_path('icons/splash.png'))
-    splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
-    splash.setMask(splash_pix.mask())
-    splash.showMessage("Initializing...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
-    splash.show()
-    QApplication.processEvents()
-    reader = RSSReader()
-    reader.show()
-    reader.raise_()
-    reader.activateWindow()
-    # Settings and feeds are loaded inside RSSReader.__init__ via load_settings()
-    splash.showMessage("Refreshing feeds...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
-    QApplication.processEvents()
-    splash.showMessage("Finalizing...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
-    QApplication.processEvents()
-    splash.finish(reader)
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    sys.exit(app.exec_())
-
-if __name__ == "__main__":
-    main()
+    def display_content(self, *args):
+        """Display currently selected article content in the content view."""
+        try:
+            items = self.articles_tree.selectedItems()
+            if not items:
+                return
+            item = items[0]
+            entry = item.data(0, Qt.UserRole) or {}
+            content = entry.get('content', [{}])[0].get('value') or entry.get('summary', '') or ''
+            if self.headless:
+                # In tests, just log/announce
+                self.statusBar().showMessage(f"Selected: {entry.get('title', '')}", 2000)
+            else:
+                self.update_content_view(content)
+        except Exception:
+            logging.debug("display_content failed", exc_info=True)
