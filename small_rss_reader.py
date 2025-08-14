@@ -27,13 +27,14 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox, QCheckBox, QSplashScreen, QSystemTrayIcon
 )
 from PyQt5.QtGui import (
-    QCursor, QFont, QIcon, QPixmap, QPainter, QBrush, QColor, QTransform, QDesktopServices
+    QCursor, QFont, QIcon, QPixmap, QPainter, QBrush, QColor, QTransform, QDesktopServices, QKeySequence
 )
 from PyQt5.QtCore import (
     Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize, QEvent, QObject, QRunnable, QThreadPool, pyqtSlot,
     qInstallMessageHandler, QtMsgType, QByteArray, QBuffer
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
+from PyQt5.QtWidgets import QShortcut
 from pathlib import Path
 from storage import Storage
 try:
@@ -1083,13 +1084,7 @@ class RSSReader(QMainWindow):
         self.feeds_panel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         self.horizontal_splitter.addWidget(self.feeds_panel)
 
-        # Set favicons for each feed
-        for feed in self.feeds:
-            feed_item = QTreeWidgetItem(self.feeds_list)
-            feed_item.setText(0, feed['title'])
-            feed_item.setData(0, Qt.UserRole, feed['url'])
-            if self.has_unread_articles(feed):
-                self.set_feed_icon(feed_item, feed['url'])
+    # Items created later in _rebuild_feeds_tree; icons handled per-group there
 
     def on_feed_item_clicked(self, item, column):
         logging.debug(f"on_feed_item_clicked: text='{item.text(0)}', has_url={bool(item.data(0, Qt.UserRole))}")
@@ -1433,6 +1428,13 @@ class RSSReader(QMainWindow):
         self.addToolBar(self.toolbar)
         self.add_toolbar_buttons()
         self.toolbar.setVisible(True)
+        # Shortcut: Cmd/Ctrl+F focuses the search field
+        try:
+            self.search_shortcut = QShortcut(QKeySequence.Find, self)
+            self.search_shortcut.setContext(Qt.ApplicationShortcut)
+            self.search_shortcut.activated.connect(lambda: self.search_input.setFocus() if hasattr(self, 'search_input') else None)
+        except Exception:
+            pass
 
     def on_feed_selection_changed(self):
         # Ignore while signals are blocked (during list rebuild)
@@ -1989,6 +1991,9 @@ class RSSReader(QMainWindow):
             self.show_feed_context_menu(item, position)
 
     def show_group_context_menu(self, group_item, position):
+        # Preserve current selection to avoid focus jumping when context menu opens
+        prev_item = self.feeds_list.currentItem()
+        self.feeds_list.setCurrentItem(group_item)
         menu = QMenu()
         rename_group_action = QAction("Rename Group", self)
         rename_group_action.triggered.connect(lambda: self.rename_group(group_item))
@@ -1997,6 +2002,12 @@ class RSSReader(QMainWindow):
         settings_action.triggered.connect(lambda: self.group_settings_dialog(group_item))
         menu.addAction(settings_action)
         menu.exec_(self.feeds_list.viewport().mapToGlobal(position))
+        # Restore previous selection after the menu is closed
+        try:
+            if prev_item and prev_item is not group_item:
+                self.feeds_list.setCurrentItem(prev_item)
+        except Exception:
+            pass
 
     def group_settings_dialog(self, group_item):
         group_name = group_item.text(0)
@@ -2190,7 +2201,7 @@ class RSSReader(QMainWindow):
 
         for domain, feeds in domain_feeds.items():
             if len(feeds) == 1:
-                # Single feed for this domain — show at root without a group wrapper
+                # Single feed — show at root and display favicon
                 feed_data = feeds[0]
                 feed_item = QTreeWidgetItem(self.feeds_list)
                 feed_item.setText(0, feed_data['title'])
@@ -2218,8 +2229,7 @@ class RSSReader(QMainWindow):
                         font = feed_item.font(0)
                         font.setBold(True)
                         feed_item.setFont(0, font)
-                    # Ensure each child feed node also gets an icon
-                    self.set_feed_icon(feed_item, feed_data['url'])
+                    # Do not set favicon for individual feeds inside a group
 
         self.feeds_list.expandAll()
         self.feeds_list.blockSignals(prev_block)
@@ -2287,8 +2297,8 @@ class RSSReader(QMainWindow):
                             child = top_item.child(j)
                             url = child.data(0, Qt.UserRole) or ''
                             if urlparse(url).netloc in _domain_variants(domain):
+                                # Set icon only on the group node; skip child feed icons
                                 top_item.setIcon(0, icon)
-                                child.setIcon(0, icon)
                         continue
                 except Exception:
                     pass
@@ -2538,6 +2548,14 @@ class RSSReader(QMainWindow):
             pass
         self.is_populating_articles = False
         logging.debug("populate_articles_ui: done, UI restored")
+
+        # Auto-select the first article if any
+        try:
+            if self.articles_tree.topLevelItemCount() > 0:
+                first = self.articles_tree.topLevelItem(0)
+                self.articles_tree.setCurrentItem(first)
+        except Exception:
+            pass
 
         # --- OMDb: запуск потока для подгрузки рейтингов ---
         if omdb_enabled and self.api_key:
