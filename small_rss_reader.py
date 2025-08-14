@@ -37,6 +37,7 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEng
 from PyQt5.QtWidgets import QShortcut
 from pathlib import Path
 from storage import Storage
+from rss_reader.utils.net import compute_article_id as _compute_article_id
 try:
     # Build-time constants injected by setup.py
     from app_version import VERSION as APP_VERSION, TAG as APP_TAG, COMMIT as APP_COMMIT, ORIGIN as APP_ORIGIN
@@ -3317,8 +3318,8 @@ class RSSReader(QMainWindow):
             return datetime.min
 
     def get_article_id(self, entry):
-        unique_string = entry.get('id') or entry.get('guid') or entry.get('link') or (entry.get('title', '') + entry.get('published', ''))
-        return hashlib.md5(unique_string.encode('utf-8')).hexdigest()
+        # Delegate to shared utils for stability and reuse
+        return _compute_article_id(entry)
 
     def mark_feed_unread(self):
         selected_items = self.feeds_list.selectedItems()
