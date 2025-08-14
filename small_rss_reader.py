@@ -769,6 +769,20 @@ class RSSReader(QMainWindow):
             return
         QMessageBox.warning(self, title, message)
 
+    def _on_app_about_to_quit(self):
+        """Ensure flags and tray state are set to allow real quit on macOS."""
+        try:
+            self.is_quitting = True
+            self.is_shutting_down = True
+            self.quit_flag.set()
+            if getattr(self, 'tray_icon', None):
+                try:
+                    self.tray_icon.hide()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def __init__(self):
         super().__init__()
         # Headless mode for tests (no WebEngine/tray, no modals)
@@ -798,7 +812,11 @@ class RSSReader(QMainWindow):
         self.notify_signal.connect(self.show_notification)
         # Ensure orderly shutdown on app quit
         try:
-            QApplication.instance().aboutToQuit.connect(self.shutdown_threads)
+            app = QApplication.instance()
+            if app:
+                # Mark quitting early to allow closeEvent to accept
+                app.aboutToQuit.connect(self._on_app_about_to_quit)
+                app.aboutToQuit.connect(self.shutdown_threads)
         except Exception:
             pass
         # Connect favicon signal
@@ -937,6 +955,15 @@ class RSSReader(QMainWindow):
         self.statusBar().showMessage("Saving your data before exiting...", 5000)
         # Centralized, robust shutdown
         self.shutdown_threads()
+        # Hide and dispose tray icon to avoid lingering dock/menu on macOS
+        try:
+            if getattr(self, 'tray_icon', None):
+                self.tray_icon.hide()
+                self.tray_icon.setContextMenu(None)
+                self.tray_icon.deleteLater()
+                self.tray_icon = None
+        except Exception:
+            pass
         # Explicitly delete QWebEngineView to ensure cleanup
         try:
             if hasattr(self, 'content_view') and not getattr(self, '_view_deleted', False):
@@ -945,7 +972,12 @@ class RSSReader(QMainWindow):
                 logging.info("Deleted QWebEngineView to ensure proper cleanup.")
         except Exception:
             pass
+        # Close the main window to end the event loop
         self.close()
+        try:
+            QApplication.instance() and QApplication.instance().quit()
+        except Exception:
+            pass
 
     def save_font_size(self):
         settings = QSettings('rocker', 'SmallRSSReader')
@@ -1257,6 +1289,16 @@ class RSSReader(QMainWindow):
         about_action.triggered.connect(self.show_help_info)
         help_menu.addAction(about_action)
 
+        # Also ensure a proper Application "Quit" action exists on macOS
+        try:
+            quit_action = QAction("Quit Small RSS Reader", self)
+            quit_action.setMenuRole(QAction.QuitRole)
+            quit_action.setShortcut(QKeySequence.Quit)
+            quit_action.triggered.connect(self.quit_app)
+            menu.addAction(quit_action)
+        except Exception:
+            pass
+
     def _git_command(self, args):
         """Run a git command in the repository directory if available."""
         try:
@@ -1375,9 +1417,14 @@ class RSSReader(QMainWindow):
         settings_action = QAction("Settings", self)
         settings_action.triggered.connect(self.open_settings_dialog)
         file_menu.addAction(settings_action)
-        exit_action = QAction("Exit", self)
-        exit_action.setShortcut('Ctrl+Q' if sys.platform != 'darwin' else 'Cmd+Q')
-        exit_action.triggered.connect(self.close)
+        exit_action = QAction("Quit", self)
+        try:
+            # Use platform-native quit role and shortcut
+            exit_action.setMenuRole(QAction.QuitRole)
+            exit_action.setShortcut(QKeySequence.Quit)
+        except Exception:
+            exit_action.setShortcut('Ctrl+Q' if sys.platform != 'darwin' else 'Cmd+Q')
+        exit_action.triggered.connect(self.quit_app)
         file_menu.addAction(exit_action)
 
     def add_view_menu_actions(self, view_menu):
