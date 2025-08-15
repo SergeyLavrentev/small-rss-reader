@@ -100,6 +100,49 @@ Threading model
 - A shared `QThreadPool` runs RSS and OMDb tasks (as `QRunnable`).
 - OMDb requests are de-duplicated by normalized title and limited by a timer-driven dispatcher.
 
+### Diagrams
+
+High-level module relationships:
+
+```mermaid
+graph LR
+   entry[small_rss_reader.py]\n(splash + shim) --> app[rss_reader.app.RSSReader]
+   app --> ui[ui/dialogs.py]
+   app --> feeds[rss_reader/services/feeds.py]
+   app --> omdb[rss_reader/services/omdb.py]
+   app --> storage[storage.py]
+   app --> paths[rss_reader/utils/paths.py]
+   storage --> sqlite[(SQLite db.sqlite3)]
+   feeds -. Qt signals .-> app
+   omdb -. Qt signals .-> app
+```
+
+Threading and data flow:
+
+```mermaid
+sequenceDiagram
+   participant User as User/UI
+   participant App as RSSReader (UI thread)
+   participant Pool as QThreadPool
+   participant Feeds as FetchFeedRunnable
+   participant OMDb as FetchOmdbRunnable
+   participant Worker as OmdbWorker (QObject)
+   participant DB as SQLite
+
+   User->>App: Actions (Add/Refresh/Select)
+   App->>Pool: start(Feeds)
+   Pool->>Feeds: run()
+   Feeds-->>App: feed_fetched(entries)
+   App->>DB: persist entries / read state
+   App->>App: enqueue OMDb titles (rate-limited)
+   App->>Pool: dispatch(OMDb) (timer-driven)
+   Pool->>OMDb: run()
+   OMDb->>Worker: emit movie_fetched/failed
+   Worker-->>App: signals (Qt)
+   App->>DB: cache OMDb data
+   App->>User: update UI (table/columns/badges)
+```
+
 Settings and state (QSettings keys)
 - `window_geometry`, `window_state` — window size/state persistence.
 - `toolbar_visible`, `menubar_visible` — UI visibility toggles.
@@ -140,4 +183,14 @@ make test-network
 - If the app doesn’t start after an update, try:
    - `make clean` then `make run` (recreates venv and reinstalls deps)
    - `make full-rebuild` to rebuild the .app bundle from scratch
+
+## Contributing
+
+- Fork the repository and create a feature branch:
+   - `git checkout -b feat/your-feature`
+- Use the provided Makefile and venv (no global Python assumptions):
+   - `make run` for local runs, `make test` to run tests headless
+- Prefer small, focused commits with clear messages (e.g., `feat:`, `fix:`, `docs:`).
+- Add or update tests when changing behavior.
+- Open a PR with a concise description, screenshots (if UI), and testing notes.
 
