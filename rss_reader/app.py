@@ -315,6 +315,19 @@ class RSSReader(QMainWindow):
             except Exception:
                 pass
         self.data_changed = True
+        # Rebuild tree in case domain grouping changed; reselect updated feed
+        try:
+            self._rebuild_feeds_tree()
+            # select by new_url
+            for it in self._iter_feed_items() or []:
+                try:
+                    if it.data(0, Qt.UserRole) == new_url:
+                        self.feedsTree.setCurrentItem(it)
+                        break
+                except Exception:
+                    pass
+        except Exception:
+            pass
         return True
 
     # ---- Backup / Restore ----
@@ -350,9 +363,7 @@ class RSSReader(QMainWindow):
             self.favicon_cache[d] = icon
         # Update tree icons for matching feeds (single-level tree in refactor build)
         try:
-            top_count = self.feedsTree.topLevelItemCount()
-            for i in range(top_count):
-                item = self.feedsTree.topLevelItem(i)
+            for item in self._iter_feed_items():
                 url = item.data(0, Qt.UserRole) or ""
                 if not url:
                     continue
@@ -409,13 +420,13 @@ class RSSReader(QMainWindow):
                 pass
         except Exception:
             pass
-        for feed in self.feeds:
-            self._add_feed_item(feed.get('title') or feed.get('url'), feed.get('url'))
+        # Build the feeds tree with domain grouping
+        self._rebuild_feeds_tree()
         self._update_tray()
         self._update_feed_unread_badges()
 
     # helper to add item into feeds tree and set icon from cache/storage
-    def _add_feed_item(self, title: str, url: str) -> QTreeWidgetItem:
+    def _add_feed_item(self, title: str, url: str, parent: Optional[QTreeWidgetItem] = None) -> QTreeWidgetItem:
         item = QTreeWidgetItem([title])
         item.setData(0, Qt.UserRole, url)
         domain = urlparse(url).netloc or url
@@ -433,8 +444,72 @@ class RSSReader(QMainWindow):
             item.setIcon(0, icon)
             # store base icon for badge overlay
             item.setData(0, Qt.UserRole + 1, icon)
-        self.feedsTree.addTopLevelItem(item)
+        if parent is not None:
+            parent.addChild(item)
+        else:
+            self.feedsTree.addTopLevelItem(item)
         return item
+
+    def _iter_feed_items(self):
+        """Yield all feed leaf items regardless of grouping."""
+        try:
+            top_count = self.feedsTree.topLevelItemCount()
+        except Exception:
+            return
+        for i in range(top_count):
+            top = self.feedsTree.topLevelItem(i)
+            if top is None:
+                continue
+            url = top.data(0, Qt.UserRole)
+            if url:
+                yield top
+            else:
+                for j in range(top.childCount()):
+                    ch = top.child(j)
+                    if ch and ch.data(0, Qt.UserRole):
+                        yield ch
+
+    def _rebuild_feeds_tree(self) -> None:
+        """Rebuild the feeds tree with automatic grouping by domain
+        (only when multiple feeds share a domain)."""
+        try:
+            # Preserve current selection
+            cur_url = None
+            try:
+                cur_item = self.feedsTree.currentItem()
+                if cur_item:
+                    cur_url = cur_item.data(0, Qt.UserRole)
+            except Exception:
+                pass
+
+            self.feedsTree.clear()
+            # Build mapping: domain -> list of feeds
+            domain_map: Dict[str, List[Dict[str, Any]]] = {}
+            for f in self.feeds:
+                u = f.get('url') or ''
+                d = urlparse(u).netloc or u
+                domain_map.setdefault(d, []).append(f)
+
+            # Create items: group only when domain has >1 feeds
+            url_to_item: Dict[str, QTreeWidgetItem] = {}
+            for domain, flist in domain_map.items():
+                if len(flist) > 1:
+                    group_item = QTreeWidgetItem([domain])
+                    group_item.setFirstColumnSpanned(False)
+                    self.feedsTree.addTopLevelItem(group_item)
+                    for f in flist:
+                        it = self._add_feed_item(f.get('title') or f.get('url'), f.get('url'), parent=group_item)
+                        url_to_item[f.get('url')] = it
+                else:
+                    f = flist[0]
+                    it = self._add_feed_item(f.get('title') or f.get('url'), f.get('url'))
+                    url_to_item[f.get('url')] = it
+
+            # Restore selection if possible
+            if cur_url and cur_url in url_to_item:
+                self.feedsTree.setCurrentItem(url_to_item[cur_url])
+        except Exception:
+            pass
 
     # ----------------- Feed operations -----------------
     def add_feed(self) -> None:
@@ -457,10 +532,21 @@ class RSSReader(QMainWindow):
                     pass
             feed = {'title': title, 'url': url, 'entries': []}
             self.feeds.append(feed)
-            item = self._add_feed_item(title, url)
+            # Rebuild to place the new feed in its domain group if needed
+            self._rebuild_feeds_tree()
+            # Try to locate the new item
+            item = None
+            try:
+                for it in self._iter_feed_items():
+                    if it.data(0, Qt.UserRole) == url:
+                        item = it
+                        break
+            except Exception:
+                pass
             pass
             self.refresh_feed(url)
-            self.feedsTree.setCurrentItem(item)
+            if item:
+                self.feedsTree.setCurrentItem(item)
 
     def remove_selected_feed(self) -> None:
         item = self.feedsTree.currentItem()
@@ -475,12 +561,6 @@ class RSSReader(QMainWindow):
                 self.storage.remove_feed(url)
             except Exception:
                 pass
-        self.feeds = [f for f in self.feeds if f.get('url') != url]
-        idx = self.feedsTree.indexOfTopLevelItem(item)
-        self.feedsTree.takeTopLevelItem(idx)
-        self.articlesTree.clear()
-        self.webView.setHtml("<html><body><p>Feed removed</p></body></html>")
-        self._update_feed_unread_badges()
 
     # Context menu for feeds tree
     def _on_feeds_context_menu(self, pos) -> None:
@@ -488,14 +568,61 @@ class RSSReader(QMainWindow):
         if not item:
             return
         url = item.data(0, Qt.UserRole)
-        # Only feed items are supported for now
+        # Group node menu
         if not url:
+            domain = item.text(0) or ""
+            if not domain:
+                return
+            menu = QMenu(self)
+            actOmdbDomain = menu.addAction(f"Enable OMDb for this group ({domain})")
+            actOmdbDomain.setCheckable(True)
+            try:
+                curd = (self.group_settings or {}).get(domain, {})
+                actOmdbDomain.setChecked(bool(curd.get('omdb_enabled')))
+            except Exception:
+                pass
+            chosen = menu.exec_(self.feedsTree.viewport().mapToGlobal(pos))
+            if chosen == actOmdbDomain:
+                try:
+                    gs = dict(self.group_settings or {})
+                    dcfg = dict(gs.get(domain) or {})
+                    enabled = bool(actOmdbDomain.isChecked())
+                    dcfg['omdb_enabled'] = enabled
+                    gs[domain] = dcfg
+                    # mirror to each child feed URL
+                    for i in range(item.childCount()):
+                        ch = item.child(i)
+                        f_url = ch.data(0, Qt.UserRole)
+                        if not f_url:
+                            continue
+                        fcfg = dict(gs.get(f_url) or {})
+                        fcfg['omdb_enabled'] = enabled
+                        gs[f_url] = fcfg
+                    self.group_settings = gs
+                    if self.storage:
+                        try:
+                            self.storage.save_group_settings(self.group_settings)
+                        except Exception:
+                            pass
+                    # Refresh all child feeds' article views
+                    for i in range(item.childCount()):
+                        ch = item.child(i)
+                        f_url = ch.data(0, Qt.UserRole)
+                        if not f_url:
+                            continue
+                        fd = next((f for f in self.feeds if f.get('url') == f_url), None)
+                        ents = fd.get('entries', []) if fd else []
+                        self._populate_articles(f_url, ents)
+                        self._maybe_fetch_omdb_for_entries(f_url, ents)
+                except Exception:
+                    pass
             return
+
+        # Feed node menu
         menu = QMenu(self)
         actRename = menu.addAction("Rename")
         actEditUrl = menu.addAction("Edit URL")
         actRefresh = menu.addAction("Refresh")
-        # OMDb toggle
         actOmdb = menu.addAction("Enable OMDb (per feed)")
         actOmdb.setCheckable(True)
         try:
@@ -515,7 +642,6 @@ class RSSReader(QMainWindow):
         elif action == actRefresh:
             self.refresh_feed(url)
         elif action == actOmdb:
-            # Toggle OMDb setting for this feed URL
             try:
                 gs = dict(self.group_settings or {})
                 cfg = dict(gs.get(url) or {})
@@ -527,16 +653,13 @@ class RSSReader(QMainWindow):
                         self.storage.save_group_settings(self.group_settings)
                     except Exception:
                         pass
-                # refresh current view if this feed selected
-                cur_item = self.feedsTree.currentItem()
-                if cur_item and cur_item.data(0, Qt.UserRole) == url:
-                    feed = next((f for f in self.feeds if f.get('url') == url), None)
-                    entries = feed.get('entries', []) if feed else []
-                    self._populate_articles(url, entries)
+                feed = next((f for f in self.feeds if f.get('url') == url), None)
+                entries = feed.get('entries', []) if feed else []
+                self._populate_articles(url, entries)
+                self._maybe_fetch_omdb_for_entries(url, entries)
             except Exception:
                 pass
         elif action == actRemove:
-            # Temporarily set selection to the item to reuse existing removal flow
             prev = self.feedsTree.currentItem()
             try:
                 self.feedsTree.setCurrentItem(item)
@@ -619,6 +742,12 @@ class RSSReader(QMainWindow):
         if not item:
             return
         url = item.data(0, Qt.UserRole)
+        # If group node selected, move selection to first child feed
+        if not url and item.childCount() > 0:
+            ch = item.child(0)
+            if ch:
+                self.feedsTree.setCurrentItem(ch)
+                return
         feed = next((f for f in self.feeds if f.get('url') == url), None)
         entries = feed.get('entries', []) if feed else []
         if not entries and self.storage:
@@ -656,7 +785,12 @@ class RSSReader(QMainWindow):
         # Columns based on OMDb flag
         omdb_enabled = self._is_omdb_enabled(feed_url)
         if omdb_enabled:
-            cols = self.omdb_columns_by_feed.get(feed_url) or ["Title", "Date", "IMDb"]
+            # default OMDb columns when enabled
+            default_cols = ["Title", "Date", "IMDb"]
+            cols = self.omdb_columns_by_feed.get(feed_url) or default_cols
+            # ensure at least Title present
+            if "Title" not in cols:
+                cols = ["Title"] + [c for c in cols if c != "Title"]
             self.omdb_columns_by_feed[feed_url] = cols
         else:
             cols = ["Title", "Date"]
@@ -672,13 +806,19 @@ class RSSReader(QMainWindow):
             title = e.get('title') or e.get('link') or 'Untitled'
             dt = self.get_entry_date(e)
             date_str = dt.strftime('%Y-%m-%d %H:%M') if dt != datetime.min else ''
-            imdb = ''
+            # OMDb-derived fields (only if enabled)
+            imdb = year = director = actors = genre = ''
+            rec = {}
             if omdb_enabled and self.movie_cache:
                 try:
                     rec = self.movie_cache.get(title) or {}
-                    imdb = rec.get('imdbrating') or rec.get('imdb_rating') or rec.get('rating') or ''
+                    imdb = rec.get('imdbrating') or rec.get('imdb_rating') or rec.get('rating') or rec.get('imdbRating') or ''
+                    year = rec.get('year') or rec.get('Year') or ''
+                    director = rec.get('director') or rec.get('Director') or ''
+                    actors = rec.get('actors') or rec.get('Actors') or ''
+                    genre = rec.get('genre') or rec.get('Genre') or ''
                 except Exception:
-                    imdb = ''
+                    pass
             row: List[str] = []
             for c in cols:
                 if c == "Title":
@@ -687,6 +827,14 @@ class RSSReader(QMainWindow):
                     row.append(date_str)
                 elif c == "IMDb":
                     row.append(imdb)
+                elif c == "Year":
+                    row.append(year)
+                elif c == "Director":
+                    row.append(director)
+                elif c == "Actors":
+                    row.append(actors)
+                elif c == "Genre":
+                    row.append(genre)
                 else:
                     row.append('')
             item = ArticleTreeWidgetItem(row)
@@ -735,9 +883,13 @@ class RSSReader(QMainWindow):
 
     def _is_omdb_enabled(self, feed_url: str) -> bool:
         try:
-            # Store by feed_url in group_settings if available
+            # Prefer explicit per-feed setting; fall back to domain-level
             cfg = (self.group_settings or {}).get(feed_url)
-            return bool(cfg and cfg.get('omdb_enabled'))
+            if cfg is not None and 'omdb_enabled' in cfg:
+                return bool(cfg.get('omdb_enabled'))
+            domain = urlparse(feed_url).netloc or feed_url
+            dcfg = (self.group_settings or {}).get(domain)
+            return bool(dcfg and dcfg.get('omdb_enabled'))
         except Exception:
             return False
 
@@ -749,7 +901,8 @@ class RSSReader(QMainWindow):
             feed_url = item.data(0, Qt.UserRole)
             if not self._is_omdb_enabled(feed_url):
                 return
-            available = ["Title", "Date", "IMDb"]
+            # allow extended OMDb columns when enabled
+            available = ["Title", "Date", "IMDb", "Year", "Director", "Actors", "Genre"]
             current = self.omdb_columns_by_feed.get(feed_url) or available
             menu = QMenu(self)
             act_map = {}
@@ -1143,10 +1296,10 @@ class RSSReader(QMainWindow):
                     except Exception:
                         pass
                 self.feeds.append({'title': title, 'url': url, 'entries': []})
-                try:
-                    self._add_feed_item(title, url)
-                except Exception:
-                    pass
+            try:
+                self._rebuild_feeds_tree()
+            except Exception:
+                pass
         except Exception:
             self.warn("Error", "Failed to import OPML")
 
@@ -1166,11 +1319,11 @@ class RSSReader(QMainWindow):
                     except Exception:
                         pass
                 self.feeds.append({'title': title, 'url': url, 'entries': []})
-                try:
-                    self._add_feed_item(title, url)
-                except Exception:
-                    pass
                 added += 1
+            try:
+                self._rebuild_feeds_tree()
+            except Exception:
+                pass
             self._update_tray()
         except Exception:
             self.warn("Error", "Failed to import JSON")
@@ -1207,12 +1360,13 @@ class RSSReader(QMainWindow):
                 except Exception:
                     pass
             self.feeds.append({'title': title, 'url': url, 'entries': feed.get('entries', [])})
-            # UI tree might be absent in tests
-            try:
-                self._add_feed_item(title, url)
-            except Exception:
-                pass
             added += 1
+
+        # Rebuild tree once after import
+        try:
+            self._rebuild_feeds_tree()
+        except Exception:
+            pass
 
         if col_widths and isinstance(col_widths, dict):
             try:
@@ -1291,9 +1445,7 @@ class RSSReader(QMainWindow):
 
     def _update_feed_unread_badges(self) -> None:
         try:
-            count = self.feedsTree.topLevelItemCount()
-            for i in range(count):
-                item = self.feedsTree.topLevelItem(i)
+            for item in self._iter_feed_items():
                 self._apply_feed_unread_badge(item)
         except Exception:
             pass
