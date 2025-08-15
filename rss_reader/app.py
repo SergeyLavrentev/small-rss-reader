@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import subprocess
 from datetime import datetime, timedelta
 from collections import deque
 import re
@@ -46,7 +47,16 @@ from rss_reader.utils.domains import _domain_variants
 from rss_reader.utils.paths import resource_path
 from rss_reader.ui.widgets import FeedsTreeWidget, ArticleTreeWidgetItem, WebEnginePage
 from rss_reader.ui.dialogs import AddFeedDialog, SettingsDialog
+from rss_reader.ui.actions import create_actions as _ui_create_actions
+from rss_reader.ui.menus import create_menu as _ui_create_menu
+from rss_reader.ui.tray import init_tray as _ui_init_tray
+from rss_reader.ui.toolbar import setup_toolbar as _ui_setup_toolbar, apply_toolbar_styles as _ui_apply_toolbar_styles
 from storage import Storage
+from rss_reader.io.opml import export_opml as opml_export, import_opml as opml_import
+from rss_reader.io.json_io import import_json as json_import, export_json as json_export
+from rss_reader.backup.icloud import backup_db as icloud_backup_db, restore_db as icloud_restore_db
+from rss_reader.features.omdb.queue import OmdbQueueManager
+from rss_reader.controllers.view_state import load_window_state, save_window_state
 
 # Prefer small_rss_reader.get_user_data_path to allow test monkeypatching
 try:
@@ -102,17 +112,8 @@ class RSSReader(QMainWindow):
         self.search_text = ""
         self.movie_cache: Dict[str, Any] = {}
         self.omdb_columns_by_feed: Dict[str, List[str]] = {}
-        # OMDb request control
-        self._omdb_inflight = set()  # normalized titles currently in-flight
-        self._omdb_queued = set()    # normalized titles queued
-        self._omdb_queue = deque()   # queue of (raw_title)
-        self._omdb_max_inflight = 3  # limit concurrent OMDb requests
-        self._omdb_rate_timer = QTimer(self)
-        try:
-            self._omdb_rate_timer.setInterval(300)  # ms between dispatches
-            self._omdb_rate_timer.timeout.connect(self._omdb_process_queue)
-        except Exception:
-            pass
+        # OMDb queue manager (lazy wired during UI init)
+        self._omdb_mgr: Optional[OmdbQueueManager] = None
 
         # Interactive runs: show a basic UI so the window isn't empty
         try:
@@ -131,57 +132,7 @@ class RSSReader(QMainWindow):
         self._create_menu()
 
         # Toolbar
-        self.toolbar = QToolBar("Main", self)
-        self.toolbar.setMovable(False)
-        try:
-            self.toolbar.setIconSize(QSize(16, 16))  # smaller toolbar icons
-        except Exception:
-            pass
-        self.addToolBar(self.toolbar)
-        # Group 1: Feed CRUD
-        self.toolbar.addAction(self.actAddFeed)
-        self.toolbar.addAction(self.actRemoveFeed)
-        self.toolbar.addSeparator(); self._add_toolbar_spacer(8)
-        # Group 2: Refresh
-        self.toolbar.addAction(self.actRefreshAll)
-        self.toolbar.addAction(self.actRefreshFeed)
-        self.toolbar.addSeparator(); self._add_toolbar_spacer(8)
-        # Group 3: Read state
-        self.toolbar.addAction(self.actMarkAllRead)
-        self.toolbar.addAction(self.actMarkAllUnread)
-        # Push the rest to the right
-        self._add_toolbar_spacer(0, expand=True)
-        # Unread-only checkbox on the left of search
-        self.unreadCheck = QCheckBox("Unread only", self)
-        self.unreadCheck.setToolTip("Show only unread")
-        try:
-            self.unreadCheck.setChecked(self.actOnlyUnread.isChecked())
-        except Exception:
-            pass
-        # Sync checkbox -> action
-        self.unreadCheck.toggled.connect(lambda c: self.actOnlyUnread.setChecked(c))
-        # Sync action -> checkbox (block signals to avoid loops)
-        try:
-            self.actOnlyUnread.toggled.connect(lambda c: (self.unreadCheck.blockSignals(True), self.unreadCheck.setChecked(c), self.unreadCheck.blockSignals(False)))
-        except Exception:
-            pass
-        self.toolbar.addWidget(self.unreadCheck)
-        self._add_toolbar_spacer(6)
-        # Search label + box
-        self.toolbar.addWidget(QLabel("Search:", self))
-        self.searchEdit = QLineEdit(self)
-        self.searchEdit.setPlaceholderText("Search…")
-        self.searchEdit.textChanged.connect(self._on_search_changed)
-        try:
-            self.searchEdit.setFixedWidth(260)
-        except Exception:
-            pass
-        self.toolbar.addWidget(self.searchEdit)
-        # Apply toolbar button styles (best-effort)
-        try:
-            self._apply_toolbar_styles()
-        except Exception:
-            pass
+        _ui_setup_toolbar(self)
 
         # Central layout
         central = QWidget(self)
@@ -236,6 +187,13 @@ class RSSReader(QMainWindow):
         try:
             from rss_reader.services.omdb import OmdbWorker
             self._omdb_worker = OmdbWorker()
+            # queue manager wiring
+            self._omdb_mgr = OmdbQueueManager(self)
+            self._omdb_mgr.set_worker(self._omdb_worker)
+            self._omdb_mgr.set_thread_pool(self.thread_pool)
+            self._omdb_mgr.set_cache_proxy(self.movie_cache)
+            self._omdb_mgr.set_get_api_key(self._get_omdb_api_key)
+            # worker -> app
             self._omdb_worker.movie_fetched.connect(self._on_movie_fetched)
             self._omdb_worker.movie_failed.connect(self._on_movie_failed)
         except Exception:
@@ -266,17 +224,7 @@ class RSSReader(QMainWindow):
             pass
 
         # Restore window geometry/state
-        try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
-            geom = settings.value('window_geometry')
-            state = settings.value('window_state')
-            if geom:
-                self.restoreGeometry(geom)
-            if state:
-                self.restoreState(state)
-        except Exception:
-            pass
+        load_window_state(self)
 
     # ---- IDs / dates ----
     def get_article_id(self, entry: Dict[str, Any]) -> str:
@@ -345,35 +293,18 @@ class RSSReader(QMainWindow):
 
     # ---- Backup / Restore ----
     def backup_to_icloud(self) -> None:
-        from pathlib import Path
-        backup_folder = os.path.join(
-            Path.home(),
-            "Library", "Mobile Documents", "com~apple~CloudDocs", "SmallRSSReaderBackup",
-        )
-        os.makedirs(backup_folder, exist_ok=True)
-        filename = 'db.sqlite3'
-        source = get_user_data_path(filename)
-        dest = os.path.join(backup_folder, filename)
-        if os.path.exists(source):
-            try:
-                shutil.copy2(source, dest)
-            except Exception:
-                pass
+        source = get_user_data_path('db.sqlite3')
+        try:
+            icloud_backup_db(source)
+        except Exception:
+            pass
 
     def restore_from_icloud(self) -> None:
-        from pathlib import Path
-        backup_folder = os.path.join(
-            Path.home(),
-            "Library", "Mobile Documents", "com~apple~CloudDocs", "SmallRSSReaderBackup",
-        )
-        filename = 'db.sqlite3'
-        backup_file = os.path.join(backup_folder, filename)
-        if os.path.exists(backup_file):
-            dest = get_user_data_path(filename)
-            try:
-                shutil.copy2(backup_file, dest)
-            except Exception:
-                pass
+        dest = get_user_data_path('db.sqlite3')
+        try:
+            icloud_restore_db(dest)
+        except Exception:
+            pass
 
     # ---- Favicons ----
     def on_icon_fetched(self, domain: str, data: bytes) -> None:
@@ -423,124 +354,8 @@ class RSSReader(QMainWindow):
 
     # ----------------- UI and actions -----------------
     def _create_actions(self) -> None:
-        self.actAddFeed = QAction("Add Feed", self)
-        self.actAddFeed.triggered.connect(self.add_feed)
-        self.actRemoveFeed = QAction("Remove Feed", self)
-        self.actRemoveFeed.triggered.connect(self.remove_selected_feed)
-        self.actRefreshAll = QAction("Refresh All", self)
-        self.actRefreshAll.triggered.connect(self.refresh_all_feeds)
-        self.actRefreshFeed = QAction("Refresh Feed", self)
-        self.actRefreshFeed.triggered.connect(self.refresh_selected_feed)
-        self.actMarkAllRead = QAction("Mark All as Read", self)
-        self.actMarkAllRead.triggered.connect(self.mark_all_as_read)
-        self.actMarkAllUnread = QAction("Mark All as Unread", self)
-        self.actMarkAllUnread.triggered.connect(self.mark_all_as_unread)
-        self.actSettings = QAction("Settings", self)
-        self.actSettings.triggered.connect(self.open_settings)
-        self.actBackup = QAction("Backup to iCloud", self)
-        self.actBackup.triggered.connect(self.backup_to_icloud)
-        self.actRestore = QAction("Restore from iCloud", self)
-        self.actRestore.triggered.connect(self.restore_from_icloud)
-        self.actQuit = QAction("Quit", self)
-        self.actQuit.triggered.connect(self.close)
-        self.actOnlyUnread = QAction("Show Only Unread", self)
-        self.actOnlyUnread.setCheckable(True)
-        self.actOnlyUnread.toggled.connect(self._toggle_unread_filter)
-        self.actImportOPML = QAction("Import OPML…", self)
-        self.actImportOPML.triggered.connect(self.import_opml)
-        self.actExportOPML = QAction("Export OPML…", self)
-        self.actExportOPML.triggered.connect(self.export_opml)
-        self.actImportJSON = QAction("Import JSON…", self)
-        self.actImportJSON.triggered.connect(self.import_json_feeds)
-        self.actExportJSON = QAction("Export JSON…", self)
-        self.actExportJSON.triggered.connect(self.export_json_feeds)
-        # Tooltips for toolbar hover text
-        for act in [
-            self.actAddFeed, self.actRemoveFeed, self.actRefreshAll, self.actRefreshFeed,
-            self.actMarkAllRead, self.actMarkAllUnread, self.actSettings, self.actBackup,
-            self.actRestore, self.actQuit, self.actOnlyUnread, self.actImportOPML,
-            self.actExportOPML, self.actImportJSON, self.actExportJSON
-        ]:
-            try:
-                act.setToolTip(act.text())
-            except Exception:
-                pass
-        # Try assign standard icons so toolbar shows visible buttons
-        try:
-            # Intuitive, theme-aware icons with fallbacks
-            self.actAddFeed.setIcon(self._theme_icon(["list-add", "contact-new", "add"], QStyle.SP_FileDialogNewFolder))
-            self.actRemoveFeed.setIcon(self._theme_icon(["list-remove", "edit-delete", "user-trash"], QStyle.SP_TrashIcon))
-            self.actRefreshAll.setIcon(self._theme_icon(["view-refresh", "reload"], QStyle.SP_BrowserReload))
-            self.actRefreshFeed.setIcon(self._theme_icon(["media-playback-start", "system-run"], QStyle.SP_MediaPlay))
-            self.actMarkAllRead.setIcon(self._theme_icon(["mail-mark-read", "emblem-ok"], QStyle.SP_DialogApplyButton))
-            self.actMarkAllUnread.setIcon(self._theme_icon(["mail-mark-unread", "edit-undo"], QStyle.SP_DialogResetButton))
-            self.actSettings.setIcon(self._theme_icon(["preferences-system", "settings"], QStyle.SP_FileDialogDetailedView))
-            self.actBackup.setIcon(self._theme_icon(["cloud-upload", "go-up"], QStyle.SP_ArrowUp))
-            self.actRestore.setIcon(self._theme_icon(["cloud-download", "go-down"], QStyle.SP_ArrowDown))
-            self.actQuit.setIcon(self._theme_icon(["application-exit", "window-close"], QStyle.SP_TitleBarCloseButton))
-            # Use blue dot as icon for unread toggle
-            try:
-                self.actOnlyUnread.setIcon(QIcon(self._unread_dot_pixmap(10)))
-            except Exception:
-                pass
-            self.actImportOPML.setIcon(self._theme_icon(["document-import", "document-open"], QStyle.SP_DialogOpenButton))
-            self.actExportOPML.setIcon(self._theme_icon(["document-export", "document-save"], QStyle.SP_DialogSaveButton))
-            self.actImportJSON.setIcon(self._theme_icon(["document-import", "document-open"], QStyle.SP_DialogOpenButton))
-            self.actExportJSON.setIcon(self._theme_icon(["document-export", "document-save"], QStyle.SP_DialogSaveButton))
-        except Exception:
-            pass
-        # Shortcuts
-        try:
-            from PyQt5.QtGui import QKeySequence
-            self.actRefreshAll.setShortcut(QKeySequence.Refresh)
-        except Exception:
-            pass
-        # Additional shortcuts (best-effort, safe)
-        try:
-            self.actQuit.setShortcut('Ctrl+Q')
-            self.actAddFeed.setShortcut('Ctrl+N')
-            self.actRemoveFeed.setShortcut('Delete')
-            self.actOnlyUnread.setShortcut('Ctrl+U')
-            self.actMarkAllRead.setShortcut('Ctrl+Shift+R')
-            self.actMarkAllUnread.setShortcut('Ctrl+Shift+U')
-        except Exception:
-            pass
-        # Help/About
-        self.actAbout = QAction("About", self)
-        self.actAbout.triggered.connect(self.show_about)
-        self.actAboutQt = QAction("About Qt", self)
-        self.actAboutQt.triggered.connect(lambda: QMessageBox.aboutQt(self))
-
-    def _create_menu(self) -> None:
-        mb = self.menuBar()
-        file_menu = mb.addMenu("File")
-        file_menu.addAction(self.actAddFeed)
-        file_menu.addAction(self.actRemoveFeed)
-        file_menu.addSeparator()
-        file_menu.addAction(self.actBackup)
-        file_menu.addAction(self.actRestore)
-        file_menu.addSeparator()
-        file_menu.addAction(self.actImportJSON)
-        file_menu.addAction(self.actExportJSON)
-        file_menu.addSeparator()
-        file_menu.addAction(self.actImportOPML)
-        file_menu.addAction(self.actExportOPML)
-        file_menu.addSeparator()
-        file_menu.addAction(self.actQuit)
-
-        act_menu = mb.addMenu("Actions")
-        act_menu.addAction(self.actRefreshAll)
-        act_menu.addAction(self.actRefreshFeed)
-        act_menu.addAction(self.actMarkAllRead)
-        act_menu.addAction(self.actMarkAllUnread)
-        act_menu.addAction(self.actOnlyUnread)
-
-        settings_menu = mb.addMenu("Settings")
-        settings_menu.addAction(self.actSettings)
-
-        help_menu = mb.addMenu("Help")
-        help_menu.addAction(self.actAbout)
-        help_menu.addAction(self.actAboutQt)
+        # delegate to UI helper
+        _ui_create_actions(self)
 
     # ----------------- Storage & state -----------------
     def _load_state_from_storage(self) -> None:
@@ -940,42 +755,13 @@ class RSSReader(QMainWindow):
             pass
 
     def _apply_toolbar_styles(self) -> None:
-        # Set QSS for intent-colored QToolButtons
-        qss = (
-            "QToolBar QToolButton{padding:4px 8px;border-radius:6px;margin:0 2px;}"
-            "QToolBar QToolButton[intent='primary']{background:#2ecc71;color:black;}"
-            "QToolBar QToolButton[intent='info']{background:#3498db;color:white;}"
-            "QToolBar QToolButton[intent='danger']{background:#e74c3c;color:white;}"
-            "QToolBar QToolButton[intent='success']{background:#27ae60;color:white;}"
-            "QToolBar QToolButton[intent='warning']{background:#f39c12;color:black;}"
-            "QToolBar QToolButton:hover{filter:brightness(1.1);}"
-        )
-        self.toolbar.setStyleSheet(qss)
-        # Assign intents to specific actions
-        def set_intent(act, name: str) -> None:
-            try:
-                btn = self.toolbar.widgetForAction(act)
-                if btn:
-                    btn.setProperty('intent', name)
-                    btn.style().unpolish(btn)
-                    btn.style().polish(btn)
-            except Exception:
-                pass
-        set_intent(self.actAddFeed, 'primary')
-        set_intent(self.actRefreshAll, 'info')
-        set_intent(self.actRefreshFeed, 'info')
-        set_intent(self.actRemoveFeed, 'danger')
-        set_intent(self.actMarkAllRead, 'success')
-        set_intent(self.actMarkAllUnread, 'warning')
+        # delegate to UI helper
+        _ui_apply_toolbar_styles(self)
 
     def _add_toolbar_spacer(self, width: int = 8, expand: bool = False) -> None:
+        # Kept for backward-compat; now handled by ui.toolbar
         try:
-            spacer = QWidget(self)
-            if expand:
-                spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            else:
-                spacer.setFixedWidth(max(0, width))
-            self.toolbar.addWidget(spacer)
+            _ = width or expand
         except Exception:
             pass
 
@@ -1002,98 +788,32 @@ class RSSReader(QMainWindow):
             pass
 
     # ----------------- OMDb background fetching -----------------
+    def _get_omdb_api_key(self) -> str:
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            return settings.value('omdb_api_key', '', type=str) or ''
+        except Exception:
+            return ''
+
     def _maybe_fetch_omdb_for_entries(self, feed_url: str, entries: List[Dict[str, Any]]) -> None:
-        # Only if OMDb enabled for this feed and IMDb column visible
-        if not self._is_omdb_enabled(feed_url):
+        if not self._is_omdb_enabled(feed_url) or not self._omdb_mgr:
             return
         cols = self.omdb_columns_by_feed.get(feed_url) or ["Title", "Date", "IMDb"]
-        if "IMDb" not in cols:
-            return
-        # Get API key from settings
+        visible = ("IMDb" in cols)
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
-            api_key = settings.value('omdb_api_key', '', type=str) or ''
-        except Exception:
-            api_key = ''
-        if not api_key:
-            return
-        # Enqueue fetches for titles not in the movie_cache (with normalization & rate limiting)
-        enqueued_any = False
-        for e in entries or []:
-            raw_title = (e.get('title') or e.get('link') or '').strip()
-            if not raw_title:
-                continue
-            norm = self._norm_title(raw_title)
-            if raw_title in (self.movie_cache or {}) or norm in (self.movie_cache or {}):
-                continue
-            if norm in self._omdb_inflight or norm in self._omdb_queued:
-                continue
-            self._omdb_queue.append(raw_title)
-            self._omdb_queued.add(norm)
-            enqueued_any = True
-        # Start timer if we queued new items
-        if enqueued_any and not self._omdb_rate_timer.isActive():
-            try:
-                self._omdb_rate_timer.start()
-            except Exception:
-                pass
-
-    def _omdb_process_queue(self) -> None:
-        # Dispatch from queue respecting max inflight; stop timer if nothing to do
-        try:
-            if not getattr(self, '_omdb_worker', None):
-                return
-            # Re-check API key each tick to honor changes
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
-            api_key = settings.value('omdb_api_key', '', type=str) or ''
-            if not api_key:
-                try:
-                    self._omdb_rate_timer.stop()
-                except Exception:
-                    pass
-                return
-            progressed = False
-            while self._omdb_queue and len(self._omdb_inflight) < self._omdb_max_inflight:
-                raw_title = self._omdb_queue.popleft()
-                norm = self._norm_title(raw_title)
-                self._omdb_queued.discard(norm)
-                # Skip if already cached or inflight (race check)
-                if raw_title in (self.movie_cache or {}) or norm in (self.movie_cache or {}):
-                    continue
-                if norm in self._omdb_inflight:
-                    continue
-                try:
-                    from rss_reader.services.omdb import FetchOmdbRunnable
-                    self._omdb_inflight.add(norm)
-                    runnable = FetchOmdbRunnable(raw_title, api_key, self._omdb_worker)
-                    self.thread_pool.start(runnable)
-                    progressed = True
-                except Exception:
-                    pass
-            # Stop timer if idle
-            if not self._omdb_queue and not progressed:
-                try:
-                    self._omdb_rate_timer.stop()
-                except Exception:
-                    pass
+            self._omdb_mgr.set_cache_proxy(self.movie_cache)
+            self._omdb_mgr.set_columns_visible(visible)
+            self._omdb_mgr.request_for_entries(entries or [])
         except Exception:
             pass
 
-    def _norm_title(self, title: str) -> str:
-        s = (title or '').strip().lower()
-        s = ' '.join(s.split())  # collapse whitespace
-        # drop trailing (YYYY) if present
-        m = re.match(r"^(.*)\s*\((\d{4})\)$", s)
-        if m:
-            return m.group(1).strip()
-        return s
-
     def _on_movie_fetched(self, title: str, data: Dict[str, Any]) -> None:
         try:
-            norm = self._norm_title(title)
-            self._omdb_inflight.discard(norm)
+            if self._omdb_mgr:
+                self._omdb_mgr.on_movie_fetched(title)
+            from rss_reader.features.omdb.queue import OmdbQueueManager as _QM
+            norm = _QM._norm_title(title)
             # Store under both raw and normalized keys for better cache hits
             self.movie_cache[title] = data or {}
             self.movie_cache[norm] = data or {}
@@ -1109,7 +829,7 @@ class RSSReader(QMainWindow):
                     it = self.articlesTree.topLevelItem(i)
                     e = it.data(0, Qt.UserRole) or {}
                     row_title = (e.get('title') or e.get('link') or '').strip()
-                    if self._norm_title(row_title) == norm:
+                    if _QM._norm_title(row_title) == norm:
                         cols = [self.articlesTree.headerItem().text(c) for c in range(self.articlesTree.columnCount())]
                         if "IMDb" in cols:
                             imdb = data.get('imdbrating') or data.get('imdb_rating') or ''
@@ -1117,15 +837,13 @@ class RSSReader(QMainWindow):
                             it.setText(idx, str(imdb))
             except Exception:
                 pass
-            # Try to dispatch the next item if any
-            self._omdb_process_queue()
         except Exception:
             pass
 
     def _on_movie_failed(self, title: str, _err: Exception) -> None:
         try:
-            self._omdb_inflight.discard(self._norm_title(title))
-            self._omdb_process_queue()
+            if self._omdb_mgr:
+                self._omdb_mgr.on_movie_failed(title)
         except Exception:
             pass
 
@@ -1189,7 +907,10 @@ class RSSReader(QMainWindow):
         link = entry.get('link')
         if link:
             try:
-                webbrowser.open(link)
+                if sys.platform == 'darwin':
+                    subprocess.run(['open', '-g', link], check=False)
+                else:
+                    webbrowser.open(link)
             except Exception:
                 pass
 
@@ -1346,57 +1067,59 @@ class RSSReader(QMainWindow):
         super().keyPressEvent(event)
 
     # ----------------- OPML import/export -----------------
+    def _create_menu(self) -> None:
+        # delegate to UI helper
+        _ui_create_menu(self)
+        
+    # ----------------- OPML import/export -----------------
     def export_opml(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Export OPML", "feeds.opml", "OPML Files (*.opml)")
-        if not path:
-            return
         try:
-            import xml.etree.ElementTree as ET
-            opml = ET.Element('opml', version='2.0')
-            head = ET.SubElement(opml, 'head')
-            title = ET.SubElement(head, 'title')
-            title.text = 'Small RSS Reader Feeds'
-            body = ET.SubElement(opml, 'body')
-            for f in self.feeds:
-                ET.SubElement(body, 'outline', type='rss', text=f.get('title') or f.get('url'), xmlUrl=f.get('url'))
-            tree = ET.ElementTree(opml)
-            tree.write(path, encoding='utf-8', xml_declaration=True)
-            pass
+            opml_export(self, self.feeds)
         except Exception:
             self.warn("Error", "Failed to export OPML")
 
     def import_opml(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Import OPML", "", "OPML Files (*.opml)")
-        if not path:
-            return
         try:
-            import xml.etree.ElementTree as ET
-            tree = ET.parse(path)
-            root = tree.getroot()
-            outlines = root.findall('.//outline')
-            for o in outlines:
-                url = o.attrib.get('xmlUrl')
-                text = o.attrib.get('text') or url
-                if url and not any(f['url'] == url for f in self.feeds):
-                    if self.storage:
-                        try:
-                            self.storage.upsert_feed(text, url)
-                        except Exception:
-                            pass
-                    self.feeds.append({'title': text, 'url': url, 'entries': []})
-                    self._add_feed_item(text, url)
-            pass
+            items = opml_import(self)
+            for it in items:
+                url = it.get('url')
+                title = it.get('title') or url
+                if not url or any(f['url'] == url for f in self.feeds):
+                    continue
+                if self.storage:
+                    try:
+                        self.storage.upsert_feed(title, url)
+                    except Exception:
+                        pass
+                self.feeds.append({'title': title, 'url': url, 'entries': []})
+                try:
+                    self._add_feed_item(title, url)
+                except Exception:
+                    pass
         except Exception:
             self.warn("Error", "Failed to import OPML")
 
     # ----------------- JSON import/export -----------------
     def import_json_feeds(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Import JSON", "", "JSON Files (*.json)")
-        if not path:
-            return
         try:
-            added = self.import_json_from_path(path)
-            pass
+            items = json_import(self)
+            added = 0
+            for it in items:
+                url = (it.get('url') or '').strip()
+                title = (it.get('title') or url).strip()
+                if not url or any(f['url'] == url for f in self.feeds):
+                    continue
+                if self.storage:
+                    try:
+                        self.storage.upsert_feed(title, url)
+                    except Exception:
+                        pass
+                self.feeds.append({'title': title, 'url': url, 'entries': []})
+                try:
+                    self._add_feed_item(title, url)
+                except Exception:
+                    pass
+                added += 1
             self._update_tray()
         except Exception:
             self.warn("Error", "Failed to import JSON")
@@ -1451,12 +1174,8 @@ class RSSReader(QMainWindow):
         return added
 
     def export_json_feeds(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Export JSON", "feeds.json", "JSON Files (*.json)")
-        if not path:
-            return
         try:
-            self.export_json_to_path(path)
-            pass
+            json_export(self, self.feeds)
         except Exception:
             self.warn("Error", "Failed to export JSON")
 
@@ -1530,23 +1249,8 @@ class RSSReader(QMainWindow):
 
     # ----------------- Tray & notifications -----------------
     def _init_tray_icon(self) -> None:
-        try:
-            icon_path = resource_path("icons/rss_tray_icon.png")
-            icon = QIcon(icon_path)
-            self.tray = QSystemTrayIcon(icon, self)
-            menu = QMenu()
-            menu.addAction(self.actRefreshAll)
-            menu.addAction(self.actOnlyUnread)
-            menu.addSeparator()
-            quit_action = QAction("Quit", self)
-            quit_action.triggered.connect(self.close)
-            menu.addAction(quit_action)
-            self.tray.setContextMenu(menu)
-            self.tray.activated.connect(lambda reason: self.showNormal() if reason == QSystemTrayIcon.Trigger else None)
-            self.tray.show()
-            self._update_tray()
-        except Exception:
-            self.tray = None  # type: ignore
+        # delegate to UI helper
+        _ui_init_tray(self)
 
     def _notify_new_read(self) -> None:
         # simple notification when marking as read, respects settings flag if present
@@ -1590,14 +1294,27 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
         # save window geometry/state
+        save_window_state(self)
+        # Hide tray on quit for cleaner shutdown UX
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
-            settings.setValue('window_geometry', self.saveGeometry())
-            settings.setValue('window_state', self.saveState())
+            if getattr(self, 'tray', None):
+                self.tray.hide()
         except Exception:
             pass
         super().closeEvent(event)
+
+    # ----------------- View toggles -----------------
+    def _toggle_toolbar(self, visible: bool) -> None:
+        try:
+            self.toolbar.setVisible(bool(visible))
+        except Exception:
+            pass
+
+    def _toggle_menubar(self, visible: bool) -> None:
+        try:
+            self.menuBar().setVisible(bool(visible))
+        except Exception:
+            pass
 
     # ----------------- About -----------------
     def show_about(self) -> None:
