@@ -32,14 +32,33 @@ def setup_toolbar(app: Any) -> None:
     app.toolbar.addAction(app.actMarkAllRead)
     app.toolbar.addAction(app.actMarkAllUnread)
 
+    # Small visual gap before the center group
+    app.toolbar.addSeparator(); _add_toolbar_spacer(app, 6)
     # Center group: Unread checkbox + Search field (immediately after last button)
     center = QWidget(app)
+    # Ensure no margins/padding inside the center group so checkbox and search are flush
+    try:
+        center.setStyleSheet(
+            "*{margin:0;padding:0;}"
+            "QCheckBox{margin:0;padding:0;}"
+            "QCheckBox::indicator{margin:0;padding:0;}"
+            "QLineEdit{margin:0;}"
+        )
+    except Exception:
+        pass
     hl = QHBoxLayout(center)
     hl.setContentsMargins(0, 0, 0, 0)
-    hl.setSpacing(6)
+    # Small gap between checkbox text and search field
+    hl.setSpacing(20)
 
-    app.unreadCheck = QCheckBox("Unread only", center)
+    # Unread checkbox (single widget with text, like in main)
+    app.unreadCheck = QCheckBox("Show only unread", center)
     app.unreadCheck.setToolTip("Show only unread")
+    try:
+        app.unreadCheck.setContentsMargins(0, 0, 0, 0)
+        app.unreadCheck.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+    except Exception:
+        pass
     try:
         app.unreadCheck.setChecked(app.actOnlyUnread.isChecked())
     except Exception:
@@ -49,11 +68,16 @@ def setup_toolbar(app: Any) -> None:
         app.actOnlyUnread.toggled.connect(lambda c: (app.unreadCheck.blockSignals(True), app.unreadCheck.setChecked(c), app.unreadCheck.blockSignals(False)))
     except Exception:
         pass
-    hl.addWidget(app.unreadCheck)
+    hl.addWidget(app.unreadCheck, 0)
 
     app.searchEdit = QLineEdit(center)
     app.searchEdit.setPlaceholderText("Search…")
     app.searchEdit.textChanged.connect(app._on_search_changed)
+    try:
+        app.searchEdit.setContentsMargins(0, 0, 0, 0)
+        app.searchEdit.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+    except Exception:
+        pass
     try:
         app.searchEdit.setFixedWidth(280)
     except Exception:
