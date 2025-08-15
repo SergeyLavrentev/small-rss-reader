@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 import webbrowser
 
-from PyQt5.QtGui import QIcon, QPixmap, QFont, QCloseEvent
+from PyQt5.QtGui import QIcon, QPixmap, QFont, QCloseEvent, QPainter, QColor
 from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -27,8 +27,15 @@ from PyQt5.QtWidgets import (
     QAction,
     QFileDialog,
     QMessageBox,
+    QInputDialog,
+    QToolBar,
+    QLineEdit,
+    QStyle,
+    QCheckBox,
+    QLabel,
+    QSizePolicy,
 )
-from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer
+from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
 
@@ -76,12 +83,12 @@ class RSSReader(QMainWindow):
         super().__init__()
         # Minimal state used by tests
         self.max_days = 30
-        self.feeds = []
+        self.feeds: List[Dict[str, Any]] = []
         self.read_articles = set()
-        self.column_widths = {}
-        self.group_settings = {}
-        self.group_name_mapping = {}
-        self.favicon_cache = {}
+        self.column_widths: Dict[str, List[int]] = {}
+        self.group_settings: Dict[str, Dict[str, bool]] = {}
+        self.group_name_mapping: Dict[str, str] = {}
+        self.favicon_cache: Dict[str, QIcon] = {}
         self.data_changed = False
         # Optional storage (created only in interactive runs to keep tests lightweight)
         self.storage = None
@@ -90,6 +97,9 @@ class RSSReader(QMainWindow):
         self.current_font_size = 12
         self.api_key = ""
         self.show_unread_only = False
+        self.search_text = ""
+        self.movie_cache: Dict[str, Any] = {}
+        self.omdb_columns_by_feed: Dict[str, List[str]] = {}
 
         # Interactive runs: show a basic UI so the window isn't empty
         try:
@@ -102,12 +112,63 @@ class RSSReader(QMainWindow):
     # ---- Full UI for interactive runs ----
     def _init_full_ui(self) -> None:
         self.setWindowTitle("Small RSS Reader")
-        self.setWindowIcon(QIcon(resource_path("icons/rss_icon.icns")))
-        self.resize(1200, 800)
 
-        # Menu/actions
+        # Actions and menu
         self._create_actions()
         self._create_menu()
+
+        # Toolbar
+        self.toolbar = QToolBar("Main", self)
+        self.toolbar.setMovable(False)
+        try:
+            self.toolbar.setIconSize(QSize(16, 16))  # smaller toolbar icons
+        except Exception:
+            pass
+        self.addToolBar(self.toolbar)
+        # Group 1: Feed CRUD
+        self.toolbar.addAction(self.actAddFeed)
+        self.toolbar.addAction(self.actRemoveFeed)
+        self.toolbar.addSeparator(); self._add_toolbar_spacer(8)
+        # Group 2: Refresh
+        self.toolbar.addAction(self.actRefreshAll)
+        self.toolbar.addAction(self.actRefreshFeed)
+        self.toolbar.addSeparator(); self._add_toolbar_spacer(8)
+        # Group 3: Read state
+        self.toolbar.addAction(self.actMarkAllRead)
+        self.toolbar.addAction(self.actMarkAllUnread)
+        # Push the rest to the right
+        self._add_toolbar_spacer(0, expand=True)
+        # Unread-only checkbox on the left of search
+        self.unreadCheck = QCheckBox("Unread only", self)
+        self.unreadCheck.setToolTip("Show only unread")
+        try:
+            self.unreadCheck.setChecked(self.actOnlyUnread.isChecked())
+        except Exception:
+            pass
+        # Sync checkbox -> action
+        self.unreadCheck.toggled.connect(lambda c: self.actOnlyUnread.setChecked(c))
+        # Sync action -> checkbox (block signals to avoid loops)
+        try:
+            self.actOnlyUnread.toggled.connect(lambda c: (self.unreadCheck.blockSignals(True), self.unreadCheck.setChecked(c), self.unreadCheck.blockSignals(False)))
+        except Exception:
+            pass
+        self.toolbar.addWidget(self.unreadCheck)
+        self._add_toolbar_spacer(6)
+        # Search label + box
+        self.toolbar.addWidget(QLabel("Search:", self))
+        self.searchEdit = QLineEdit(self)
+        self.searchEdit.setPlaceholderText("Search…")
+        self.searchEdit.textChanged.connect(self._on_search_changed)
+        try:
+            self.searchEdit.setFixedWidth(260)
+        except Exception:
+            pass
+        self.toolbar.addWidget(self.searchEdit)
+        # Apply toolbar button styles (best-effort)
+        try:
+            self._apply_toolbar_styles()
+        except Exception:
+            pass
 
         # Central layout
         central = QWidget(self)
@@ -121,6 +182,8 @@ class RSSReader(QMainWindow):
         self.feedsTree.setHeaderHidden(True)
         self.feedsTree.setObjectName("feedsTree")
         self.feedsTree.itemSelectionChanged.connect(self._on_feed_selected)
+        self.feedsTree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.feedsTree.customContextMenuRequested.connect(self._on_feeds_context_menu)
 
         # Center: articles list
         self.articlesTree = QTreeWidget(splitter)
@@ -134,19 +197,25 @@ class RSSReader(QMainWindow):
         self.articlesTree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.articlesTree.customContextMenuRequested.connect(self._on_articles_context_menu)
         self.articlesTree.header().sectionResized.connect(self._on_section_resized)
+        # Header menu for column toggling when OMDb is enabled
+        try:
+            self.articlesTree.header().setContextMenuPolicy(Qt.CustomContextMenu)
+            self.articlesTree.header().customContextMenuRequested.connect(self._on_articles_header_menu)
+        except Exception:
+            pass
 
         # Right: article content
         self.webView = QWebEngineView(splitter)
         self.webView.setObjectName("contentView")
         self.webView.setPage(WebEnginePage(self.webView))
-        self.webView.setHtml("<html><body><p>Выберите статью, чтобы увидеть содержимое</p></body></html>")
+        self.webView.setHtml("<html><body><p>Select an article to view its content</p></body></html>")
 
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
         splitter.setStretchFactor(2, 4)
 
         self.setCentralWidget(central)
-        self.statusBar().showMessage("Готово")
+        self.statusBar().showMessage("Ready")
 
         # Infrastructure
         self.thread_pool = QThreadPool.globalInstance()
@@ -164,7 +233,7 @@ class RSSReader(QMainWindow):
         self._load_state_from_storage()
         self.update_refresh_timer()
         self._init_tray_icon()
-        
+
         # Restore window geometry/state
         try:
             from PyQt5.QtCore import QSettings
@@ -181,6 +250,20 @@ class RSSReader(QMainWindow):
     # ---- IDs / dates ----
     def get_article_id(self, entry: Dict[str, Any]) -> str:
         return compute_article_id(entry)
+    # ---- Icons helper ----
+    def _theme_icon(self, names: List[str], fallback: QStyle.StandardPixmap) -> QIcon:
+        try:
+            for n in names:
+                ic = QIcon.fromTheme(n)
+                if ic and not ic.isNull():
+                    return ic
+        except Exception:
+            pass
+        try:
+            return self.style().standardIcon(fallback)
+        except Exception:
+            return QIcon()
+
 
     def get_entry_date(self, entry: Dict[str, Any]) -> datetime:
         date_struct = entry.get('published_parsed') or entry.get('updated_parsed')
@@ -219,6 +302,12 @@ class RSSReader(QMainWindow):
         if hasattr(feed_item, 'setIcon'):
             try:
                 self.set_feed_icon_placeholder(feed_item, new_url)
+            except Exception:
+                pass
+        # Persist change in storage
+        if self.storage:
+            try:
+                self.storage.update_feed_url(old_url, new_url)
             except Exception:
                 pass
         self.data_changed = True
@@ -286,7 +375,9 @@ class RSSReader(QMainWindow):
                 try:
                     feed_domain = urlparse(url).netloc or url
                     if feed_domain in _domain_variants(domain):
-                        item.setIcon(0, icon)
+                        # store base icon and then apply unread badge if needed
+                        item.setData(0, Qt.UserRole + 1, icon)
+                        self._apply_feed_unread_badge(item)
                 except Exception:
                     pass
         except Exception:
@@ -297,43 +388,80 @@ class RSSReader(QMainWindow):
         try:
             domain = urlparse(url).netloc or url
             icon = self.favicon_cache.get(domain, QIcon())
-            item.setIcon(0, icon)
+            # store base and apply badge
+            item.setData(0, Qt.UserRole + 1, icon)
+            self._apply_feed_unread_badge(item)
         except Exception:
             pass
 
     # ----------------- UI and actions -----------------
     def _create_actions(self) -> None:
-        self.actAddFeed = QAction("Добавить ленту", self)
+        self.actAddFeed = QAction("Add Feed", self)
         self.actAddFeed.triggered.connect(self.add_feed)
-        self.actRemoveFeed = QAction("Удалить ленту", self)
+        self.actRemoveFeed = QAction("Remove Feed", self)
         self.actRemoveFeed.triggered.connect(self.remove_selected_feed)
-        self.actRefreshAll = QAction("Обновить все", self)
+        self.actRefreshAll = QAction("Refresh All", self)
         self.actRefreshAll.triggered.connect(self.refresh_all_feeds)
-        self.actRefreshFeed = QAction("Обновить ленту", self)
+        self.actRefreshFeed = QAction("Refresh Feed", self)
         self.actRefreshFeed.triggered.connect(self.refresh_selected_feed)
-        self.actMarkAllRead = QAction("Пометить все как прочитанные", self)
+        self.actMarkAllRead = QAction("Mark All as Read", self)
         self.actMarkAllRead.triggered.connect(self.mark_all_as_read)
-        self.actMarkAllUnread = QAction("Пометить все как непрочитанные", self)
+        self.actMarkAllUnread = QAction("Mark All as Unread", self)
         self.actMarkAllUnread.triggered.connect(self.mark_all_as_unread)
-        self.actSettings = QAction("Настройки", self)
+        self.actSettings = QAction("Settings", self)
         self.actSettings.triggered.connect(self.open_settings)
-        self.actBackup = QAction("Backup в iCloud", self)
+        self.actBackup = QAction("Backup to iCloud", self)
         self.actBackup.triggered.connect(self.backup_to_icloud)
-        self.actRestore = QAction("Восстановить из iCloud", self)
+        self.actRestore = QAction("Restore from iCloud", self)
         self.actRestore.triggered.connect(self.restore_from_icloud)
-        self.actQuit = QAction("Выход", self)
+        self.actQuit = QAction("Quit", self)
         self.actQuit.triggered.connect(self.close)
-        self.actOnlyUnread = QAction("Показывать только непрочитанные", self)
+        self.actOnlyUnread = QAction("Show Only Unread", self)
         self.actOnlyUnread.setCheckable(True)
         self.actOnlyUnread.toggled.connect(self._toggle_unread_filter)
-        self.actImportOPML = QAction("Импорт OPML…", self)
+        self.actImportOPML = QAction("Import OPML…", self)
         self.actImportOPML.triggered.connect(self.import_opml)
-        self.actExportOPML = QAction("Экспорт OPML…", self)
+        self.actExportOPML = QAction("Export OPML…", self)
         self.actExportOPML.triggered.connect(self.export_opml)
-        self.actImportJSON = QAction("Импорт JSON…", self)
+        self.actImportJSON = QAction("Import JSON…", self)
         self.actImportJSON.triggered.connect(self.import_json_feeds)
-        self.actExportJSON = QAction("Экспорт JSON…", self)
+        self.actExportJSON = QAction("Export JSON…", self)
         self.actExportJSON.triggered.connect(self.export_json_feeds)
+        # Tooltips for toolbar hover text
+        for act in [
+            self.actAddFeed, self.actRemoveFeed, self.actRefreshAll, self.actRefreshFeed,
+            self.actMarkAllRead, self.actMarkAllUnread, self.actSettings, self.actBackup,
+            self.actRestore, self.actQuit, self.actOnlyUnread, self.actImportOPML,
+            self.actExportOPML, self.actImportJSON, self.actExportJSON
+        ]:
+            try:
+                act.setToolTip(act.text())
+            except Exception:
+                pass
+        # Try assign standard icons so toolbar shows visible buttons
+        try:
+            # Intuitive, theme-aware icons with fallbacks
+            self.actAddFeed.setIcon(self._theme_icon(["list-add", "contact-new", "add"], QStyle.SP_FileDialogNewFolder))
+            self.actRemoveFeed.setIcon(self._theme_icon(["list-remove", "edit-delete", "user-trash"], QStyle.SP_TrashIcon))
+            self.actRefreshAll.setIcon(self._theme_icon(["view-refresh", "reload"], QStyle.SP_BrowserReload))
+            self.actRefreshFeed.setIcon(self._theme_icon(["media-playback-start", "system-run"], QStyle.SP_MediaPlay))
+            self.actMarkAllRead.setIcon(self._theme_icon(["mail-mark-read", "emblem-ok"], QStyle.SP_DialogApplyButton))
+            self.actMarkAllUnread.setIcon(self._theme_icon(["mail-mark-unread", "edit-undo"], QStyle.SP_DialogResetButton))
+            self.actSettings.setIcon(self._theme_icon(["preferences-system", "settings"], QStyle.SP_FileDialogDetailedView))
+            self.actBackup.setIcon(self._theme_icon(["cloud-upload", "go-up"], QStyle.SP_ArrowUp))
+            self.actRestore.setIcon(self._theme_icon(["cloud-download", "go-down"], QStyle.SP_ArrowDown))
+            self.actQuit.setIcon(self._theme_icon(["application-exit", "window-close"], QStyle.SP_TitleBarCloseButton))
+            # Use blue dot as icon for unread toggle
+            try:
+                self.actOnlyUnread.setIcon(QIcon(self._unread_dot_pixmap(10)))
+            except Exception:
+                pass
+            self.actImportOPML.setIcon(self._theme_icon(["document-import", "document-open"], QStyle.SP_DialogOpenButton))
+            self.actExportOPML.setIcon(self._theme_icon(["document-export", "document-save"], QStyle.SP_DialogSaveButton))
+            self.actImportJSON.setIcon(self._theme_icon(["document-import", "document-open"], QStyle.SP_DialogOpenButton))
+            self.actExportJSON.setIcon(self._theme_icon(["document-export", "document-save"], QStyle.SP_DialogSaveButton))
+        except Exception:
+            pass
         # Shortcuts
         try:
             from PyQt5.QtGui import QKeySequence
@@ -351,14 +479,14 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
         # Help/About
-        self.actAbout = QAction("О программе", self)
+        self.actAbout = QAction("About", self)
         self.actAbout.triggered.connect(self.show_about)
-        self.actAboutQt = QAction("О Qt", self)
+        self.actAboutQt = QAction("About Qt", self)
         self.actAboutQt.triggered.connect(lambda: QMessageBox.aboutQt(self))
 
     def _create_menu(self) -> None:
         mb = self.menuBar()
-        file_menu = mb.addMenu("Файл")
+        file_menu = mb.addMenu("File")
         file_menu.addAction(self.actAddFeed)
         file_menu.addAction(self.actRemoveFeed)
         file_menu.addSeparator()
@@ -373,17 +501,17 @@ class RSSReader(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.actQuit)
 
-        act_menu = mb.addMenu("Действия")
+        act_menu = mb.addMenu("Actions")
         act_menu.addAction(self.actRefreshAll)
         act_menu.addAction(self.actRefreshFeed)
         act_menu.addAction(self.actMarkAllRead)
         act_menu.addAction(self.actMarkAllUnread)
         act_menu.addAction(self.actOnlyUnread)
 
-        settings_menu = mb.addMenu("Настройки")
+        settings_menu = mb.addMenu("Settings")
         settings_menu.addAction(self.actSettings)
 
-        help_menu = mb.addMenu("Справка")
+        help_menu = mb.addMenu("Help")
         help_menu.addAction(self.actAbout)
         help_menu.addAction(self.actAboutQt)
 
@@ -397,11 +525,21 @@ class RSSReader(QMainWindow):
             self.feeds = self.storage.get_all_feeds()
             self.read_articles = set(self.storage.load_read_articles())
             self.column_widths = self.storage.load_column_widths()
+            # optional
+            try:
+                self.group_settings = self.storage.load_group_settings()
+            except Exception:
+                self.group_settings = {}
+            try:
+                self.movie_cache = self.storage.load_movie_cache()
+            except Exception:
+                pass
         except Exception:
             pass
         for feed in self.feeds:
             self._add_feed_item(feed.get('title') or feed.get('url'), feed.get('url'))
         self._update_tray()
+        self._update_feed_unread_badges()
 
     # helper to add item into feeds tree and set icon from cache/storage
     def _add_feed_item(self, title: str, url: str) -> QTreeWidgetItem:
@@ -420,6 +558,8 @@ class RSSReader(QMainWindow):
                 pass
         if icon:
             item.setIcon(0, icon)
+            # store base icon for badge overlay
+            item.setData(0, Qt.UserRole + 1, icon)
         self.feedsTree.addTopLevelItem(item)
         return item
 
@@ -433,7 +573,7 @@ class RSSReader(QMainWindow):
             if not url.startswith(('http://', 'https://')):
                 url = 'http://' + url
             if any(f['url'] == url for f in self.feeds):
-                self.warn("Дубликат", "Эта лента уже добавлена")
+                self.warn("Duplicate", "This feed is already added")
                 return
             title = name or url
             # storage
@@ -445,7 +585,7 @@ class RSSReader(QMainWindow):
             feed = {'title': title, 'url': url, 'entries': []}
             self.feeds.append(feed)
             item = self._add_feed_item(title, url)
-            self.statusBar().showMessage("Лента добавлена", 3000)
+            self.statusBar().showMessage("Feed added", 3000)
             self.refresh_feed(url)
             self.feedsTree.setCurrentItem(item)
 
@@ -454,7 +594,7 @@ class RSSReader(QMainWindow):
         if not item:
             return
         url = item.data(0, Qt.UserRole)
-        if QMessageBox.question(self, "Удалить ленту", f"Удалить {url}?") != QMessageBox.Yes:
+        if QMessageBox.question(self, "Remove Feed", f"Remove {url}?") != QMessageBox.Yes:
             return
         # remove from storage and memory
         if self.storage:
@@ -466,7 +606,90 @@ class RSSReader(QMainWindow):
         idx = self.feedsTree.indexOfTopLevelItem(item)
         self.feedsTree.takeTopLevelItem(idx)
         self.articlesTree.clear()
-        self.webView.setHtml("<html><body><p>Лента удалена</p></body></html>")
+        self.webView.setHtml("<html><body><p>Feed removed</p></body></html>")
+        self._update_feed_unread_badges()
+
+    # Context menu for feeds tree
+    def _on_feeds_context_menu(self, pos) -> None:
+        item = self.feedsTree.itemAt(pos)
+        if not item:
+            return
+        url = item.data(0, Qt.UserRole)
+        # Only feed items are supported for now
+        if not url:
+            return
+        menu = QMenu(self)
+        actRename = menu.addAction("Rename")
+        actEditUrl = menu.addAction("Edit URL")
+        actRefresh = menu.addAction("Refresh")
+        # OMDb toggle
+        actOmdb = menu.addAction("Enable OMDb (per feed)")
+        actOmdb.setCheckable(True)
+        try:
+            cur = (self.group_settings or {}).get(url, {})
+            actOmdb.setChecked(bool(cur.get('omdb_enabled')))
+        except Exception:
+            pass
+        actRemove = menu.addAction("Remove")
+        action = menu.exec_(self.feedsTree.viewport().mapToGlobal(pos))
+        if action == actRename:
+            self.rename_feed(item)
+        elif action == actEditUrl:
+            old_url = url
+            new_url, ok = QInputDialog.getText(self, "Edit URL", "New URL:", text=old_url)
+            if ok and new_url:
+                self.update_feed_url(item, new_url.strip())
+        elif action == actRefresh:
+            self.refresh_feed(url)
+        elif action == actOmdb:
+            # Toggle OMDb setting for this feed URL
+            try:
+                gs = dict(self.group_settings or {})
+                cfg = dict(gs.get(url) or {})
+                cfg['omdb_enabled'] = bool(actOmdb.isChecked())
+                gs[url] = cfg
+                self.group_settings = gs
+                if self.storage:
+                    try:
+                        self.storage.save_group_settings(self.group_settings)
+                    except Exception:
+                        pass
+                # refresh current view if this feed selected
+                cur_item = self.feedsTree.currentItem()
+                if cur_item and cur_item.data(0, Qt.UserRole) == url:
+                    feed = next((f for f in self.feeds if f.get('url') == url), None)
+                    entries = feed.get('entries', []) if feed else []
+                    self._populate_articles(url, entries)
+            except Exception:
+                pass
+        elif action == actRemove:
+            # Temporarily set selection to the item to reuse existing removal flow
+            prev = self.feedsTree.currentItem()
+            try:
+                self.feedsTree.setCurrentItem(item)
+                self.remove_selected_feed()
+            finally:
+                if prev and prev != item:
+                    self.feedsTree.setCurrentItem(prev)
+
+    def rename_feed(self, item: QTreeWidgetItem) -> None:
+        old_title = item.text(0)
+        url = item.data(0, Qt.UserRole) or ""
+        new_title, ok = QInputDialog.getText(self, "Rename Feed", "New title:", text=old_title)
+        if not ok or not new_title:
+            return
+        item.setText(0, new_title)
+        # Update in-memory model
+        for f in self.feeds:
+            if f.get('url') == url:
+                f['title'] = new_title
+                break
+        # Persist title change
+        if self.storage:
+            try:
+                self.storage.upsert_feed(new_title, url)
+            except Exception:
+                pass
 
     def refresh_selected_feed(self) -> None:
         item = self.feedsTree.currentItem()
@@ -486,14 +709,14 @@ class RSSReader(QMainWindow):
             worker.feed_fetched.connect(self._on_feed_fetched)
             runnable = FetchFeedRunnable(url, worker)
             self.thread_pool.start(runnable)
-            self.statusBar().showMessage(f"Обновляю: {url}", 2000)
+            self.statusBar().showMessage(f"Refreshing: {url}", 2000)
         except Exception:
             pass
 
     @pyqtSlot(str, object)
     def _on_feed_fetched(self, url: str, feed_obj: Any) -> None:
         if not feed_obj:
-            self.statusBar().showMessage(f"Не удалось загрузить: {url}", 4000)
+            self.statusBar().showMessage(f"Failed to load: {url}", 4000)
             return
         # normalize entries
         entries = list(feed_obj.entries or [])
@@ -512,8 +735,9 @@ class RSSReader(QMainWindow):
         current = self.feedsTree.currentItem()
         if current and current.data(0, Qt.UserRole) == url:
             self._populate_articles(url, entries)
-        self.statusBar().showMessage(f"Загружено: {url}", 2000)
+        self.statusBar().showMessage(f"Loaded: {url}", 2000)
         self._update_tray()
+        self._update_feed_unread_badges()
 
     # ----------------- UI handlers -----------------
     def _on_feed_selected(self) -> None:
@@ -536,27 +760,186 @@ class RSSReader(QMainWindow):
 
     def _populate_articles(self, feed_url: str, entries: List[Dict[str, Any]]) -> None:
         self.articlesTree.clear()
-        visible_entries = entries
+        visible_entries = list(entries or [])
+        # unread filter
         if self.show_unread_only:
-            visible_entries = [e for e in entries if self.get_article_id(e) not in self.read_articles]
+            visible_entries = [e for e in visible_entries if self.get_article_id(e) not in self.read_articles]
+        # search filter
+        try:
+            q = (self.search_text or "").strip().lower()
+            if q:
+                def _matches(e: Dict[str, Any]) -> bool:
+                    title = (e.get('title') or '').lower()
+                    summary = (e.get('summary') or '').lower()
+                    link = (e.get('link') or '').lower()
+                    return q in title or q in summary or q in link
+                visible_entries = [e for e in visible_entries if _matches(e)]
+        except Exception:
+            pass
+
+        # Columns based on OMDb flag
+        omdb_enabled = self._is_omdb_enabled(feed_url)
+        if omdb_enabled:
+            cols = self.omdb_columns_by_feed.get(feed_url) or ["Title", "Date", "IMDb"]
+            self.omdb_columns_by_feed[feed_url] = cols
+        else:
+            cols = ["Title", "Date"]
+        self.articlesTree.setHeaderLabels(cols)
+
+        # index of Date column for sorting and role storage
+        try:
+            date_col_index = cols.index("Date")
+        except ValueError:
+            date_col_index = 0
+
         for e in visible_entries:
             title = e.get('title') or e.get('link') or 'Untitled'
             dt = self.get_entry_date(e)
-            item = ArticleTreeWidgetItem([title, dt.strftime('%Y-%m-%d %H:%M') if dt != datetime.min else ''])
+            date_str = dt.strftime('%Y-%m-%d %H:%M') if dt != datetime.min else ''
+            imdb = ''
+            if omdb_enabled and self.movie_cache:
+                try:
+                    rec = self.movie_cache.get(title) or {}
+                    imdb = rec.get('imdbrating') or rec.get('imdb_rating') or rec.get('rating') or ''
+                except Exception:
+                    imdb = ''
+            row: List[str] = []
+            for c in cols:
+                if c == "Title":
+                    row.append(title)
+                elif c == "Date":
+                    row.append(date_str)
+                elif c == "IMDb":
+                    row.append(imdb)
+                else:
+                    row.append('')
+            item = ArticleTreeWidgetItem(row)
+            # store entry on first column role
             item.setData(0, Qt.UserRole, e)
-            item.setData(1, Qt.UserRole, dt)
+            # store dt on Date column role for potential sorting helpers
+            try:
+                item.setData(date_col_index, Qt.UserRole, dt)
+            except Exception:
+                pass
             # mark read visually
             aid = self.get_article_id(e)
             if aid in self.read_articles:
                 item.setForeground(0, Qt.gray)
+                try:
+                    item.setIcon(0, QIcon())
+                except Exception:
+                    pass
+            else:
+                # unread -> blue dot icon at column 0
+                try:
+                    item.setIcon(0, QIcon(self._unread_dot_pixmap(8)))
+                except Exception:
+                    pass
             self.articlesTree.addTopLevelItem(item)
-        self.articlesTree.sortItems(1, Qt.DescendingOrder)
+
+        # Sort by Date if present
+        try:
+            sort_idx = cols.index("Date") if "Date" in cols else max(0, len(cols) - 1)
+            self.articlesTree.sortItems(sort_idx, Qt.DescendingOrder)
+        except Exception:
+            pass
+
         # apply column widths
         widths = self.column_widths.get(feed_url)
         if widths:
             for i, w in enumerate(widths):
                 if w:
                     self.articlesTree.setColumnWidth(i, int(w))
+
+    def _is_omdb_enabled(self, feed_url: str) -> bool:
+        try:
+            # Store by feed_url in group_settings if available
+            cfg = (self.group_settings or {}).get(feed_url)
+            return bool(cfg and cfg.get('omdb_enabled'))
+        except Exception:
+            return False
+
+    def _on_articles_header_menu(self, pos) -> None:
+        try:
+            item = self.feedsTree.currentItem()
+            if not item:
+                return
+            feed_url = item.data(0, Qt.UserRole)
+            if not self._is_omdb_enabled(feed_url):
+                return
+            available = ["Title", "Date", "IMDb"]
+            current = self.omdb_columns_by_feed.get(feed_url) or available
+            menu = QMenu(self)
+            act_map = {}
+            for col in available:
+                a = menu.addAction(col)
+                a.setCheckable(True)
+                a.setChecked(col in current)
+                if col == "Title":
+                    a.setEnabled(False)
+                act_map[a] = col
+            chosen = menu.exec_(self.articlesTree.header().mapToGlobal(pos))
+            if not chosen:
+                return
+            col = act_map.get(chosen)
+            if not col:
+                return
+            new = set(current)
+            if chosen.isChecked():
+                new.add(col)
+            else:
+                if col != "Title":
+                    new.discard(col)
+            ordered = [c for c in available if c in new]
+            if not ordered:
+                ordered = ["Title"]
+            self.omdb_columns_by_feed[feed_url] = ordered
+            # repopulate current feed
+            feed = next((f for f in self.feeds if f.get('url') == feed_url), None)
+            entries = feed.get('entries', []) if feed else []
+            self._populate_articles(feed_url, entries)
+        except Exception:
+            pass
+
+    def _apply_toolbar_styles(self) -> None:
+        # Set QSS for intent-colored QToolButtons
+        qss = (
+            "QToolBar QToolButton{padding:4px 8px;border-radius:6px;margin:0 2px;}"
+            "QToolBar QToolButton[intent='primary']{background:#2ecc71;color:black;}"
+            "QToolBar QToolButton[intent='info']{background:#3498db;color:white;}"
+            "QToolBar QToolButton[intent='danger']{background:#e74c3c;color:white;}"
+            "QToolBar QToolButton[intent='success']{background:#27ae60;color:white;}"
+            "QToolBar QToolButton[intent='warning']{background:#f39c12;color:black;}"
+            "QToolBar QToolButton:hover{filter:brightness(1.1);}"
+        )
+        self.toolbar.setStyleSheet(qss)
+        # Assign intents to specific actions
+        def set_intent(act, name: str) -> None:
+            try:
+                btn = self.toolbar.widgetForAction(act)
+                if btn:
+                    btn.setProperty('intent', name)
+                    btn.style().unpolish(btn)
+                    btn.style().polish(btn)
+            except Exception:
+                pass
+        set_intent(self.actAddFeed, 'primary')
+        set_intent(self.actRefreshAll, 'info')
+        set_intent(self.actRefreshFeed, 'info')
+        set_intent(self.actRemoveFeed, 'danger')
+        set_intent(self.actMarkAllRead, 'success')
+        set_intent(self.actMarkAllUnread, 'warning')
+
+    def _add_toolbar_spacer(self, width: int = 8, expand: bool = False) -> None:
+        try:
+            spacer = QWidget(self)
+            if expand:
+                spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            else:
+                spacer.setFixedWidth(max(0, width))
+            self.toolbar.addWidget(spacer)
+        except Exception:
+            pass
 
     def _on_article_selected(self) -> None:
         item = self.articlesTree.currentItem()
@@ -578,6 +961,15 @@ class RSSReader(QMainWindow):
                     self.storage.save_read_articles(list(self.read_articles))
                 except Exception:
                     pass
+            # update current item visuals and feed badge
+            try:
+                item = self.articlesTree.currentItem()
+                if item:
+                    item.setForeground(0, Qt.gray)
+                    item.setIcon(0, QIcon())
+                self._update_feed_unread_badges()
+            except Exception:
+                pass
         # build simple HTML
         title = entry.get('title', '')
         link = entry.get('link', '')
@@ -629,7 +1021,7 @@ class RSSReader(QMainWindow):
     def open_settings(self) -> None:
         dlg = SettingsDialog(self)
         if dlg.exec_() == dlg.Accepted:
-            self.statusBar().showMessage("Настройки сохранены", 3000)
+            self.statusBar().showMessage("Settings saved", 3000)
             self._update_tray()
 
     def update_refresh_timer(self) -> None:
@@ -646,6 +1038,20 @@ class RSSReader(QMainWindow):
     def apply_font_size(self) -> None:
         # Re-render current article with updated size
         self._on_article_selected()
+
+    def _on_search_changed(self, text: str) -> None:
+        self.search_text = text or ""
+        # repopulate current feed
+        try:
+            item = self.feedsTree.currentItem()
+            if not item:
+                return
+            url = item.data(0, Qt.UserRole)
+            feed = next((f for f in self.feeds if f.get('url') == url), None)
+            entries = feed.get('entries', []) if feed else []
+            self._populate_articles(url, entries)
+        except Exception:
+            pass
 
     # ----------------- Utilities -----------------
     def warn(self, title: str, text: str) -> None:
@@ -687,6 +1093,7 @@ class RSSReader(QMainWindow):
                 pass
         self._on_feed_selected()
         self._update_tray()
+        self._update_feed_unread_badges()
 
     def mark_all_as_unread(self) -> None:
         item = self.feedsTree.currentItem()
@@ -707,13 +1114,14 @@ class RSSReader(QMainWindow):
                 pass
         self._on_feed_selected()
         self._update_tray()
+        self._update_feed_unread_badges()
 
     def _on_articles_context_menu(self, pos) -> None:
         item = self.articlesTree.itemAt(pos)
         menu = QMenu(self)
-        actOpen = menu.addAction("Открыть в браузере")
-        actMarkUnread = menu.addAction("Пометить как непрочитанное")
-        actAllRead = menu.addAction("Пометить все как прочитанные")
+        actOpen = menu.addAction("Open in Browser")
+        actMarkUnread = menu.addAction("Mark as Unread")
+        actAllRead = menu.addAction("Mark All as Read")
         action = menu.exec_(self.articlesTree.viewport().mapToGlobal(pos))
         if action == actOpen and item:
             entry = item.data(0, Qt.UserRole) or {}
@@ -735,6 +1143,7 @@ class RSSReader(QMainWindow):
                         pass
                 self._on_feed_selected()
                 self._update_tray()
+                self._update_feed_unread_badges()
         elif action == actAllRead:
             self.mark_all_as_read()
 
@@ -750,7 +1159,7 @@ class RSSReader(QMainWindow):
 
     # ----------------- OPML import/export -----------------
     def export_opml(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Экспорт OPML", "feeds.opml", "OPML Files (*.opml)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export OPML", "feeds.opml", "OPML Files (*.opml)")
         if not path:
             return
         try:
@@ -764,12 +1173,12 @@ class RSSReader(QMainWindow):
                 ET.SubElement(body, 'outline', type='rss', text=f.get('title') or f.get('url'), xmlUrl=f.get('url'))
             tree = ET.ElementTree(opml)
             tree.write(path, encoding='utf-8', xml_declaration=True)
-            self.statusBar().showMessage("Экспортировано OPML", 3000)
+            self.statusBar().showMessage("OPML exported", 3000)
         except Exception:
-            self.warn("Ошибка", "Не удалось экспортировать OPML")
+            self.warn("Error", "Failed to export OPML")
 
     def import_opml(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Импорт OPML", "", "OPML Files (*.opml)")
+        path, _ = QFileDialog.getOpenFileName(self, "Import OPML", "", "OPML Files (*.opml)")
         if not path:
             return
         try:
@@ -788,28 +1197,28 @@ class RSSReader(QMainWindow):
                             pass
                     self.feeds.append({'title': text, 'url': url, 'entries': []})
                     self._add_feed_item(text, url)
-            self.statusBar().showMessage("Импортировано OPML", 3000)
+            self.statusBar().showMessage("OPML imported", 3000)
         except Exception:
-            self.warn("Ошибка", "Не удалось импортировать OPML")
+            self.warn("Error", "Failed to import OPML")
 
     # ----------------- JSON import/export -----------------
     def import_json_feeds(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Импорт JSON", "", "JSON Files (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, "Import JSON", "", "JSON Files (*.json)")
         if not path:
             return
         try:
             added = self.import_json_from_path(path)
-            self.statusBar().showMessage(f"Импортировано лент: {added}", 3000)
+            self.statusBar().showMessage(f"Imported feeds: {added}", 3000)
             self._update_tray()
         except Exception:
-            self.warn("Ошибка", "Не удалось импортировать JSON")
+            self.warn("Error", "Failed to import JSON")
 
     def import_json_from_path(self, path: str) -> int:
-        """Импорт лент и настроек из JSON-файла. Возвращает количество добавленных лент.
+        """Import feeds and settings from a JSON file. Returns count of added feeds.
 
-        Форматы поддерживаются:
-        - Список лент: [{"title": str, "url": str, "entries": [...]}, ...]
-        - Объект: {"feeds": [...], "column_widths": {...}}
+        Supported formats:
+        - List of feeds: [{"title": str, "url": str, "entries": [...]}, ...]
+        - Object: {"feeds": [...], "column_widths": {...}}
         """
         import json
         with open(path, 'r', encoding='utf-8') as f:
@@ -854,17 +1263,17 @@ class RSSReader(QMainWindow):
         return added
 
     def export_json_feeds(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Экспорт JSON", "feeds.json", "JSON Files (*.json)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export JSON", "feeds.json", "JSON Files (*.json)")
         if not path:
             return
         try:
             self.export_json_to_path(path)
-            self.statusBar().showMessage("Экспортировано JSON", 3000)
+            self.statusBar().showMessage("JSON exported", 3000)
         except Exception:
-            self.warn("Ошибка", "Не удалось экспортировать JSON")
+            self.warn("Error", "Failed to export JSON")
 
     def export_json_to_path(self, path: str) -> None:
-        """Экспорт текущих лент и ширин колонок в JSON-файл."""
+        """Export current feeds and column widths to a JSON file."""
         import json
         payload = {
             'feeds': self.feeds,
@@ -872,6 +1281,64 @@ class RSSReader(QMainWindow):
         }
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    # ----------------- Unread badges (blue dot) -----------------
+    def _unread_dot_pixmap(self, size: int = 8, color: QColor = QColor(0, 122, 255)) -> QPixmap:
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(color)
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(0, 0, size, size)
+        painter.end()
+        return pm
+
+    def _icon_with_unread_dot(self, base_icon: Optional[QIcon]) -> QIcon:
+        # Compose a 16x16 icon with a small blue dot at bottom-right
+        size = 16
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        painter = QPainter(pm)
+        if base_icon and not base_icon.isNull():
+            base_pm = base_icon.pixmap(size, size)
+            painter.drawPixmap(0, 0, base_pm)
+        # draw dot
+        dot = self._unread_dot_pixmap(6)
+        painter.drawPixmap(size - dot.width(), size - dot.height(), dot)
+        painter.end()
+        return QIcon(pm)
+
+    def _apply_feed_unread_badge(self, item: QTreeWidgetItem) -> None:
+        try:
+            url = item.data(0, Qt.UserRole) or ""
+            if not url:
+                return
+            feed = next((f for f in self.feeds if f.get('url') == url), None)
+            if not feed:
+                return
+            ents = feed.get('entries', []) or []
+            has_unread = any(self.get_article_id(e) not in self.read_articles for e in ents)
+            base_icon = item.data(0, Qt.UserRole + 1)
+            if not isinstance(base_icon, QIcon):
+                # fallback to current icon
+                base_icon = item.icon(0)
+            if has_unread:
+                item.setIcon(0, self._icon_with_unread_dot(base_icon))
+            else:
+                # restore base icon
+                item.setIcon(0, base_icon if isinstance(base_icon, QIcon) else QIcon())
+        except Exception:
+            pass
+
+    def _update_feed_unread_badges(self) -> None:
+        try:
+            count = self.feedsTree.topLevelItemCount()
+            for i in range(count):
+                item = self.feedsTree.topLevelItem(i)
+                self._apply_feed_unread_badge(item)
+        except Exception:
+            pass
 
     # ----------------- Tray & notifications -----------------
     def _init_tray_icon(self) -> None:
@@ -883,7 +1350,7 @@ class RSSReader(QMainWindow):
             menu.addAction(self.actRefreshAll)
             menu.addAction(self.actOnlyUnread)
             menu.addSeparator()
-            quit_action = QAction("Выход", self)
+            quit_action = QAction("Quit", self)
             quit_action.triggered.connect(self.close)
             menu.addAction(quit_action)
             self.tray.setContextMenu(menu)
@@ -900,7 +1367,7 @@ class RSSReader(QMainWindow):
             settings = QSettings('rocker', 'SmallRSSReader')
             enabled = settings.value('notifications_enabled', False, type=bool)
             if enabled and getattr(self, 'tray', None):
-                self.tray.showMessage('Small RSS Reader', 'Статья отмечена как прочитанная', QSystemTrayIcon.Information, 2000)
+                self.tray.showMessage('Small RSS Reader', 'Article marked as read', QSystemTrayIcon.Information, 2000)
         except Exception:
             pass
 
@@ -913,7 +1380,7 @@ class RSSReader(QMainWindow):
                 total += len(ents)
                 unread += sum(1 for e in ents if self.get_article_id(e) not in self.read_articles)
             if getattr(self, 'tray', None):
-                self.tray.setToolTip(f"Непрочитанных: {unread} / {total}")
+                self.tray.setToolTip(f"Unread: {unread} / {total}")
         except Exception:
             pass
 
@@ -946,13 +1413,38 @@ class RSSReader(QMainWindow):
 
     # ----------------- About -----------------
     def show_about(self) -> None:
+        # Collect version and paths info
+        VERSION = TAG = COMMIT = ORIGIN = "unknown"
         try:
-            from app_version import VERSION
+            from app_version import VERSION as _V, TAG as _T, COMMIT as _C, ORIGIN as _O
+            VERSION, TAG, COMMIT, ORIGIN = _V, _T, _C, _O
         except Exception:
-            VERSION = "dev"
-        text = (
-            f"Small RSS Reader\n\n"
-            f"Версия: {VERSION}\n"
-            f"Небольшой быстрый RSS-ридер на PyQt5."
-        )
-        QMessageBox.about(self, "О программе", text)
+            pass
+        try:
+            db_path = get_user_data_path("db.sqlite3")
+        except Exception:
+            db_path = os.path.abspath("db.sqlite3")
+        try:
+            log_path = get_user_data_path("rss_reader.log")
+            if not os.path.isabs(log_path):
+                log_path = os.path.abspath(log_path)
+        except Exception:
+            log_path = os.path.abspath("rss_reader.log")
+
+        html = f"""
+        <html><head><meta charset='utf-8'>
+        <style>
+          body {{ font-family: -apple-system, Helvetica, Arial, sans-serif; font-size: 13px; }}
+          code {{ font-family: SFMono-Regular, Menlo, monospace; }}
+          .lbl {{ color: #666; }}
+        </style>
+        </head><body>
+        <h3>Small RSS Reader</h3>
+        <p class='lbl'>A small, fast RSS reader built with PyQt5.</p>
+        <p><b>Version:</b> {VERSION} (<code>{TAG}</code>, <code>{COMMIT}</code>)</p>
+        <p><b>Database:</b> <code>{db_path}</code></p>
+        <p><b>Log file:</b> <code>{log_path}</code></p>
+        <p><b>Repository:</b> <a href='{ORIGIN}'>{ORIGIN}</a></p>
+        </body></html>
+        """
+        QMessageBox.about(self, "About", html)
