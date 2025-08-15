@@ -23,13 +23,17 @@ def get_user_data_path(filename: str) -> str:
 
 def main() -> int:
     app = QApplication(sys.argv)
-    # Show splash screen with app logo while initializing the main window
+    debug = ('--debug' in sys.argv)
+    # Show splash screen only in non-debug runs to avoid perceived hangs during heavy init
     try:
-        splash_path = resource_path('icons/splash.png')
-        pix = QPixmap(splash_path)
-        splash = QSplashScreen(pix) if not pix.isNull() else QSplashScreen()
-        splash.show()
-        app.processEvents()
+        if not debug:
+            splash_path = resource_path('icons/splash.png')
+            pix = QPixmap(splash_path)
+            splash = QSplashScreen(pix) if not pix.isNull() else QSplashScreen()
+            splash.show()
+            app.processEvents()
+        else:
+            splash = None  # type: ignore
     except Exception:
         splash = None  # type: ignore
 

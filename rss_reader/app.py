@@ -38,7 +38,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QSizePolicy,
 )
-from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize
+from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
 
@@ -114,6 +114,8 @@ class RSSReader(QMainWindow):
         self.omdb_columns_by_feed: Dict[str, List[str]] = {}
         # OMDb queue manager (lazy wired during UI init)
         self._omdb_mgr: Optional[OmdbQueueManager] = None
+        # Track domains with in-flight favicon fetch to avoid duplicates
+        self._favicon_fetching = set()
 
         # Interactive runs: show a basic UI so the window isn't empty
         try:
@@ -130,9 +132,27 @@ class RSSReader(QMainWindow):
         # Actions and menu
         self._create_actions()
         self._create_menu()
+        # Initialize unread-only from settings so action/checkbox start in sync
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            checked = settings.value('show_only_unread', False, type=bool)
+            self.show_unread_only = bool(checked)
+            try:
+                self.actOnlyUnread.setChecked(bool(checked))
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         # Toolbar
         _ui_setup_toolbar(self)
+        # Search UX: clear button + ESC to clear
+        try:
+            self.searchEdit.setClearButtonEnabled(True)
+            self.searchEdit.installEventFilter(self)
+        except Exception:
+            pass
 
         # Central layout
         central = QWidget(self)
@@ -183,6 +203,10 @@ class RSSReader(QMainWindow):
         # Infrastructure
         self.thread_pool = QThreadPool.globalInstance()
         self.icon_fetched.connect(self.on_icon_fetched)
+        try:
+            self.icon_fetch_failed.connect(self._on_icon_fetch_failed)
+        except Exception:
+            pass
         # OMDb worker signals (created lazily)
         try:
             from rss_reader.services.omdb import OmdbWorker
@@ -218,8 +242,10 @@ class RSSReader(QMainWindow):
                 if first_feed:
                     self.feedsTree.setCurrentItem(first_feed)
                     QTimer.singleShot(0, lambda: self._select_first_article_in_current_feed(open_article=True))
-            # Initial background refresh (non-blocking)
-            QTimer.singleShot(0, self.refresh_all_feeds)
+            # Initial background refresh (non-blocking) — skip in debug mode
+            import sys as _sys
+            if '--debug' not in (_sys.argv or []):
+                QTimer.singleShot(0, self.refresh_all_feeds)
         except Exception:
             pass
 
@@ -338,6 +364,11 @@ class RSSReader(QMainWindow):
                         self._apply_feed_unread_badge(item)
                 except Exception:
                     pass
+        except Exception:
+            pass
+        # Clear in-flight guard
+        try:
+            self._favicon_fetching.discard(domain)
         except Exception:
             pass
 
@@ -920,9 +951,18 @@ class RSSReader(QMainWindow):
         if domain in self.favicon_cache:
             return
         try:
+            if domain in self._favicon_fetching:
+                return
+            self._favicon_fetching.add(domain)
             from rss_reader.services.favicons import FaviconFetchRunnable
             runnable = FaviconFetchRunnable(domain, self)
             self.thread_pool.start(runnable)
+        except Exception:
+            pass
+
+    def _on_icon_fetch_failed(self, domain: str) -> None:
+        try:
+            self._favicon_fetching.discard(domain)
         except Exception:
             pass
 
@@ -983,7 +1023,18 @@ class RSSReader(QMainWindow):
     # ----------------- Read/unread & filters -----------------
     def _toggle_unread_filter(self, checked: bool) -> None:
         self.show_unread_only = checked
-        self._on_feed_selected()
+        # persist to settings
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            settings.setValue('show_only_unread', bool(checked))
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'feedsTree') and self.feedsTree is not None:
+                self._on_feed_selected()
+        except Exception:
+            pass
 
     def mark_all_as_read(self) -> None:
         item = self.feedsTree.currentItem()
@@ -1249,8 +1300,26 @@ class RSSReader(QMainWindow):
 
     # ----------------- Tray & notifications -----------------
     def _init_tray_icon(self) -> None:
-        # delegate to UI helper
-        _ui_init_tray(self)
+        # delegate to UI helper if enabled in settings
+        enabled = True
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            enabled = settings.value('tray_icon_enabled', True, type=bool)
+        except Exception:
+            pass
+        if enabled:
+            _ui_init_tray(self)
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        try:
+            if obj is getattr(self, 'searchEdit', None) and event.type() == QEvent.KeyPress:
+                if event.key() == Qt.Key_Escape:
+                    self.searchEdit.clear()
+                    return True
+        except Exception:
+            pass
+        return super().eventFilter(obj, event)
 
     def _notify_new_read(self) -> None:
         # simple notification when marking as read, respects settings flag if present

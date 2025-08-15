@@ -9,6 +9,10 @@ from PyQt5.QtWidgets import QWidget, QHBoxLayout
 
 def setup_toolbar(app: Any) -> None:
     app.toolbar = QToolBar("Main", app)
+    try:
+        app.toolbar.setObjectName("mainToolbar")
+    except Exception:
+        pass
     app.toolbar.setMovable(False)
     try:
         app.toolbar.setIconSize(QSize(16, 16))
@@ -115,7 +119,6 @@ def apply_toolbar_styles(app: Any) -> None:
         "QToolBar QToolButton[intent='danger']{background:#e74c3c;color:white;}"
         "QToolBar QToolButton[intent='success']{background:#27ae60;color:white;}"
         "QToolBar QToolButton[intent='warning']{background:#f39c12;color:black;}"
-        "QToolBar QToolButton:hover{filter:brightness(1.1);}"
     )
     app.toolbar.setStyleSheet(qss)
 
