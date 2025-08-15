@@ -598,6 +598,11 @@ class RSSReader(QMainWindow):
                         fcfg = dict(gs.get(f_url) or {})
                         fcfg['omdb_enabled'] = enabled
                         gs[f_url] = fcfg
+                        if not enabled:
+                            try:
+                                self.omdb_columns_by_feed.pop(f_url, None)
+                            except Exception:
+                                pass
                     self.group_settings = gs
                     if self.storage:
                         try:
@@ -651,6 +656,12 @@ class RSSReader(QMainWindow):
                 if self.storage:
                     try:
                         self.storage.save_group_settings(self.group_settings)
+                    except Exception:
+                        pass
+                # Clear any cached columns when disabling per-feed
+                if not cfg.get('omdb_enabled'):
+                    try:
+                        self.omdb_columns_by_feed.pop(url, None)
                     except Exception:
                         pass
                 feed = next((f for f in self.feeds if f.get('url') == url), None)
@@ -793,7 +804,17 @@ class RSSReader(QMainWindow):
                 cols = ["Title"] + [c for c in cols if c != "Title"]
             self.omdb_columns_by_feed[feed_url] = cols
         else:
+            # reset any stale per-feed columns configuration when disabled
+            try:
+                self.omdb_columns_by_feed.pop(feed_url, None)
+            except Exception:
+                pass
             cols = ["Title", "Date"]
+        # explicitly set column count then labels to ensure shrink
+        try:
+            self.articlesTree.setColumnCount(len(cols))
+        except Exception:
+            pass
         self.articlesTree.setHeaderLabels(cols)
 
         # index of Date column for sorting and role storage
@@ -1085,6 +1106,13 @@ class RSSReader(QMainWindow):
     def _open_current_article_in_browser(self) -> None:
         """Open the currently selected article's link in the system browser."""
         item = self.articlesTree.currentItem()
+        # Fallback to first article if nothing is selected
+        if not item and self.articlesTree.topLevelItemCount() > 0:
+            item = self.articlesTree.topLevelItem(0)
+            try:
+                self.articlesTree.setCurrentItem(item)
+            except Exception:
+                pass
         if not item:
             return
         entry = item.data(0, Qt.UserRole) or {}

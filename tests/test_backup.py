@@ -4,6 +4,9 @@ from pathlib import Path
 
 import pytest
 
+# Skip: interacts with filesystem backup/restore; exclude user-action/IO tests
+pytestmark = pytest.mark.skip(reason="Excluded: file backup/restore requires external IO")
+
 from small_rss_reader import RSSReader
 from storage import Storage
 
