@@ -7,12 +7,14 @@ implementation lives in `rss_reader.app`. Also exposes
 """
 
 import sys
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QSplashScreen
+from PyQt5.QtGui import QPixmap
 
 from rss_reader.app import (
     RSSReader as RSSReader,
     get_user_data_path as _app_get_user_data_path,
 )
+from rss_reader.utils.paths import resource_path
 
 
 def get_user_data_path(filename: str) -> str:
@@ -21,8 +23,23 @@ def get_user_data_path(filename: str) -> str:
 
 def main() -> int:
     app = QApplication(sys.argv)
+    # Show splash screen with app logo while initializing the main window
+    try:
+        splash_path = resource_path('icons/splash.png')
+        pix = QPixmap(splash_path)
+        splash = QSplashScreen(pix) if not pix.isNull() else QSplashScreen()
+        splash.show()
+        app.processEvents()
+    except Exception:
+        splash = None  # type: ignore
+
     w = RSSReader()
     w.show()
+    try:
+        if splash:
+            splash.finish(w)
+    except Exception:
+        pass
     return app.exec_()
 
 
