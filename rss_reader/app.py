@@ -11,6 +11,8 @@ import os
 import shutil
 import sys
 from datetime import datetime, timedelta
+from collections import deque
+import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 import webbrowser
@@ -100,6 +102,17 @@ class RSSReader(QMainWindow):
         self.search_text = ""
         self.movie_cache: Dict[str, Any] = {}
         self.omdb_columns_by_feed: Dict[str, List[str]] = {}
+        # OMDb request control
+        self._omdb_inflight = set()  # normalized titles currently in-flight
+        self._omdb_queued = set()    # normalized titles queued
+        self._omdb_queue = deque()   # queue of (raw_title)
+        self._omdb_max_inflight = 3  # limit concurrent OMDb requests
+        self._omdb_rate_timer = QTimer(self)
+        try:
+            self._omdb_rate_timer.setInterval(300)  # ms between dispatches
+            self._omdb_rate_timer.timeout.connect(self._omdb_process_queue)
+        except Exception:
+            pass
 
         # Interactive runs: show a basic UI so the window isn't empty
         try:
@@ -215,11 +228,18 @@ class RSSReader(QMainWindow):
         splitter.setStretchFactor(2, 4)
 
         self.setCentralWidget(central)
-        self.statusBar().showMessage("Ready")
 
         # Infrastructure
         self.thread_pool = QThreadPool.globalInstance()
         self.icon_fetched.connect(self.on_icon_fetched)
+        # OMDb worker signals (created lazily)
+        try:
+            from rss_reader.services.omdb import OmdbWorker
+            self._omdb_worker = OmdbWorker()
+            self._omdb_worker.movie_fetched.connect(self._on_movie_fetched)
+            self._omdb_worker.movie_failed.connect(self._on_movie_failed)
+        except Exception:
+            self._omdb_worker = None  # type: ignore
 
         # Storage (SQLite)
         db_path = get_user_data_path("db.sqlite3")
@@ -233,6 +253,17 @@ class RSSReader(QMainWindow):
         self._load_state_from_storage()
         self.update_refresh_timer()
         self._init_tray_icon()
+        # Startup UX: focus first feed and open first article; kick off background refresh
+        try:
+            if self.feedsTree.topLevelItemCount() > 0:
+                first_feed = self.feedsTree.topLevelItem(0)
+                if first_feed:
+                    self.feedsTree.setCurrentItem(first_feed)
+                    QTimer.singleShot(0, lambda: self._select_first_article_in_current_feed(open_article=True))
+            # Initial background refresh (non-blocking)
+            QTimer.singleShot(0, self.refresh_all_feeds)
+        except Exception:
+            pass
 
         # Restore window geometry/state
         try:
@@ -277,7 +308,6 @@ class RSSReader(QMainWindow):
 
     def update_feed_url(self, feed_item, new_url: str) -> bool:
         if not new_url:
-            self.statusBar().showMessage("Feed URL is required.", 5000)
             return False
         if not new_url.startswith(('http://', 'https://')):
             new_url = 'http://' + new_url
@@ -286,11 +316,11 @@ class RSSReader(QMainWindow):
             return True
         # Duplicate guard (excluding current)
         if any(f['url'] == new_url for f in self.feeds if f.get('url') != old_url):
-            self.statusBar().showMessage("This feed URL is already added.", 5000)
+            pass
             return False
         feed_data = next((f for f in self.feeds if f.get('url') == old_url), None)
         if not feed_data:
-            self.statusBar().showMessage("Feed data not found.", 5000)
+            pass
             return False
         # Migrate column widths
         if old_url in self.column_widths:
@@ -311,7 +341,6 @@ class RSSReader(QMainWindow):
             except Exception:
                 pass
         self.data_changed = True
-        self.statusBar().showMessage("Feed URL updated.", 5000)
         return True
 
     # ---- Backup / Restore ----
@@ -330,7 +359,6 @@ class RSSReader(QMainWindow):
                 shutil.copy2(source, dest)
             except Exception:
                 pass
-        self.statusBar().showMessage("Backup to iCloud completed successfully.", 5000)
 
     def restore_from_icloud(self) -> None:
         from pathlib import Path
@@ -346,7 +374,6 @@ class RSSReader(QMainWindow):
                 shutil.copy2(backup_file, dest)
             except Exception:
                 pass
-        self.statusBar().showMessage("Restore from iCloud completed successfully.", 5000)
 
     # ---- Favicons ----
     def on_icon_fetched(self, domain: str, data: bytes) -> None:
@@ -585,7 +612,7 @@ class RSSReader(QMainWindow):
             feed = {'title': title, 'url': url, 'entries': []}
             self.feeds.append(feed)
             item = self._add_feed_item(title, url)
-            self.statusBar().showMessage("Feed added", 3000)
+            pass
             self.refresh_feed(url)
             self.feedsTree.setCurrentItem(item)
 
@@ -709,14 +736,14 @@ class RSSReader(QMainWindow):
             worker.feed_fetched.connect(self._on_feed_fetched)
             runnable = FetchFeedRunnable(url, worker)
             self.thread_pool.start(runnable)
-            self.statusBar().showMessage(f"Refreshing: {url}", 2000)
+            pass
         except Exception:
             pass
 
     @pyqtSlot(str, object)
     def _on_feed_fetched(self, url: str, feed_obj: Any) -> None:
         if not feed_obj:
-            self.statusBar().showMessage(f"Failed to load: {url}", 4000)
+            pass
             return
         # normalize entries
         entries = list(feed_obj.entries or [])
@@ -735,7 +762,8 @@ class RSSReader(QMainWindow):
         current = self.feedsTree.currentItem()
         if current and current.data(0, Qt.UserRole) == url:
             self._populate_articles(url, entries)
-        self.statusBar().showMessage(f"Loaded: {url}", 2000)
+            # trigger OMDb fetch for visible entries (if enabled)
+            self._maybe_fetch_omdb_for_entries(url, entries)
         self._update_tray()
         self._update_feed_unread_badges()
 
@@ -755,6 +783,8 @@ class RSSReader(QMainWindow):
             except Exception:
                 pass
         self._populate_articles(url, entries)
+        # trigger OMDb fetch for visible entries (if enabled)
+        self._maybe_fetch_omdb_for_entries(url, entries)
         # favicon fetch on selection if not present
         self._ensure_favicon_for_url(url)
 
@@ -851,6 +881,12 @@ class RSSReader(QMainWindow):
                 if w:
                     self.articlesTree.setColumnWidth(i, int(w))
 
+        # After listing, try to fetch OMDb data for missing items (async)
+        try:
+            self._maybe_fetch_omdb_for_entries(feed_url, visible_entries)
+        except Exception:
+            pass
+
     def _is_omdb_enabled(self, feed_url: str) -> bool:
         try:
             # Store by feed_url in group_settings if available
@@ -898,6 +934,8 @@ class RSSReader(QMainWindow):
             feed = next((f for f in self.feeds if f.get('url') == feed_url), None)
             entries = feed.get('entries', []) if feed else []
             self._populate_articles(feed_url, entries)
+            # Also refresh background fetch to reflect newly visible columns
+            self._maybe_fetch_omdb_for_entries(feed_url, entries)
         except Exception:
             pass
 
@@ -938,6 +976,156 @@ class RSSReader(QMainWindow):
             else:
                 spacer.setFixedWidth(max(0, width))
             self.toolbar.addWidget(spacer)
+        except Exception:
+            pass
+
+    # ----------------- Helpers -----------------
+    def _select_first_article_in_current_feed(self, open_article: bool = False) -> None:
+        try:
+            if self.articlesTree.topLevelItemCount() == 0:
+                # ensure articles are populated for the current feed
+                cur = self.feedsTree.currentItem()
+                if cur:
+                    url = cur.data(0, Qt.UserRole)
+                    feed = next((f for f in self.feeds if f.get('url') == url), None)
+                    entries = feed.get('entries', []) if feed else []
+                    if entries:
+                        self._populate_articles(url, entries)
+            if self.articlesTree.topLevelItemCount() > 0:
+                first = self.articlesTree.topLevelItem(0)
+                self.articlesTree.setCurrentItem(first)
+                if open_article:
+                    entry = first.data(0, Qt.UserRole)
+                    if entry:
+                        self._show_article(entry)
+        except Exception:
+            pass
+
+    # ----------------- OMDb background fetching -----------------
+    def _maybe_fetch_omdb_for_entries(self, feed_url: str, entries: List[Dict[str, Any]]) -> None:
+        # Only if OMDb enabled for this feed and IMDb column visible
+        if not self._is_omdb_enabled(feed_url):
+            return
+        cols = self.omdb_columns_by_feed.get(feed_url) or ["Title", "Date", "IMDb"]
+        if "IMDb" not in cols:
+            return
+        # Get API key from settings
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            api_key = settings.value('omdb_api_key', '', type=str) or ''
+        except Exception:
+            api_key = ''
+        if not api_key:
+            return
+        # Enqueue fetches for titles not in the movie_cache (with normalization & rate limiting)
+        enqueued_any = False
+        for e in entries or []:
+            raw_title = (e.get('title') or e.get('link') or '').strip()
+            if not raw_title:
+                continue
+            norm = self._norm_title(raw_title)
+            if raw_title in (self.movie_cache or {}) or norm in (self.movie_cache or {}):
+                continue
+            if norm in self._omdb_inflight or norm in self._omdb_queued:
+                continue
+            self._omdb_queue.append(raw_title)
+            self._omdb_queued.add(norm)
+            enqueued_any = True
+        # Start timer if we queued new items
+        if enqueued_any and not self._omdb_rate_timer.isActive():
+            try:
+                self._omdb_rate_timer.start()
+            except Exception:
+                pass
+
+    def _omdb_process_queue(self) -> None:
+        # Dispatch from queue respecting max inflight; stop timer if nothing to do
+        try:
+            if not getattr(self, '_omdb_worker', None):
+                return
+            # Re-check API key each tick to honor changes
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            api_key = settings.value('omdb_api_key', '', type=str) or ''
+            if not api_key:
+                try:
+                    self._omdb_rate_timer.stop()
+                except Exception:
+                    pass
+                return
+            progressed = False
+            while self._omdb_queue and len(self._omdb_inflight) < self._omdb_max_inflight:
+                raw_title = self._omdb_queue.popleft()
+                norm = self._norm_title(raw_title)
+                self._omdb_queued.discard(norm)
+                # Skip if already cached or inflight (race check)
+                if raw_title in (self.movie_cache or {}) or norm in (self.movie_cache or {}):
+                    continue
+                if norm in self._omdb_inflight:
+                    continue
+                try:
+                    from rss_reader.services.omdb import FetchOmdbRunnable
+                    self._omdb_inflight.add(norm)
+                    runnable = FetchOmdbRunnable(raw_title, api_key, self._omdb_worker)
+                    self.thread_pool.start(runnable)
+                    progressed = True
+                except Exception:
+                    pass
+            # Stop timer if idle
+            if not self._omdb_queue and not progressed:
+                try:
+                    self._omdb_rate_timer.stop()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _norm_title(self, title: str) -> str:
+        s = (title or '').strip().lower()
+        s = ' '.join(s.split())  # collapse whitespace
+        # drop trailing (YYYY) if present
+        m = re.match(r"^(.*)\s*\((\d{4})\)$", s)
+        if m:
+            return m.group(1).strip()
+        return s
+
+    def _on_movie_fetched(self, title: str, data: Dict[str, Any]) -> None:
+        try:
+            norm = self._norm_title(title)
+            self._omdb_inflight.discard(norm)
+            # Store under both raw and normalized keys for better cache hits
+            self.movie_cache[title] = data or {}
+            self.movie_cache[norm] = data or {}
+            if self.storage:
+                try:
+                    self.storage.save_movie_cache(self.movie_cache)
+                except Exception:
+                    pass
+            # Update currently visible rows if any match
+            try:
+                count = self.articlesTree.topLevelItemCount()
+                for i in range(count):
+                    it = self.articlesTree.topLevelItem(i)
+                    e = it.data(0, Qt.UserRole) or {}
+                    row_title = (e.get('title') or e.get('link') or '').strip()
+                    if self._norm_title(row_title) == norm:
+                        cols = [self.articlesTree.headerItem().text(c) for c in range(self.articlesTree.columnCount())]
+                        if "IMDb" in cols:
+                            imdb = data.get('imdbrating') or data.get('imdb_rating') or ''
+                            idx = cols.index("IMDb")
+                            it.setText(idx, str(imdb))
+            except Exception:
+                pass
+            # Try to dispatch the next item if any
+            self._omdb_process_queue()
+        except Exception:
+            pass
+
+    def _on_movie_failed(self, title: str, _err: Exception) -> None:
+        try:
+            self._omdb_inflight.discard(self._norm_title(title))
+            self._omdb_process_queue()
         except Exception:
             pass
 
@@ -1021,7 +1209,7 @@ class RSSReader(QMainWindow):
     def open_settings(self) -> None:
         dlg = SettingsDialog(self)
         if dlg.exec_() == dlg.Accepted:
-            self.statusBar().showMessage("Settings saved", 3000)
+            pass
             self._update_tray()
 
     def update_refresh_timer(self) -> None:
@@ -1173,7 +1361,7 @@ class RSSReader(QMainWindow):
                 ET.SubElement(body, 'outline', type='rss', text=f.get('title') or f.get('url'), xmlUrl=f.get('url'))
             tree = ET.ElementTree(opml)
             tree.write(path, encoding='utf-8', xml_declaration=True)
-            self.statusBar().showMessage("OPML exported", 3000)
+            pass
         except Exception:
             self.warn("Error", "Failed to export OPML")
 
@@ -1197,7 +1385,7 @@ class RSSReader(QMainWindow):
                             pass
                     self.feeds.append({'title': text, 'url': url, 'entries': []})
                     self._add_feed_item(text, url)
-            self.statusBar().showMessage("OPML imported", 3000)
+            pass
         except Exception:
             self.warn("Error", "Failed to import OPML")
 
@@ -1208,7 +1396,7 @@ class RSSReader(QMainWindow):
             return
         try:
             added = self.import_json_from_path(path)
-            self.statusBar().showMessage(f"Imported feeds: {added}", 3000)
+            pass
             self._update_tray()
         except Exception:
             self.warn("Error", "Failed to import JSON")
@@ -1268,7 +1456,7 @@ class RSSReader(QMainWindow):
             return
         try:
             self.export_json_to_path(path)
-            self.statusBar().showMessage("JSON exported", 3000)
+            pass
         except Exception:
             self.warn("Error", "Failed to export JSON")
 
