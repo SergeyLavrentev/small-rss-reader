@@ -11,7 +11,7 @@ def ui_app(qtbot, monkeypatch):
     return w
 
 
-def test_header_menu_allows_toggling_columns_when_omdb_enabled(ui_app):
+def test_omdb_enabled_shows_only_imdb_column(ui_app):
     app = ui_app
     app.feeds = [{'title': 'F', 'url': 'https://cols.example.org/rss', 'entries': [{'title': 'Inception'}]}]
     app.group_settings['https://cols.example.org/rss'] = {'omdb_enabled': True}
@@ -19,11 +19,11 @@ def test_header_menu_allows_toggling_columns_when_omdb_enabled(ui_app):
     it = app.feedsTree.topLevelItem(0)
     app.feedsTree.setCurrentItem(it)
     app._on_feed_selected()
-    # Initially Title, Date, IMDb
+    # Only Title, Date, IMDb
     hdr = [app.articlesTree.headerItem().text(i) for i in range(app.articlesTree.columnCount())]
-    assert 'IMDb' in hdr
-    # Simulate header menu result by directly editing omdb_columns_by_feed
+    assert hdr == ['Title', 'Date', 'IMDb']
+    # Попытки изменить набор колонок игнорируются
     app.omdb_columns_by_feed['https://cols.example.org/rss'] = ['Title', 'Date', 'Year']
     app._on_feed_selected()
     hdr2 = [app.articlesTree.headerItem().text(i) for i in range(app.articlesTree.columnCount())]
-    assert 'Year' in hdr2 and 'IMDb' not in hdr2
+    assert hdr2 == ['Title', 'Date', 'IMDb']

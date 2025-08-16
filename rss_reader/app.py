@@ -171,10 +171,9 @@ class RSSReader(QMainWindow):
         self.articlesTree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.articlesTree.customContextMenuRequested.connect(self._on_articles_context_menu)
         self.articlesTree.header().sectionResized.connect(self._on_section_resized)
-        # Header menu for column toggling when OMDb is enabled
+        # Меню заголовка отключено: OMDb показывает только одну колонку IMDb
         try:
-            self.articlesTree.header().setContextMenuPolicy(Qt.CustomContextMenu)
-            self.articlesTree.header().customContextMenuRequested.connect(self._on_articles_header_menu)
+            self.articlesTree.header().setContextMenuPolicy(Qt.DefaultContextMenu)
         except Exception:
             pass
 
@@ -358,8 +357,21 @@ class RSSReader(QMainWindow):
         icon = QIcon(pm)
         for d in _domain_variants(domain):
             self.favicon_cache[d] = icon
-        # Update tree icons for matching feeds (single-level tree in refactor build)
+        # Update tree icons for matching feeds and groups
         try:
+            # Проставить иконку для группы, если её имя совпадает с доменом
+            try:
+                top_count = self.feedsTree.topLevelItemCount()
+            except Exception:
+                top_count = 0
+            for i in range(top_count):
+                top = self.feedsTree.topLevelItem(i)
+                if not top:
+                    continue
+                if not (top.data(0, Qt.UserRole) or None):
+                    name = top.text(0)
+                    if name in _domain_variants(domain):
+                        top.setIcon(0, icon)
             for item in self._iter_feed_items():
                 url = item.data(0, Qt.UserRole) or ""
                 if not url:
@@ -367,7 +379,7 @@ class RSSReader(QMainWindow):
                 try:
                     feed_domain = urlparse(url).netloc or url
                     if feed_domain in _domain_variants(domain):
-                        # store base icon and then apply unread badge if needed
+                        # store base icon (оставляем для бейджа), не показываем favicon напрямую
                         item.setData(0, Qt.UserRole + 1, icon)
                         self._apply_feed_unread_badge(item)
                 except Exception:
@@ -438,9 +450,11 @@ class RSSReader(QMainWindow):
             except Exception:
                 pass
         if icon:
-            item.setIcon(0, icon)
             # store base icon for badge overlay
             item.setData(0, Qt.UserRole + 1, icon)
+            # показываем favicon только у одиночных фидов (верхний уровень)
+            if parent is None:
+                item.setIcon(0, icon)
         if parent is not None:
             parent.addChild(item)
         else:
@@ -493,7 +507,19 @@ class RSSReader(QMainWindow):
                 if len(flist) > 1:
                     group_item = QTreeWidgetItem([domain])
                     group_item.setFirstColumnSpanned(False)
+                    # иконка группы по домену (если есть)
+                    try:
+                        gicon = self.favicon_cache.get(domain)
+                        if gicon:
+                            group_item.setIcon(0, gicon)
+                    except Exception:
+                        pass
                     self.feedsTree.addTopLevelItem(group_item)
+                    # раскрывать группу по умолчанию
+                    try:
+                        group_item.setExpanded(True)
+                    except Exception:
+                        pass
                     for f in flist:
                         it = self._add_feed_item(f.get('title') or f.get('url'), f.get('url'), parent=group_item)
                         url_to_item[f.get('url')] = it
@@ -790,22 +816,11 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
-        # Columns based on OMDb flag
+        # Columns based on OMDb flag (только IMDb как единственная доп. колонка)
         omdb_enabled = self._is_omdb_enabled(feed_url)
         if omdb_enabled:
-            # default OMDb columns when enabled
-            default_cols = ["Title", "Date", "IMDb"]
-            cols = self.omdb_columns_by_feed.get(feed_url) or default_cols
-            # ensure at least Title present
-            if "Title" not in cols:
-                cols = ["Title"] + [c for c in cols if c != "Title"]
-            self.omdb_columns_by_feed[feed_url] = cols
+            cols = ["Title", "Date", "IMDb"]
         else:
-            # reset any stale per-feed columns configuration when disabled
-            try:
-                self.omdb_columns_by_feed.pop(feed_url, None)
-            except Exception:
-                pass
             cols = ["Title", "Date"]
         # explicitly set column count then labels to ensure shrink
         try:
@@ -825,16 +840,12 @@ class RSSReader(QMainWindow):
             dt = self.get_entry_date(e)
             date_str = dt.strftime('%d.%m.%Y') if dt != datetime.min else ''
             # OMDb-derived fields (only if enabled)
-            imdb = year = director = actors = genre = ''
+            imdb = ''
             rec = {}
             if omdb_enabled and self.movie_cache:
                 try:
                     rec = self.movie_cache.get(title) or {}
                     imdb = rec.get('imdbrating') or rec.get('imdb_rating') or rec.get('rating') or rec.get('imdbRating') or ''
-                    year = rec.get('year') or rec.get('Year') or ''
-                    director = rec.get('director') or rec.get('Director') or ''
-                    actors = rec.get('actors') or rec.get('Actors') or ''
-                    genre = rec.get('genre') or rec.get('Genre') or ''
                 except Exception:
                     pass
             row: List[str] = []
@@ -845,14 +856,6 @@ class RSSReader(QMainWindow):
                     row.append(date_str)
                 elif c == "IMDb":
                     row.append(imdb)
-                elif c == "Year":
-                    row.append(year)
-                elif c == "Director":
-                    row.append(director)
-                elif c == "Actors":
-                    row.append(actors)
-                elif c == "Genre":
-                    row.append(genre)
                 else:
                     row.append('')
             item = ArticleTreeWidgetItem(row)
@@ -912,49 +915,8 @@ class RSSReader(QMainWindow):
             return False
 
     def _on_articles_header_menu(self, pos) -> None:
-        try:
-            item = self.feedsTree.currentItem()
-            if not item:
-                return
-            feed_url = item.data(0, Qt.UserRole)
-            if not self._is_omdb_enabled(feed_url):
-                return
-            # allow extended OMDb columns when enabled
-            available = ["Title", "Date", "IMDb", "Year", "Director", "Actors", "Genre"]
-            current = self.omdb_columns_by_feed.get(feed_url) or available
-            menu = QMenu(self)
-            act_map = {}
-            for col in available:
-                a = menu.addAction(col)
-                a.setCheckable(True)
-                a.setChecked(col in current)
-                if col == "Title":
-                    a.setEnabled(False)
-                act_map[a] = col
-            chosen = menu.exec_(self.articlesTree.header().mapToGlobal(pos))
-            if not chosen:
-                return
-            col = act_map.get(chosen)
-            if not col:
-                return
-            new = set(current)
-            if chosen.isChecked():
-                new.add(col)
-            else:
-                if col != "Title":
-                    new.discard(col)
-            ordered = [c for c in available if c in new]
-            if not ordered:
-                ordered = ["Title"]
-            self.omdb_columns_by_feed[feed_url] = ordered
-            # repopulate current feed
-            feed = next((f for f in self.feeds if f.get('url') == feed_url), None)
-            entries = feed.get('entries', []) if feed else []
-            self._populate_articles(feed_url, entries)
-            # Also refresh background fetch to reflect newly visible columns
-            self._maybe_fetch_omdb_for_entries(feed_url, entries)
-        except Exception:
-            pass
+        # Меню отключено — расширенные колонки OMDb не используются
+        return
 
     def _apply_toolbar_styles(self) -> None:
         # delegate to UI helper
