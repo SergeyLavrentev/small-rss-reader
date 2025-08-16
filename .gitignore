@@ -21,3 +21,6 @@ env/
 
 # Ignore local SQLite database
 db.sqlite3
+
+# Local version metadata generated at build time
+app_version.py

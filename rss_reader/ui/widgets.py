@@ -1,9 +1,10 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QTreeWidgetItem, QTreeWidget
 try:
-    from PyQt5.QtWebEngineWidgets import QWebEnginePage
+    from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineView
 except Exception:  # pragma: no cover - not available in test-light mode
     QWebEnginePage = object  # type: ignore
+    QWebEngineView = object  # type: ignore
 from PyQt5.QtGui import QDesktopServices
 
 
@@ -57,3 +58,21 @@ class WebEnginePage(QWebEnginePage):
 
     def handleUnsupportedContent(self, reply):
         reply.abort()
+
+    # Handle target=_blank and window.open() by opening externally
+    def createWindow(self, _type):  # pragma: no cover - UI behavior
+        try:
+            # Return a transient page; open URL externally and dispose page
+            page = QWebEnginePage(self.profile(), self)
+            def _open(url):
+                try:
+                    QDesktopServices.openUrl(url)
+                finally:
+                    try:
+                        page.deleteLater()
+                    except Exception:
+                        pass
+            page.urlChanged.connect(_open)
+            return page
+        except Exception:
+            return None

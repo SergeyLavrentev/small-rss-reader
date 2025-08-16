@@ -4,7 +4,7 @@ import sys
 import logging
 import subprocess
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from urllib.parse import urlparse
 import webbrowser
@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
     QTextBrowser,
     QLabel,
 )
-from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent
+from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent, QUrl, QRunnable
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
 
@@ -76,6 +76,9 @@ class RSSReader(QMainWindow):
     # Signals used by favicon runnable
     icon_fetched = pyqtSignal(str, bytes)
     icon_fetch_failed = pyqtSignal(str)
+    # Signals for article page prefetch
+    page_fetched = pyqtSignal(str, str, str)  # aid, link, html
+    page_fetch_failed = pyqtSignal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -110,6 +113,9 @@ class RSSReader(QMainWindow):
         self._omdb_mgr: Optional[OmdbQueueManager] = None
         # Track domains with in-flight favicon fetch to avoid duplicates
         self._favicon_fetching = set()
+        # Cache for cleaned article HTML by article id
+        self.article_html_cache: Dict[str, str] = {}
+        self._page_fetching_aids = set()
 
         # Interactive runs: show a basic UI so the window isn't empty
         try:
@@ -168,6 +174,36 @@ class RSSReader(QMainWindow):
         splitter = QSplitter(Qt.Horizontal, central)
         layout.addWidget(splitter)
         self._splitter = splitter
+        # Thin handles + resize cursor
+        try:
+            splitter.setStyleSheet(
+                """
+                QSplitter::handle { background: rgba(0,0,0,32); }
+                QSplitter::handle:hover { background: rgba(66,133,244,140); }
+                QSplitter::handle:horizontal { width: 4px; }
+                QSplitter::handle:vertical { height: 4px; }
+                """
+            )
+            for i in range(1, splitter.count()):
+                try:
+                    h = splitter.handle(i)
+                    if h:
+                        h.setCursor(Qt.SplitHCursor)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Thin handles + clear resize cursor on hover
+        try:
+            splitter.setHandleWidth(4)
+            splitter.setStyleSheet(
+                """
+                QSplitter::handle { background: rgba(0,0,0,32); }
+                QSplitter::handle:hover { background: rgba(0,0,0,96); }
+                """
+            )
+        except Exception:
+            pass
 
         # Left: feeds tree
         self.feedsTree = FeedsTreeWidget(splitter)
@@ -236,6 +272,13 @@ class RSSReader(QMainWindow):
             view = QTextBrowser(splitter)
             view.setObjectName("contentView")
             view.setHtml("<html><body><p>Select an article to view its content</p></body></html>")
+            try:
+                view.setOpenExternalLinks(True)
+                # Fallback: ensure anchorClicked opens in system browser
+                from PyQt5.QtGui import QDesktopServices
+                view.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
+            except Exception:
+                pass
             self.webView = view
         else:
             self.webView = QWebEngineView(splitter)
@@ -265,6 +308,14 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
         # Guard against collapsed panels (ensure 3 panes visible)
+        # Ensure resize cursor on handles (Qt usually does this by default, but make explicit)
+        try:
+            for i in range(1, splitter.count()):
+                h = splitter.handle(i)
+                if h:
+                    h.setCursor(Qt.SplitHCursor)
+        except Exception:
+            pass
         try:
             sizes_now = splitter.sizes()
             if any(int(s or 0) <= 1 for s in sizes_now):
@@ -289,6 +340,12 @@ class RSSReader(QMainWindow):
         self.icon_fetched.connect(self.on_icon_fetched)
         try:
             self.icon_fetch_failed.connect(self._on_icon_fetch_failed)
+        except Exception:
+            pass
+        # Prefetch page signals
+        try:
+            self.page_fetched.connect(self._on_page_fetched)
+            self.page_fetch_failed.connect(lambda _aid: None)
         except Exception:
             pass
         # OMDb worker signals (created lazily)
@@ -1044,6 +1101,25 @@ class RSSReader(QMainWindow):
                     pass
             self.articlesTree.addTopLevelItem(item)
 
+        # Prefetch pages for items without inline content (skip in tests)
+        try:
+            headless_tests = bool(os.environ.get('SMALL_RSS_TESTS') or os.environ.get('PYTEST_CURRENT_TEST'))
+        except Exception:
+            headless_tests = False
+        if not headless_tests:
+            for e in visible_entries:
+                try:
+                    aid = self.get_article_id(e)
+                    if aid in self.article_html_cache or aid in self._page_fetching_aids:
+                        continue
+                    link = (e.get('link') or '').strip()
+                    has_inline = bool(e.get('content') or e.get('summary') or e.get('description'))
+                    if link and not has_inline:
+                        self._page_fetching_aids.add(aid)
+                        self.thread_pool.start(_PageFetchRunnable(aid, link, self))
+                except Exception:
+                    pass
+
         # Sort by Date if present
         try:
             sort_idx = cols.index("Date") if "Date" in cols else max(0, len(cols) - 1)
@@ -1287,39 +1363,77 @@ class RSSReader(QMainWindow):
                 self._update_feed_unread_badges()
             except Exception:
                 pass
-        # build simple HTML
-        title = entry.get('title', '')
-        link = entry.get('link', '')
-        content = ''
-        if entry.get('content'):
-            try:
-                content = entry['content'][0]['value']
-            except Exception:
-                content = ''
-        content = content or entry.get('summary', '') or entry.get('description', '') or ''
-        if not content:
-            # Build a minimal content if feed only had title/link
-            try:
-                content = f"<p><a href='{link}' target='_blank'>{link}</a></p>"
-            except Exception:
-                content = ''
-        html = f"""
-        <html><head><meta charset='utf-8'>
-    <style>
-    body {{ font-family: {self.default_font.family()}; font-size: {self.current_font_size}px; }}
-    img {{ max-width: 50%; height: auto; }}
-    </style>
-        </head><body>
-        <h2><a href='{link}' target='_blank'>{title}</a></h2>
-        <div>{content}</div>
-        </body></html>
-        """
+        # Build robust HTML (with base href and fallbacks) and show
+        # 1) Try inline HTML content
         try:
-            self.webView.setHtml(html)
+            html, base_url = self._build_article_html(entry)
+        except Exception:
+            html, base_url = ("<html><body><p>No content</p></body></html>", "")
+
+        # Heuristic: decide if we actually have real inline content
+        link = (entry.get('link') or '').strip()
+        def _has_real_content(h: str) -> bool:
+            s = (h or '').lower()
+            # more than just the header and footer around an empty body
+            return any(tag in s for tag in ('<p', '<div', '<img', '<ul', '<ol', '<table', '<article')) and len(s) > 40
+
+        showed_inline = False
+        try:
+            if hasattr(self.webView, 'setHtml') and _has_real_content(html):
+                if base_url:
+                    self.webView.setHtml(html, QUrl(base_url))
+                else:
+                    self.webView.setHtml(html)
+                showed_inline = True
         except Exception:
             # QTextBrowser uses setHtml too; this is just in case
             try:
                 self.webView.setText(html)
+                showed_inline = True
+            except Exception:
+                pass
+
+        # 2) Fallback: if no inline content and we have a link, load full page
+        try:
+            headless_tests = bool(os.environ.get('SMALL_RSS_TESTS') or os.environ.get('PYTEST_CURRENT_TEST'))
+        except Exception:
+            headless_tests = False
+        if not showed_inline and link:
+            try:
+                # If it's a QWebEngineView, load the URL directly
+                if isinstance(self.webView, QWebEngineView):
+                    self.webView.load(QUrl(link))
+                    showed_inline = True
+                # If it's a QTextBrowser (tests or light mode), try to fetch HTML
+                elif not headless_tests:
+                    try:
+                        import requests  # lazy import
+                        resp = requests.get(link, timeout=8, headers={
+                            'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'
+                        })
+                        txt = resp.text if hasattr(resp, 'text') else ''
+                        if txt:
+                            try:
+                                self.webView.setHtml(txt, QUrl(link))
+                            except Exception:
+                                self.webView.setHtml(txt)
+                            showed_inline = True
+                    except Exception:
+                        showed_inline = False
+            except Exception:
+                pass
+
+        # 3) As a last resort, show minimal link card
+        if not showed_inline:
+            try:
+                title = entry.get('title') or link or ''
+                minimal = f"<html><body style=\"font-family:{self.default_font.family()};font-size:{int(self.current_font_size)}px\"><h3>{title}</h3>"
+                if link:
+                    minimal += f"<p><a href='{link}' target='_blank'>{link}</a></p>"
+                else:
+                    minimal += "<p>No content</p>"
+                minimal += "</body></html>"
+                self.webView.setHtml(minimal, QUrl(link) if link else QUrl())
             except Exception:
                 pass
         # notifications (optional)
@@ -1347,6 +1461,82 @@ class RSSReader(QMainWindow):
                     webbrowser.open(link)
             except Exception:
                 pass
+
+    def _build_article_html(self, entry: Dict[str, Any]) -> Tuple[str, str]:
+        """Return (html, base_url) built from feed entry.
+        Keeps current parsing approach but improves robustness and layout.
+        """
+        import html as _html
+        title = entry.get('title') or entry.get('link') or ''
+        link = entry.get('link') or ''
+        base_url = link or ''
+        # If we have a prefetched/cleaned version, prefer it
+        try:
+            aid = self.get_article_id(entry)
+            cached = self.article_html_cache.get(aid)
+            if cached:
+                return cached, base_url
+        except Exception:
+            pass
+        # Prefer content.value if available
+        raw = ''
+        try:
+            if entry.get('content'):
+                raw = entry['content'][0].get('value') or ''
+        except Exception:
+            raw = ''
+        if not raw:
+            raw = entry.get('summary') or entry.get('description') or ''
+        # If raw seems plain text (no tags), escape and wrap
+        def _looks_html(s: str) -> bool:
+            s2 = (s or '').strip().lower()
+            return any(t in s2 for t in ('<p', '<div', '<br', '<img', '<a ', '<ul', '<ol', '<h1', '<h2', '<table'))
+        if raw and not _looks_html(raw):
+            raw = '<p>' + _html.escape(str(raw)).replace('\n', '<br>') + '</p>'
+        if not raw:
+            if link:
+                raw = f"<p><a href='{_html.escape(link)}' target='_blank'>{_html.escape(link)}</a></p>"
+            else:
+                raw = "<p>No content</p>"
+        # Compose HTML with base and sane defaults
+        css_body_font = f"{self.default_font.family()}"
+        css_font_size = int(self.current_font_size)
+        base_tag = f"<base href='{_html.escape(base_url)}'>" if base_url else ''
+        html = f"""
+        <html>
+            <head>
+                <meta charset='utf-8'>
+                {base_tag}
+                <style>
+                    body {{ font-family: {css_body_font}; font-size: {css_font_size}px; margin: 16px; }}
+                    img, video, iframe {{ max-width: 100%; height: auto; }}
+                    pre {{ white-space: pre-wrap; }}
+                    a {{ color: #0366d6; text-decoration: none; }}
+                    a:hover {{ text-decoration: underline; }}
+                </style>
+            </head>
+            <body>
+                <h2>{_html.escape(title)}</h2>
+                <div>{raw}</div>
+                <hr>
+                <p><a href='{_html.escape(link)}' target='_blank'>Open original</a></p>
+            </body>
+        </html>
+        """
+        return html, base_url
+
+    # -------- Prefetch support --------
+    def _on_page_fetched(self, aid: str, link: str, html: str) -> None:
+        try:
+            self.article_html_cache[aid] = html
+        except Exception:
+            pass
+        try:
+            self._page_fetching_aids.discard(aid)
+        except Exception:
+            pass
+
+ 
 
     # ----------------- Favicons -----------------
     def _ensure_favicon_for_url(self, url: str) -> None:
@@ -1877,3 +2067,46 @@ class RSSReader(QMainWindow):
         </body></html>
         """
         QMessageBox.about(self, "About", html)
+
+
+# Background page prefetch runnable (module-level)
+class _PageFetchRunnable(QRunnable):
+    def __init__(self, aid: str, link: str, app: RSSReader) -> None:
+        super().__init__()
+        self.aid = aid
+        self.link = link
+        self.app = app
+
+    def run(self) -> None:  # pragma: no cover - network
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            resp = requests.get(self.link, timeout=8, headers={
+                'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'
+            })
+            text = resp.text if hasattr(resp, 'text') else ''
+            html = text
+            try:
+                if text:
+                    soup = BeautifulSoup(text, 'html.parser')
+                    # Remove noisy elements
+                    for tag in soup(['script', 'style', 'noscript']):
+                        tag.decompose()
+                    # Heuristic: main content by common containers
+                    container = None
+                    for sel in ['article', 'main', '#content', '.post', '.entry-content', '.article-content']:
+                        container = soup.select_one(sel)
+                        if container:
+                            break
+                    if not container:
+                        container = soup.body or soup
+                    cleaned = str(container)
+                    html = f"<html><head><meta charset='utf-8'><base href='{self.link}'></head><body>{cleaned}</body></html>"
+            except Exception:
+                pass
+            self.app.page_fetched.emit(self.aid, self.link, html)
+        except Exception:
+            try:
+                self.app.page_fetch_failed.emit(self.aid)
+            except Exception:
+                pass
