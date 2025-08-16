@@ -154,11 +154,13 @@ class OmdbQueueManager(QObject):
         - Drop bracketed [ ... ] parts (release info, sizes, tags)
         - If title has ' / ' parts, pick the part with more ASCII letters
         - Remove director names in parentheses; keep year if found
+        - Trim trailing language/track tags like VO/MVO/AVO/Dub/Sub/Original Eng, etc.
+        - Cut off tails after separators like " + ", " - ", " — ", " | " when they look like metadata
         - Extract a plausible year (1900..2100) from () or [] or commas
         """
         s = (raw or '').strip()
         # Try to capture a plausible year from the original string first
-        year = None
+        year: Optional[int] = None
         for m in re.finditer(r"(19\d{2}|20\d{2}|2100)", s):
             try:
                 y = int(m.group(0))
@@ -167,15 +169,36 @@ class OmdbQueueManager(QObject):
                     break
             except Exception:
                 pass
+
         # remove [ ... ] blocks
         s = re.sub(r"\[[^\]]+\]", " ", s)
-        # split by ' / ' and pick ASCII-heavier part
+        # remove parentheses that are not pure year (to prevent splitting on ' / ' inside them)
+        s = re.sub(r"\((?!\d{4}\))[^)]*\)", " ", s)
+        # split by ' / ' and pick ASCII-heavier part (now safe; director names removed)
         parts = [p.strip() for p in s.split(' / ') if p.strip()] or [s]
+
         def ascii_score(t: str) -> int:
             return sum(1 for ch in t if ord(ch) < 128 and ch.isalpha())
+
         best = max(parts, key=ascii_score)
-        # remove parentheses that are not pure year
+        # quick cut at explicit separators commonly used for metadata
+        for sep in [" + ", " - ", " — ", " | ", " • ", " · "]:
+            if sep in best:
+                best = best.split(sep, 1)[0]
+        # remove any lingering parentheses again (safety)
         best = re.sub(r"\((?!\d{4}\))[^)]*\)", " ", best)
+        # if a stray closing parenthesis remains and tail contains metadata-ish tokens, drop the tail
+        if ")" in best:
+            head, tail = best.rsplit(")", 1)
+            if any(tok in tail for tok in [
+                "+", "VO", "MVO", "AVO", "Dub", "Sub", "Original", "Eng", "Ukr", "Rus", "Deu", "Ger", "Fra", "Ita"
+            ]):
+                best = head
+        # remove lingering language/track tags from the end
+        lang_tokens = r"VO|MVO|AVO|Dub|Sub|Eng|English|Ukr|Ukrainian|Rus|Russian|Deu|Ger|German|Fra|French|Ita|Italian|Spa|Spanish|Pol|Polish"
+        best = re.sub(rf"\b(?:{lang_tokens})\b.*$", " ", best, flags=re.IGNORECASE)
+        # remove 'Original <Lang>' pattern tails
+        best = re.sub(rf"\bOriginal\s+(?:{lang_tokens})\b.*$", " ", best, flags=re.IGNORECASE)
         # collapse spaces
         best = ' '.join(best.split())
         return best, year

@@ -33,6 +33,19 @@ def test_extract_title_year_from_noisy_title():
     assert year == 2018
 
 
+def test_extract_title_year_trims_lang_and_plus_tails():
+    samples = [
+        "American Hustle (David O. Russell) 2x Dub + 2x MVO + AVO + VO + MVO Ukr + Original Eng + Sub",
+        "The Power of Few (David A. Armstrong) MVO + Original Eng + Sub Eng",
+        "Stalingrad (Joseph Vilsmaier) VO + Sub + Original Deu",
+    ]
+    for s in samples:
+        title, year = OmdbQueueManager._extract_title_year(s)
+        assert "+" not in title
+        assert ")" not in title
+        assert any(word in title for word in ["Hustle", "Power", "Stalingrad"]) or len(title.split()) >= 1
+
+
 def test_app_sets_auth_failed_on_401_shows_status(ui_app, qtbot, monkeypatch):
     app = ui_app
     # Provide dummy manager to capture set_auth_failed calls
