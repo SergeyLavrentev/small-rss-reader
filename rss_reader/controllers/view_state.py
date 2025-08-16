@@ -45,9 +45,10 @@ def load_window_state(app) -> None:
             app.restoreState(state)
         try:
             if hasattr(app, 'toolbar') and app.toolbar:
-                app.toolbar.setVisible(bool(tb_vis))
+                # Default to visible if value missing/None
+                app.toolbar.setVisible(True if tb_vis is None else bool(tb_vis))
             if hasattr(app, 'actToggleToolbar') and app.actToggleToolbar:
-                app.actToggleToolbar.setChecked(bool(tb_vis))
+                app.actToggleToolbar.setChecked(True if tb_vis is None else bool(tb_vis))
         except Exception:
             pass
         try:

@@ -20,7 +20,21 @@ def setup_toolbar(app: Any) -> None:
         pass
     app.addToolBar(app.toolbar)
     try:
+        app.toolbar.setVisible(True)
+    except Exception:
+        pass
+    try:
         app.toolbar.setToolButtonStyle(Qt.ToolButtonIconOnly)
+    except Exception:
+        pass
+    try:
+        app.toolbar.setFloatable(False)
+        app.toolbar.setAllowedAreas(Qt.TopToolBarArea | Qt.BottomToolBarArea)
+        # Ensure buttons show as flat but react on hover/press
+        for act in []:
+            btn = app.toolbar.widgetForAction(act)
+            if btn:
+                btn.setAutoRaise(True)
     except Exception:
         pass
 
@@ -35,6 +49,12 @@ def setup_toolbar(app: Any) -> None:
     # Group 3: Read state
     app.toolbar.addAction(app.actMarkAllRead)
     app.toolbar.addAction(app.actMarkAllUnread)
+    # Ensure actions are enabled
+    try:
+        for act in [app.actAddFeed, app.actRemoveFeed, app.actRefreshAll, app.actRefreshFeed, app.actMarkAllRead, app.actMarkAllUnread]:
+            act.setEnabled(True)
+    except Exception:
+        pass
 
     # Small visual gap before the center group
     app.toolbar.addSeparator(); _add_toolbar_spacer(app, 6)
@@ -113,12 +133,33 @@ def _add_toolbar_spacer(app: Any, width: int = 8, expand: bool = False) -> None:
 
 def apply_toolbar_styles(app: Any) -> None:
     qss = (
-        "QToolBar QToolButton{padding:4px 8px;border-radius:6px;margin:0 2px;}"
+        # Base button look + clear hover/pressed feedback
+        "QToolBar QToolButton{padding:4px 8px;border-radius:6px;margin:0 2px;"
+        "background:transparent;color:inherit;}"
+        "QToolBar QToolButton:hover{background:rgba(255,255,255,0.10);}"
+        "QToolBar QToolButton:pressed{background:rgba(0,0,0,0.18);}"
+        "QToolBar QToolButton:disabled{background:rgba(0,0,0,0.06);color:#9aa0a6;}"
+
+        # Intents with explicit hover/pressed shades
         "QToolBar QToolButton[intent='primary']{background:#2ecc71;color:black;}"
+        "QToolBar QToolButton[intent='primary']:hover{background:#3ee07f;}"
+        "QToolBar QToolButton[intent='primary']:pressed{background:#28b765;}"
+
         "QToolBar QToolButton[intent='info']{background:#3498db;color:white;}"
+        "QToolBar QToolButton[intent='info']:hover{background:#3ea7ef;}"
+        "QToolBar QToolButton[intent='info']:pressed{background:#2d86c4;}"
+
         "QToolBar QToolButton[intent='danger']{background:#e74c3c;color:white;}"
+        "QToolBar QToolButton[intent='danger']:hover{background:#ee5b50;}"
+        "QToolBar QToolButton[intent='danger']:pressed{background:#cf4437;}"
+
         "QToolBar QToolButton[intent='success']{background:#27ae60;color:white;}"
+        "QToolBar QToolButton[intent='success']:hover{background:#2fbe6d;}"
+        "QToolBar QToolButton[intent='success']:pressed{background:#229955;}"
+
         "QToolBar QToolButton[intent='warning']{background:#f39c12;color:black;}"
+        "QToolBar QToolButton[intent='warning']:hover{background:#f6a42b;}"
+        "QToolBar QToolButton[intent='warning']:pressed{background:#da8c0b;}"
     )
     app.toolbar.setStyleSheet(qss)
 

@@ -38,7 +38,25 @@ def main() -> int:
         splash = None  # type: ignore
 
     w = RSSReader()
-    w.show()
+    # First run: maximize window even if geometry exists from older versions; then mark as done
+    try:
+        from PyQt5.QtCore import QSettings
+        s = QSettings('rocker', 'SmallRSSReader')
+        first_done = s.value('first_run_done', False, type=bool)
+        if not first_done:
+            w.showMaximized()
+            s.setValue('first_run_done', True)
+        else:
+            w.show()
+    except Exception:
+        w.show()
+    # Ensure toolbar visible in entrypoint
+    try:
+        if hasattr(w, 'toolbar') and w.toolbar:
+            w.toolbar.setVisible(True)
+            w.toolbar.setEnabled(True)
+    except Exception:
+        pass
     try:
         if splash:
             splash.finish(w)

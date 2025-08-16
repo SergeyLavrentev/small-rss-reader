@@ -31,7 +31,7 @@ def test_omdb_columns_hidden_by_default(ui_app):
     app = ui_app
     build_feed_with_entries(app, 'https://k.example.org/rss', ['Inception'])
     headers = [app.articlesTree.headerItem().text(i) for i in range(app.articlesTree.columnCount())]
-    assert 'IMDb' not in headers
+    assert 'Year' not in headers
 
 
 def test_enable_omdb_per_feed_shows_columns_immediately(ui_app):
@@ -42,7 +42,7 @@ def test_enable_omdb_per_feed_shows_columns_immediately(ui_app):
     # Repopulate current feed
     app._on_feed_selected()
     headers = [app.articlesTree.headerItem().text(i) for i in range(app.articlesTree.columnCount())]
-    assert 'IMDb' in headers
+    assert 'Year' in headers
 
 
 def test_disable_omdb_per_feed_hides_columns_immediately(ui_app):
@@ -59,7 +59,7 @@ def test_disable_omdb_per_feed_hides_columns_immediately(ui_app):
     app.group_settings['https://k3.example.org/rss'] = {'omdb_enabled': False}
     app._on_feed_selected()
     headers = [app.articlesTree.headerItem().text(i) for i in range(app.articlesTree.columnCount())]
-    assert 'IMDb' not in headers
+    assert 'Year' not in headers
 
 
 def test_enable_omdb_on_group_applies_to_children(ui_app):
@@ -82,7 +82,7 @@ def test_enable_omdb_on_group_applies_to_children(ui_app):
     app.feedsTree.setCurrentItem(ch1)
     app._on_feed_selected()
     headers1 = [app.articlesTree.headerItem().text(i) for i in range(app.articlesTree.columnCount())]
-    assert 'IMDb' in headers0 and 'IMDb' in headers1
+    assert 'Year' in headers0 and 'Year' in headers1
 
 
 def test_per_feed_overrides_domain_setting(ui_app):
@@ -106,4 +106,4 @@ def test_per_feed_overrides_domain_setting(ui_app):
     app.feedsTree.setCurrentItem(ch1)
     app._on_feed_selected()
     h1 = [app.articlesTree.headerItem().text(i) for i in range(app.articlesTree.columnCount())]
-    assert ('IMDb' in h0) and ('IMDb' not in h1)
+    assert ('Year' in h0) and ('Year' not in h1)

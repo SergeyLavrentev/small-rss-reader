@@ -51,13 +51,23 @@ def set_omdb_api_key(value: str) -> None:
             import keyring  # type: ignore
             if value:
                 keyring.set_password(SERVICE, ACCOUNT_OMDB, value)
+                # verify we can read it back
+                try:
+                    check = keyring.get_password(SERVICE, ACCOUNT_OMDB)
+                except Exception:
+                    check = None
+                if check != value:
+                    # treat as failure to ensure fallback persistence
+                    stored_in_keychain = False
+                else:
+                    stored_in_keychain = True
             else:
                 # Delete if empty provided
                 try:
                     keyring.delete_password(SERVICE, ACCOUNT_OMDB)
                 except Exception:
                     pass
-            stored_in_keychain = True
+                stored_in_keychain = True
         except Exception:
             stored_in_keychain = False
 
@@ -65,7 +75,7 @@ def set_omdb_api_key(value: str) -> None:
         # Clear plaintext copy when we successfully used Keychain
         _set_qsettings_value('omdb_api_key', '')
     else:
-        # Fallback: store in QSettings
+        # Fallback: store in QSettings to persist between runs
         _set_qsettings_value('omdb_api_key', value)
 
 

@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (
-    QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QSpinBox, QLabel, QCheckBox, QPushButton, QFontComboBox, QComboBox
+    QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QSpinBox, QLabel, QCheckBox, QPushButton, QFontComboBox, QComboBox, QMessageBox, QHBoxLayout
 )
 from PyQt5.QtGui import QFont, QIcon, QPixmap
 from PyQt5.QtCore import Qt, QSettings
@@ -51,13 +51,30 @@ class SettingsDialog(QDialog):
         layout = QFormLayout(self)
         self.api_key_input = QLineEdit(self)
         self.api_key_input.setEchoMode(QLineEdit.Password)
-        # Load from secrets helper (Keychain) if available; fallback to parent value
+        # Load from secrets helper (Keychain) if available; fallback to parent value if empty
+        existing_key = ''
         try:
             from rss_reader.utils.secrets import get_omdb_api_key
-            self.api_key_input.setText(get_omdb_api_key())
+            existing_key = get_omdb_api_key() or ''
         except Exception:
-            self.api_key_input.setText(getattr(self.parent, 'api_key', ''))
+            existing_key = ''
+        if not existing_key:
+            existing_key = getattr(self.parent, 'api_key', '') or ''
+        self.api_key_input.setText(existing_key)
+        # Keep parent cache in sync so notice reflects reality
+        try:
+            if hasattr(self.parent, 'api_key') and existing_key:
+                self.parent.api_key = existing_key
+        except Exception:
+            pass
         layout.addRow("OMDb API Key:", self.api_key_input)
+        # Row with Test button
+        test_row = QHBoxLayout()
+        self.test_key_btn = QPushButton("Test OMDb Key", self)
+        self.test_key_btn.clicked.connect(self.test_api_key)
+        test_row.addWidget(self.test_key_btn)
+        test_row.addStretch(1)
+        layout.addRow("", self._wrap_in_widget(test_row))
         self.api_key_notice = QLabel()
         self.api_key_notice.setStyleSheet("color: red;")
         self.update_api_key_notice()
@@ -105,6 +122,13 @@ class SettingsDialog(QDialog):
         self.max_days_input.setValue(getattr(self.parent, 'max_days', 30))
         layout.addRow("Max Days to Keep Articles:", self.max_days_input)
 
+    def _wrap_in_widget(self, layout):
+        # Helper to place a layout as a form row
+        from PyQt5.QtWidgets import QWidget
+        w = QWidget(self)
+        w.setLayout(layout)
+        return w
+
     def update_api_key_notice(self):
         if not getattr(self.parent, 'api_key', ''):
             self.api_key_notice.setText("Ratings feature is disabled without an API key.")
@@ -116,14 +140,26 @@ class SettingsDialog(QDialog):
             self.parent.restore_from_icloud()
 
     def save_settings(self):
-        api_key = self.api_key_input.text().strip()
+        api_key = (self.api_key_input.text() or "").strip()
+        # Trim and basic validation
+        if " " in api_key:
+            api_key = api_key.replace(" ", "")
+            self.api_key_input.setText(api_key)
         refresh_interval = self.refresh_interval_input.value()
         font_name = self.font_name_combo.currentFont().family()
         font_size = self.font_size_spin.value()
-        # Persist API key to Keychain when possible; fallback to QSettings
+        # Persist API key via secrets helper (handles Keychain + fallback)
         try:
             from rss_reader.utils.secrets import set_omdb_api_key
             set_omdb_api_key(api_key)
+        except Exception:
+            pass
+        # reset OMDb queue auth-failed state if present
+        try:
+            if hasattr(self.parent, '_omdb_mgr') and self.parent._omdb_mgr:
+                self.parent._omdb_mgr.set_auth_failed(False)
+            if hasattr(self.parent, '_clear_omdb_status'):
+                self.parent._clear_omdb_status()
         except Exception:
             pass
         if hasattr(self.parent, 'api_key'):
@@ -138,15 +174,6 @@ class SettingsDialog(QDialog):
         tray_icon_enabled = self.tray_icon_checkbox.isChecked()
         icloud_enabled = self.icloud_backup_checkbox.isChecked()
         settings = QSettings('rocker', 'SmallRSSReader')
-        # Keep a plaintext fallback only if Keychain wasn't used
-        try:
-            from rss_reader.utils.secrets import _use_keyring  # type: ignore
-            if not _use_keyring():
-                settings.setValue('omdb_api_key', api_key)
-            else:
-                settings.setValue('omdb_api_key', '')
-        except Exception:
-            settings.setValue('omdb_api_key', api_key)
         settings.setValue('refresh_interval', refresh_interval)
         settings.setValue('font_name', font_name)
         settings.setValue('font_size', font_size)
@@ -159,8 +186,34 @@ class SettingsDialog(QDialog):
             self.parent.update_refresh_timer()
         if hasattr(self.parent, 'apply_font_size'):
             self.parent.apply_font_size()
+        # If API key was entered, kick OMDb fetching for current feed
+        try:
+            if api_key and hasattr(self.parent, '_on_feed_selected'):
+                self.parent._on_feed_selected()
+        except Exception:
+            pass
         self.update_api_key_notice()
 
     def accept(self):
         self.save_settings()
         super().accept()
+
+    def test_api_key(self):
+        key = (self.api_key_input.text() or "").strip().replace(" ", "")
+        if not key:
+            QMessageBox.information(self, "Test OMDb Key", "Enter API key first.")
+            return
+        try:
+            import urllib.request, json
+            url = f"https://www.omdbapi.com/?i=tt3896198&apikey={key}"
+            req = urllib.request.Request(url, headers={"User-Agent": "SmallRSSReader/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:  # nosec - user-initiated check
+                payload = resp.read()
+            data = json.loads(payload.decode('utf-8', 'ignore'))
+            if isinstance(data, dict) and str(data.get('Response', '')).lower() == 'true':
+                QMessageBox.information(self, "Test OMDb Key", "Key works. OMDb responded successfully.")
+            else:
+                err = data.get('Error') if isinstance(data, dict) else 'Unknown error'
+                QMessageBox.warning(self, "Test OMDb Key", f"OMDb error: {err}")
+        except Exception as e:
+            QMessageBox.critical(self, "Test OMDb Key", f"Request failed: {e}")

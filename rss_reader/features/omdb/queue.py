@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 import re
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
 from PyQt5.QtCore import QObject, QTimer, pyqtSlot
 
@@ -26,7 +26,8 @@ class OmdbQueueManager(QObject):
         super().__init__(parent)
         self._inflight: Set[str] = set()
         self._queued: Set[str] = set()
-        self._queue: deque[str] = deque()
+        # queue holds tuples of (raw_title, query_title, year)
+        self._queue: deque[Tuple[str, str, Optional[int]]] = deque()
         self._max_inflight = max_inflight
         self._timer = QTimer(self)
         self._timer.setInterval(tick_ms)
@@ -37,6 +38,7 @@ class OmdbQueueManager(QObject):
         self._get_api_key = lambda: ''
         self._cache: Dict[str, Any] = {}
         self._columns_visible = True
+        self._auth_failed = False
 
     # wiring
     def set_worker(self, worker):
@@ -54,24 +56,47 @@ class OmdbQueueManager(QObject):
     def set_columns_visible(self, visible: bool):
         self._columns_visible = bool(visible)
 
+    def set_auth_failed(self, failed: bool):
+        self._auth_failed = bool(failed)
+        if self._auth_failed:
+            try:
+                self._timer.stop()
+                self._queue.clear()
+                self._queued.clear()
+                self._inflight.clear()
+            except Exception:
+                pass
+        else:
+            # allow processing again
+            pass
+
+    def clear(self):
+        try:
+            self._queue.clear()
+            self._queued.clear()
+            self._inflight.clear()
+        except Exception:
+            pass
+
     # API
     def request_for_entries(self, entries: Iterable[Dict[str, Any]]):
         if not self._columns_visible:
             return
         api_key = self._get_api_key() or ''
-        if not api_key or not self._worker or not self._pool:
+        if not api_key or not self._worker or not self._pool or self._auth_failed:
             return
         enqueued = False
         for e in entries:
             raw_title = (e.get('title') or e.get('link') or '').strip()
             if not raw_title:
                 continue
-            norm = self._norm_title(raw_title)
+            query_title, year = self._extract_title_year(raw_title)
+            norm = self._norm_title(query_title or raw_title)
             if raw_title in self._cache or norm in self._cache:
                 continue
             if norm in self._inflight or norm in self._queued:
                 continue
-            self._queue.append(raw_title)
+            self._queue.append((raw_title, query_title or raw_title, year))
             self._queued.add(norm)
             enqueued = True
         if enqueued and not self._timer.isActive():
@@ -80,21 +105,21 @@ class OmdbQueueManager(QObject):
     @pyqtSlot()
     def _process(self):
         api_key = self._get_api_key() or ''
-        if not api_key:
+        if not api_key or self._auth_failed:
             self._timer.stop()
             return
         progressed = False
         while self._queue and len(self._inflight) < self._max_inflight:
-            title = self._queue.popleft()
-            norm = self._norm_title(title)
+            raw_title, query_title, year = self._queue.popleft()
+            norm = self._norm_title(query_title or raw_title)
             self._queued.discard(norm)
-            if title in self._cache or norm in self._cache:
+            if raw_title in self._cache or norm in self._cache:
                 continue
             if norm in self._inflight:
                 continue
             try:
                 from rss_reader.services.omdb import FetchOmdbRunnable
-                runnable = FetchOmdbRunnable(title, api_key, self._worker)
+                runnable = FetchOmdbRunnable(query_title or raw_title, api_key, self._worker, year=year)
                 self._inflight.add(norm)
                 self._pool.start(runnable)
                 progressed = True
@@ -116,7 +141,41 @@ class OmdbQueueManager(QObject):
     def _norm_title(title: str) -> str:
         s = (title or '').strip().lower()
         s = ' '.join(s.split())
+        # remove trailing year in parentheses
         m = re.match(r"^(.*)\s*\((\d{4})\)$", s)
         if m:
             return m.group(1).strip()
         return s
+
+    @staticmethod
+    def _extract_title_year(raw: str) -> Tuple[str, Optional[int]]:
+        """
+        Heuristically extract an English-ish title and optional year from noisy titles.
+        - Drop bracketed [ ... ] parts (release info, sizes, tags)
+        - If title has ' / ' parts, pick the part with more ASCII letters
+        - Remove director names in parentheses; keep year if found
+        - Extract a plausible year (1900..2100) from () or [] or commas
+        """
+        s = (raw or '').strip()
+        # Try to capture a plausible year from the original string first
+        year = None
+        for m in re.finditer(r"(19\d{2}|20\d{2}|2100)", s):
+            try:
+                y = int(m.group(0))
+                if 1900 <= y <= 2100:
+                    year = y
+                    break
+            except Exception:
+                pass
+        # remove [ ... ] blocks
+        s = re.sub(r"\[[^\]]+\]", " ", s)
+        # split by ' / ' and pick ASCII-heavier part
+        parts = [p.strip() for p in s.split(' / ') if p.strip()] or [s]
+        def ascii_score(t: str) -> int:
+            return sum(1 for ch in t if ord(ch) < 128 and ch.isalpha())
+        best = max(parts, key=ascii_score)
+        # remove parentheses that are not pure year
+        best = re.sub(r"\((?!\d{4}\))[^)]*\)", " ", best)
+        # collapse spaces
+        best = ' '.join(best.split())
+        return best, year
