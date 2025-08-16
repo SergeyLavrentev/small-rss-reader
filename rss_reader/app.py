@@ -267,14 +267,8 @@ class RSSReader(QMainWindow):
 
         self.setCentralWidget(central)
 
-        # Status bar with OMDb status
-        try:
-            sb = self.statusBar()
-            self._omdbStatusLabel = QLabel("")
-            self._omdbStatusLabel.setStyleSheet("color: #b00020; font-weight: 500;")
-            sb.addPermanentWidget(self._omdbStatusLabel)
-        except Exception:
-            self._omdbStatusLabel = None  # type: ignore
+    # Status bar intentionally disabled per requirement — do not create it
+    # self._omdbStatusLabel is not created; related updates are guarded by hasattr checks elsewhere
 
         # Ensure toolbar visible by default
         try:
@@ -916,13 +910,14 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
-    # Columns based on OMDb flag (для OMDb показываем расширенный набор колонок без отдельной колонки рейтинга)
+    # Columns based on OMDb flag (для OMDb показываем расширенный набор колонок, теперь с колонкой IMDb)
         omdb_enabled = self._is_omdb_enabled(feed_url)
         if omdb_enabled:
             cols = [
                 "Title",
                 "Date",
-        "Year",
+                "Year",
+                "IMDb",
                 "Director",
                 "Actors",
                 "Genre",
@@ -950,6 +945,7 @@ class RSSReader(QMainWindow):
             date_str = dt.strftime('%d.%m.%Y') if dt != datetime.min else ''
             # OMDb-derived fields (only if enabled)
             year = ''
+            imdb = ''
             director = ''
             actors = ''
             genre = ''
@@ -958,8 +954,12 @@ class RSSReader(QMainWindow):
             rec = {}
             if omdb_enabled and self.movie_cache:
                 try:
-                    rec = self.movie_cache.get(title) or {}
+                    # Prefer raw-title key; fallback to normalized to support older cache layouts
+                    from rss_reader.features.omdb.queue import OmdbQueueManager as _QM
+                    norm_key = _QM._norm_title(title)
+                    rec = self.movie_cache.get(title) or self.movie_cache.get(norm_key) or {}
                     year = rec.get('Year') or rec.get('year') or ''
+                    imdb = rec.get('imdbRating') or rec.get('imdbrating') or ''
                     director = rec.get('Director') or rec.get('director') or ''
                     actors = rec.get('Actors') or rec.get('actors') or ''
                     genre = rec.get('Genre') or rec.get('genre') or ''
@@ -975,6 +975,8 @@ class RSSReader(QMainWindow):
                     row.append(date_str)
                 elif c == "Year":
                     row.append(str(year))
+                elif c == "IMDb":
+                    row.append(str(imdb))
                 elif c == "Director":
                     row.append(director)
                 elif c == "Actors":
@@ -1006,6 +1008,17 @@ class RSSReader(QMainWindow):
                         yv = None
                     if yv is not None:
                         item.setData(idxy, Qt.UserRole, yv)
+                # store numeric role for IMDb (float) to improve sorting
+                if "IMDb" in hdr_cols:
+                    idxi = hdr_cols.index("IMDb")
+                    try:
+                        s = str(imdb)
+                        s_num = s.split('/', 1)[0]
+                        rv = float(s_num) if s_num.replace('.', '', 1).isdigit() else None
+                    except Exception:
+                        rv = None
+                    if rv is not None:
+                        item.setData(idxi, Qt.UserRole, rv)
             except Exception:
                 pass
             # mark read visually
@@ -1040,8 +1053,8 @@ class RSSReader(QMainWindow):
             # First run: set defaults and remember
             try:
                 if omdb_enabled:
-                    # Title, Date, Year, Director, Actors, Genre, Runtime, Rated
-                    defaults = [520, 140, 70, 180, 240, 180, 100, 80]
+                    # Title, Date, Year, IMDb, Director, Actors, Genre, Runtime, Rated
+                    defaults = [520, 140, 70, 60, 180, 240, 180, 100, 80]
                 else:
                     defaults = [540, 140]      # Title, Date
                 for i, w in enumerate(defaults[: self.articlesTree.columnCount()]):
@@ -1134,12 +1147,11 @@ class RSSReader(QMainWindow):
     def _maybe_fetch_omdb_for_entries(self, feed_url: str, entries: List[Dict[str, Any]]) -> None:
         if not self._is_omdb_enabled(feed_url) or not self._omdb_mgr:
             return
-        cols = self.omdb_columns_by_feed.get(feed_url) or ["Title", "Date", "Year", "Director", "Actors", "Genre", "Runtime", "Rated"]
-        visible = any(c in cols for c in ["Year", "Director", "Actors", "Genre", "Runtime", "Rated"])
         try:
             # allow processing unless previously marked as auth failed
             self._omdb_mgr.set_cache_proxy(self.movie_cache)
-            self._omdb_mgr.set_columns_visible(visible)
+            # In минимальной конфигурации OMDb-колонки всегда видимы — не гейтить запросы
+            self._omdb_mgr.set_columns_visible(True)
             self._omdb_mgr.request_for_entries(entries or [])
         except Exception:
             pass
@@ -1182,6 +1194,19 @@ class RSSReader(QMainWindow):
                         # Director
                         if "Director" in cols:
                             it.setText(cols.index("Director"), data.get('Director') or data.get('director') or '')
+                        # IMDb
+                        if "IMDb" in cols:
+                            val = data.get('imdbRating') or data.get('imdbrating') or ''
+                            idxi = cols.index("IMDb")
+                            it.setText(idxi, str(val))
+                            try:
+                                s = str(val)
+                                s_num = s.split('/', 1)[0]
+                                rv = float(s_num) if s_num.replace('.', '', 1).isdigit() else None
+                                if rv is not None:
+                                    it.setData(idxi, Qt.UserRole, rv)
+                            except Exception:
+                                pass
                         # Actors
                         if "Actors" in cols:
                             it.setText(cols.index("Actors"), data.get('Actors') or data.get('actors') or '')
@@ -1208,9 +1233,11 @@ class RSSReader(QMainWindow):
                     msg = str(_err)
                     if '401' in msg or 'Unauthorized' in msg:
                         self._omdb_mgr.set_auth_failed(True)
+                        # Status bar UI is disabled, but tests can stub a label;
+                        # update it if present for observability.
                         try:
-                            if hasattr(self, '_omdbStatusLabel') and self._omdbStatusLabel:
-                                self._omdbStatusLabel.setText("OMDb: Unauthorized (check API key)")
+                            if hasattr(self, '_omdbStatusLabel') and hasattr(self._omdbStatusLabel, 'setText'):
+                                self._omdbStatusLabel.setText(f"OMDb: {msg}")
                         except Exception:
                             pass
                 except Exception:
@@ -1220,11 +1247,8 @@ class RSSReader(QMainWindow):
             pass
 
     def _clear_omdb_status(self) -> None:
-        try:
-            if hasattr(self, '_omdbStatusLabel') and self._omdbStatusLabel:
-                self._omdbStatusLabel.setText("")
-        except Exception:
-            pass
+        # Status bar disabled: nothing to clear
+        pass
 
     def _on_article_selected(self) -> None:
         item = self.articlesTree.currentItem()

@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+import re
 
 
 SERVICE = "com.rocker.SmallRSSReader"
@@ -29,6 +30,23 @@ def _set_qsettings_value(key: str, value: str) -> None:
         pass
 
 
+def sanitize_omdb_api_key(value: str) -> str:
+    """Normalize an OMDb API key by removing whitespace and invisible chars.
+
+    - Strips leading/trailing whitespace
+    - Removes all Unicode whitespace characters inside the string
+    - Removes common zero-width/invisible code points (ZWSP/ZWNJ/ZWJ/BOM)
+    """
+    if not value:
+        return ""
+    s = value.strip()
+    # remove all whitespace characters
+    s = re.sub(r"\s+", "", s)
+    # remove common invisible characters
+    s = s.replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+    return s
+
+
 def get_omdb_api_key() -> str:
     """Get OMDb API key from Keychain if available, else from QSettings."""
     if _use_keyring():
@@ -36,15 +54,16 @@ def get_omdb_api_key() -> str:
             import keyring  # type: ignore
             val: Optional[str] = keyring.get_password(SERVICE, ACCOUNT_OMDB)
             if val:
-                return val
+                return sanitize_omdb_api_key(val)
         except Exception:
             # Fall back to QSettings silently
             pass
-    return _get_qsettings_value('omdb_api_key', '')
+    return sanitize_omdb_api_key(_get_qsettings_value('omdb_api_key', ''))
 
 
 def set_omdb_api_key(value: str) -> None:
     """Store OMDb API key in Keychain when possible; otherwise QSettings. Always clear plaintext copy if Keychain used."""
+    value = sanitize_omdb_api_key(value)
     stored_in_keychain = False
     if _use_keyring():
         try:
@@ -88,7 +107,7 @@ def migrate_omdb_key_from_qsettings() -> None:
         current = keyring.get_password(SERVICE, ACCOUNT_OMDB)
         if current:
             return
-        qv = _get_qsettings_value('omdb_api_key', '')
+        qv = sanitize_omdb_api_key(_get_qsettings_value('omdb_api_key', ''))
         if qv:
             try:
                 keyring.set_password(SERVICE, ACCOUNT_OMDB, qv)

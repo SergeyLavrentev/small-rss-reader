@@ -141,9 +141,14 @@ class SettingsDialog(QDialog):
 
     def save_settings(self):
         api_key = (self.api_key_input.text() or "").strip()
-        # Trim and basic validation
-        if " " in api_key:
-            api_key = api_key.replace(" ", "")
+        # Normalize using shared sanitizer (handles spaces and invisible chars)
+        try:
+            from rss_reader.utils.secrets import sanitize_omdb_api_key
+            sanitized = sanitize_omdb_api_key(api_key)
+        except Exception:
+            sanitized = api_key.replace(" ", "")
+        if sanitized != api_key:
+            api_key = sanitized
             self.api_key_input.setText(api_key)
         refresh_interval = self.refresh_interval_input.value()
         font_name = self.font_name_combo.currentFont().family()
@@ -199,7 +204,16 @@ class SettingsDialog(QDialog):
         super().accept()
 
     def test_api_key(self):
-        key = (self.api_key_input.text() or "").strip().replace(" ", "")
+        key = (self.api_key_input.text() or "").strip()
+        # Normalize with the same sanitizer used for storage
+        try:
+            from rss_reader.utils.secrets import sanitize_omdb_api_key
+            key_sanitized = sanitize_omdb_api_key(key)
+        except Exception:
+            key_sanitized = key.replace(" ", "")
+        if key_sanitized != key:
+            key = key_sanitized
+            self.api_key_input.setText(key)
         if not key:
             QMessageBox.information(self, "Test OMDb Key", "Enter API key first.")
             return

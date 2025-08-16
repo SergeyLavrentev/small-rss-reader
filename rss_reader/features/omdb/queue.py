@@ -92,7 +92,8 @@ class OmdbQueueManager(QObject):
                 continue
             query_title, year = self._extract_title_year(raw_title)
             norm = self._norm_title(query_title or raw_title)
-            if raw_title in self._cache or norm in self._cache:
+            # If either raw or normalized key is cached, skip enqueue
+            if (raw_title in self._cache) or (norm in self._cache):
                 continue
             if norm in self._inflight or norm in self._queued:
                 continue
@@ -113,7 +114,8 @@ class OmdbQueueManager(QObject):
             raw_title, query_title, year = self._queue.popleft()
             norm = self._norm_title(query_title or raw_title)
             self._queued.discard(norm)
-            if raw_title in self._cache or norm in self._cache:
+            # Skip dispatch if we already have data by raw or normalized key
+            if (raw_title in self._cache) or (norm in self._cache):
                 continue
             if norm in self._inflight:
                 continue
@@ -139,13 +141,10 @@ class OmdbQueueManager(QObject):
     # helpers
     @staticmethod
     def _norm_title(title: str) -> str:
-        s = (title or '').strip().lower()
-        s = ' '.join(s.split())
-        # remove trailing year in parentheses
-        m = re.match(r"^(.*)\s*\((\d{4})\)$", s)
-        if m:
-            return m.group(1).strip()
-        return s
+        # Reuse the same heuristic as extraction to keep keys consistent
+        best, _ = OmdbQueueManager._extract_title_year(title or '')
+        s = (best or '').strip().lower()
+        return ' '.join(s.split())
 
     @staticmethod
     def _extract_title_year(raw: str) -> Tuple[str, Optional[int]]:
@@ -199,6 +198,8 @@ class OmdbQueueManager(QObject):
         best = re.sub(rf"\b(?:{lang_tokens})\b.*$", " ", best, flags=re.IGNORECASE)
         # remove 'Original <Lang>' pattern tails
         best = re.sub(rf"\bOriginal\s+(?:{lang_tokens})\b.*$", " ", best, flags=re.IGNORECASE)
+        # remove trailing count markers like '3x', '5x' that refer to number of tracks left after tag removal
+        best = re.sub(r"\b\d+\s*[xх]\b\s*$", " ", best, flags=re.IGNORECASE)
         # collapse spaces
         best = ' '.join(best.split())
         return best, year
