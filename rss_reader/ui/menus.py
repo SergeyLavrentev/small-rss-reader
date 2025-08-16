@@ -31,6 +31,9 @@ def create_menu(app: Any) -> None:
     view_menu = mb.addMenu("View")
     view_menu.addAction(app.actToggleToolbar)
     view_menu.addAction(app.actToggleMenuBar)
+    view_menu.addSeparator()
+    view_menu.addAction(app.actFontIncrease)
+    view_menu.addAction(app.actFontDecrease)
 
     settings_menu = mb.addMenu("Settings")
     settings_menu.addAction(app.actSettings)

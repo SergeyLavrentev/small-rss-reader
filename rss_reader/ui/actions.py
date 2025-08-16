@@ -48,6 +48,27 @@ def create_actions(app: Any) -> None:
 
     # View toggles
     app.actToggleToolbar = QAction("Show Toolbar", app)
+    # Font size controls
+    app.actFontIncrease = QAction("Increase Font Size", app)
+    app.actFontDecrease = QAction("Decrease Font Size", app)
+    def _inc():
+        try:
+            app.current_font_size = min(48, int(app.current_font_size) + 1)
+            from PyQt5.QtCore import QSettings
+            QSettings('rocker', 'SmallRSSReader').setValue('content_font_size', app.current_font_size)
+            app.apply_font_size()
+        except Exception:
+            pass
+    def _dec():
+        try:
+            app.current_font_size = max(8, int(app.current_font_size) - 1)
+            from PyQt5.QtCore import QSettings
+            QSettings('rocker', 'SmallRSSReader').setValue('content_font_size', app.current_font_size)
+            app.apply_font_size()
+        except Exception:
+            pass
+    app.actFontIncrease.triggered.connect(_inc)
+    app.actFontDecrease.triggered.connect(_dec)
     app.actToggleToolbar.setCheckable(True)
     app.actToggleToolbar.setChecked(True)
     app.actToggleToolbar.toggled.connect(app._toggle_toolbar)
@@ -104,6 +125,15 @@ def create_actions(app: Any) -> None:
         app.actOnlyUnread.setShortcut('Ctrl+U')
         app.actMarkAllRead.setShortcut('Ctrl+Shift+R')
         app.actMarkAllUnread.setShortcut('Ctrl+Shift+U')
+        # Font size shortcuts (Cmd/Ctrl + +/-)
+        try:
+            app.actFontIncrease.setShortcuts(['Ctrl+=', 'Ctrl++', 'Meta+=', 'Meta++'])
+        except Exception:
+            app.actFontIncrease.setShortcut('Ctrl+=')
+        try:
+            app.actFontDecrease.setShortcuts(['Ctrl+-', 'Meta+-'])
+        except Exception:
+            app.actFontDecrease.setShortcut('Ctrl+-')
         # Focus search: Cmd+F on macOS, Ctrl+F elsewhere
         app.actFocusSearch = QAction("Focus Search", app)
         app.actFocusSearch.triggered.connect(lambda: getattr(app, 'searchEdit', None) and app.searchEdit.setFocus())

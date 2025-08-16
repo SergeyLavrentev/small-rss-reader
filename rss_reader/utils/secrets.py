@@ -1,0 +1,91 @@
+import os
+from typing import Optional
+
+
+SERVICE = "com.rocker.SmallRSSReader"
+ACCOUNT_OMDB = "omdb_api_key"
+
+
+def _use_keyring() -> bool:
+    """Return True if we should try keyring. Skip in tests to avoid backend issues."""
+    if os.environ.get("SMALL_RSS_TESTS"):
+        return False
+    return True
+
+
+def _get_qsettings_value(key: str, default: str = "") -> str:
+    try:
+        from PyQt5.QtCore import QSettings
+        return QSettings('rocker', 'SmallRSSReader').value(key, default, type=str) or default
+    except Exception:
+        return default
+
+
+def _set_qsettings_value(key: str, value: str) -> None:
+    try:
+        from PyQt5.QtCore import QSettings
+        QSettings('rocker', 'SmallRSSReader').setValue(key, value)
+    except Exception:
+        pass
+
+
+def get_omdb_api_key() -> str:
+    """Get OMDb API key from Keychain if available, else from QSettings."""
+    if _use_keyring():
+        try:
+            import keyring  # type: ignore
+            val: Optional[str] = keyring.get_password(SERVICE, ACCOUNT_OMDB)
+            if val:
+                return val
+        except Exception:
+            # Fall back to QSettings silently
+            pass
+    return _get_qsettings_value('omdb_api_key', '')
+
+
+def set_omdb_api_key(value: str) -> None:
+    """Store OMDb API key in Keychain when possible; otherwise QSettings. Always clear plaintext copy if Keychain used."""
+    stored_in_keychain = False
+    if _use_keyring():
+        try:
+            import keyring  # type: ignore
+            if value:
+                keyring.set_password(SERVICE, ACCOUNT_OMDB, value)
+            else:
+                # Delete if empty provided
+                try:
+                    keyring.delete_password(SERVICE, ACCOUNT_OMDB)
+                except Exception:
+                    pass
+            stored_in_keychain = True
+        except Exception:
+            stored_in_keychain = False
+
+    if stored_in_keychain:
+        # Clear plaintext copy when we successfully used Keychain
+        _set_qsettings_value('omdb_api_key', '')
+    else:
+        # Fallback: store in QSettings
+        _set_qsettings_value('omdb_api_key', value)
+
+
+def migrate_omdb_key_from_qsettings() -> None:
+    """One-time migration: if Keychain is empty but QSettings has a value, move it to Keychain and clear QSettings."""
+    if not _use_keyring():
+        return
+    try:
+        import keyring  # type: ignore
+        current = keyring.get_password(SERVICE, ACCOUNT_OMDB)
+        if current:
+            return
+        qv = _get_qsettings_value('omdb_api_key', '')
+        if qv:
+            try:
+                keyring.set_password(SERVICE, ACCOUNT_OMDB, qv)
+                _set_qsettings_value('omdb_api_key', '')
+            except Exception:
+                # leave value in QSettings if Keychain fails
+                pass
+    except Exception:
+        # No keyring, nothing to migrate
+        pass

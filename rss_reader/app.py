@@ -1,17 +1,10 @@
-"""Application API for Small RSS Reader (refactored).
-
-Minimal, test-ready implementation of RSSReader moved out of the legacy
-module to keep the public shim tiny. Focuses on core logic exercised by
-unit tests; UI-heavy pieces live in rss_reader.ui/ and services/ packages.
-"""
-
-from __future__ import annotations
-
+"""Application API for Small RSS Reader (refactored)."""
 import os
 import sys
 import subprocess
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import List, Dict, Any, Optional
+
 from urllib.parse import urlparse
 import webbrowser
 
@@ -95,8 +88,17 @@ class RSSReader(QMainWindow):
         # Optional storage (created only in interactive runs to keep tests lightweight)
         self.storage = None
         self.refresh_interval = 60
-        self.default_font = QFont("Arial", 12)
-        self.current_font_size = 12
+        self.default_font = QFont("Arial", 16)
+        self.current_font_size = 16
+        # try load saved font size
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            fs = settings.value('content_font_size', None)
+            if fs is not None:
+                self.current_font_size = int(fs)
+        except Exception:
+            pass
         self.api_key = ""
         self.show_unread_only = False
         self.search_text = ""
@@ -143,18 +145,22 @@ class RSSReader(QMainWindow):
             self.searchEdit.installEventFilter(self)
         except Exception:
             pass
-
         # Central layout
         central = QWidget(self)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         splitter = QSplitter(Qt.Horizontal, central)
         layout.addWidget(splitter)
+        self._splitter = splitter
 
         # Left: feeds tree
         self.feedsTree = FeedsTreeWidget(splitter)
         self.feedsTree.setHeaderHidden(True)
         self.feedsTree.setObjectName("feedsTree")
+        try:
+            self.feedsTree.setMinimumWidth(180)
+        except Exception:
+            pass
         self.feedsTree.itemSelectionChanged.connect(self._on_feed_selected)
         self.feedsTree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.feedsTree.customContextMenuRequested.connect(self._on_feeds_context_menu)
@@ -163,6 +169,25 @@ class RSSReader(QMainWindow):
         self.articlesTree = QTreeWidget(splitter)
         self.articlesTree.setHeaderLabels(["Title", "Date"])
         self.articlesTree.setObjectName("articlesTree")
+        try:
+            self.articlesTree.setMinimumWidth(260)
+        except Exception:
+            pass
+        # Apply initial font size to the list and header
+        try:
+            init_font = QFont(self.default_font.family(), int(self.current_font_size))
+            self.articlesTree.setFont(init_font)
+            self.articlesTree.header().setFont(init_font)
+        except Exception:
+            pass
+        # Enable sorting by clicking on headers
+        try:
+            self.articlesTree.setSortingEnabled(True)
+            hdr = self.articlesTree.header()
+            hdr.setSortIndicatorShown(True)
+            hdr.setSectionsClickable(True)
+        except Exception:
+            pass
         self.articlesTree.itemSelectionChanged.connect(self._on_article_selected)
         # Open in browser on activation (double-click or Enter/Return)
         self.articlesTree.itemActivated.connect(lambda _i, _c: self._open_current_article_in_browser())
@@ -171,6 +196,11 @@ class RSSReader(QMainWindow):
         self.articlesTree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.articlesTree.customContextMenuRequested.connect(self._on_articles_context_menu)
         self.articlesTree.header().sectionResized.connect(self._on_section_resized)
+        # Auto-resize column to contents on header double-click
+        try:
+            self.articlesTree.header().sectionDoubleClicked.connect(self._on_header_section_double_clicked)
+        except Exception:
+            pass
         # Меню заголовка отключено: OMDb показывает только одну колонку IMDb
         try:
             self.articlesTree.header().setContextMenuPolicy(Qt.DefaultContextMenu)
@@ -189,12 +219,44 @@ class RSSReader(QMainWindow):
             self.webView.setObjectName("contentView")
             self.webView.setPage(WebEnginePage(self.webView))
             self.webView.setHtml("<html><body><p>Select an article to view its content</p></body></html>")
+        try:
+            self.webView.setMinimumWidth(320)
+        except Exception:
+            pass
 
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
         splitter.setStretchFactor(2, 4)
+        # Sensible defaults for first run (overridden by saved sizes below)
+        try:
+            splitter.setSizes([280, 420, 720])
+        except Exception:
+            pass
+        # Restore splitter sizes if saved
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            sizes = settings.value('splitter_sizes')
+            if sizes:
+                splitter.setSizes([int(x) for x in list(sizes)])
+        except Exception:
+            pass
+        # Guard against collapsed panels (ensure 3 panes visible)
+        try:
+            sizes_now = splitter.sizes()
+            if any(int(s or 0) <= 1 for s in sizes_now):
+                splitter.setSizes([max(180, sizes_now[0] or 180), max(260, sizes_now[1] or 260), max(320, sizes_now[2] or 320)])
+        except Exception:
+            pass
 
         self.setCentralWidget(central)
+
+        # Ensure toolbar visible by default
+        try:
+            if hasattr(self, 'toolbar') and self.toolbar:
+                self.toolbar.setVisible(True)
+        except Exception:
+            pass
 
         # Infrastructure
         self.thread_pool = QThreadPool.globalInstance()
@@ -206,6 +268,12 @@ class RSSReader(QMainWindow):
         # OMDb worker signals (created lazily)
         try:
             from rss_reader.services.omdb import OmdbWorker
+            # Migrate OMDb key from QSettings to Keychain if available
+            try:
+                from rss_reader.utils.secrets import migrate_omdb_key_from_qsettings
+                migrate_omdb_key_from_qsettings()
+            except Exception:
+                pass
             self._omdb_worker = OmdbWorker()
             # queue manager wiring
             self._omdb_mgr = OmdbQueueManager(self)
@@ -816,10 +884,20 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
-        # Columns based on OMDb flag (только IMDb как единственная доп. колонка)
+        # Columns based on OMDb flag (для OMDb показываем расширенный набор колонок)
         omdb_enabled = self._is_omdb_enabled(feed_url)
         if omdb_enabled:
-            cols = ["Title", "Date", "IMDb"]
+            cols = [
+                "Title",
+                "Date",
+                "IMDb",
+                "Year",
+                "Director",
+                "Actors",
+                "Genre",
+                "Runtime",
+                "Rated",
+            ]
         else:
             cols = ["Title", "Date"]
         # explicitly set column count then labels to ensure shrink
@@ -841,11 +919,23 @@ class RSSReader(QMainWindow):
             date_str = dt.strftime('%d.%m.%Y') if dt != datetime.min else ''
             # OMDb-derived fields (only if enabled)
             imdb = ''
+            year = ''
+            director = ''
+            actors = ''
+            genre = ''
+            runtime = ''
+            rated = ''
             rec = {}
             if omdb_enabled and self.movie_cache:
                 try:
                     rec = self.movie_cache.get(title) or {}
-                    imdb = rec.get('imdbrating') or rec.get('imdb_rating') or rec.get('rating') or rec.get('imdbRating') or ''
+                    imdb = rec.get('imdbRating') or rec.get('imdbrating') or rec.get('imdb_rating') or rec.get('rating') or ''
+                    year = rec.get('Year') or rec.get('year') or ''
+                    director = rec.get('Director') or rec.get('director') or ''
+                    actors = rec.get('Actors') or rec.get('actors') or ''
+                    genre = rec.get('Genre') or rec.get('genre') or ''
+                    runtime = rec.get('Runtime') or rec.get('runtime') or ''
+                    rated = rec.get('Rated') or rec.get('rated') or ''
                 except Exception:
                     pass
             row: List[str] = []
@@ -856,6 +946,18 @@ class RSSReader(QMainWindow):
                     row.append(date_str)
                 elif c == "IMDb":
                     row.append(imdb)
+                elif c == "Year":
+                    row.append(str(year))
+                elif c == "Director":
+                    row.append(director)
+                elif c == "Actors":
+                    row.append(actors)
+                elif c == "Genre":
+                    row.append(genre)
+                elif c == "Runtime":
+                    row.append(runtime)
+                elif c == "Rated":
+                    row.append(rated)
                 else:
                     row.append('')
             item = ArticleTreeWidgetItem(row)
@@ -866,10 +968,30 @@ class RSSReader(QMainWindow):
                 item.setData(date_col_index, Qt.UserRole, dt)
             except Exception:
                 pass
+            # store numeric roles for IMDb and Year to improve sorting
+            try:
+                hdr_cols = cols
+                if "IMDb" in hdr_cols:
+                    idx = hdr_cols.index("IMDb")
+                    try:
+                        val = float(str(imdb).split('/')[0]) if str(imdb) else None
+                    except Exception:
+                        val = None
+                    if val is not None:
+                        item.setData(idx, Qt.UserRole, val)
+                if "Year" in hdr_cols:
+                    idxy = hdr_cols.index("Year")
+                    try:
+                        yv = int(str(year)) if str(year).isdigit() else None
+                    except Exception:
+                        yv = None
+                    if yv is not None:
+                        item.setData(idxy, Qt.UserRole, yv)
+            except Exception:
+                pass
             # mark read visually
             aid = self.get_article_id(e)
             if aid in self.read_articles:
-                item.setForeground(0, Qt.gray)
                 try:
                     item.setIcon(0, QIcon())
                 except Exception:
@@ -889,12 +1011,32 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
-        # apply column widths
+        # apply column widths (with first-run defaults)
         widths = self.column_widths.get(feed_url)
         if widths:
             for i, w in enumerate(widths):
                 if w:
                     self.articlesTree.setColumnWidth(i, int(w))
+        else:
+            # First run: set defaults and remember
+            try:
+                if omdb_enabled:
+                    # Title, Date, IMDb, Year, Director, Actors, Genre, Runtime, Rated
+                    defaults = [500, 140, 60, 60, 160, 220, 160, 90, 70]
+                else:
+                    defaults = [540, 140]      # Title, Date
+                for i, w in enumerate(defaults[: self.articlesTree.columnCount()]):
+                    self.articlesTree.setColumnWidth(i, int(w))
+                self.column_widths[feed_url] = [
+                    self.articlesTree.columnWidth(i) for i in range(self.articlesTree.columnCount())
+                ]
+                if self.storage:
+                    try:
+                        self.storage.save_column_widths(self.column_widths)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
         # After listing, try to fetch OMDb data for missing items (async)
         try:
@@ -953,6 +1095,14 @@ class RSSReader(QMainWindow):
 
     # ----------------- OMDb background fetching -----------------
     def _get_omdb_api_key(self) -> str:
+        # Prefer Keychain-backed value via secrets helper; fallback to QSettings
+        try:
+            from rss_reader.utils.secrets import get_omdb_api_key
+            key = get_omdb_api_key()
+            if isinstance(key, str):
+                return key
+        except Exception:
+            pass
         try:
             from PyQt5.QtCore import QSettings
             settings = QSettings('rocker', 'SmallRSSReader')
@@ -963,8 +1113,8 @@ class RSSReader(QMainWindow):
     def _maybe_fetch_omdb_for_entries(self, feed_url: str, entries: List[Dict[str, Any]]) -> None:
         if not self._is_omdb_enabled(feed_url) or not self._omdb_mgr:
             return
-        cols = self.omdb_columns_by_feed.get(feed_url) or ["Title", "Date", "IMDb"]
-        visible = ("IMDb" in cols)
+        cols = self.omdb_columns_by_feed.get(feed_url) or ["Title", "Date", "IMDb", "Year", "Director", "Actors", "Genre", "Runtime", "Rated"]
+        visible = any(c in cols for c in ["IMDb", "Year", "Director", "Actors", "Genre", "Runtime", "Rated"])
         try:
             self._omdb_mgr.set_cache_proxy(self.movie_cache)
             self._omdb_mgr.set_columns_visible(visible)
@@ -995,10 +1145,43 @@ class RSSReader(QMainWindow):
                     row_title = (e.get('title') or e.get('link') or '').strip()
                     if _QM._norm_title(row_title) == norm:
                         cols = [self.articlesTree.headerItem().text(c) for c in range(self.articlesTree.columnCount())]
+                        # IMDb
                         if "IMDb" in cols:
-                            imdb = data.get('imdbrating') or data.get('imdb_rating') or ''
+                            imdb = data.get('imdbRating') or data.get('imdbrating') or data.get('imdb_rating') or ''
                             idx = cols.index("IMDb")
                             it.setText(idx, str(imdb))
+                            try:
+                                val = float(str(imdb).split('/')[0]) if str(imdb) else None
+                                if val is not None:
+                                    it.setData(idx, Qt.UserRole, val)
+                            except Exception:
+                                pass
+                        # Year
+                        if "Year" in cols:
+                            yr = data.get('Year') or data.get('year') or ''
+                            idxy = cols.index("Year")
+                            it.setText(idxy, str(yr))
+                            try:
+                                yv = int(str(yr)) if str(yr).isdigit() else None
+                                if yv is not None:
+                                    it.setData(idxy, Qt.UserRole, yv)
+                            except Exception:
+                                pass
+                        # Director
+                        if "Director" in cols:
+                            it.setText(cols.index("Director"), data.get('Director') or data.get('director') or '')
+                        # Actors
+                        if "Actors" in cols:
+                            it.setText(cols.index("Actors"), data.get('Actors') or data.get('actors') or '')
+                        # Genre
+                        if "Genre" in cols:
+                            it.setText(cols.index("Genre"), data.get('Genre') or data.get('genre') or '')
+                        # Runtime
+                        if "Runtime" in cols:
+                            it.setText(cols.index("Runtime"), data.get('Runtime') or data.get('runtime') or '')
+                        # Rated
+                        if "Rated" in cols:
+                            it.setText(cols.index("Rated"), data.get('Rated') or data.get('rated') or '')
             except Exception:
                 pass
         except Exception:
@@ -1035,7 +1218,6 @@ class RSSReader(QMainWindow):
             try:
                 item = self.articlesTree.currentItem()
                 if item:
-                    item.setForeground(0, Qt.gray)
                     item.setIcon(0, QIcon())
                 self._update_feed_unread_badges()
             except Exception:
@@ -1052,7 +1234,10 @@ class RSSReader(QMainWindow):
         content = content or entry.get('summary', '')
         html = f"""
         <html><head><meta charset='utf-8'>
-        <style>body {{ font-family: {self.default_font.family()}; font-size: {self.current_font_size}px; }}</style>
+    <style>
+    body {{ font-family: {self.default_font.family()}; font-size: {self.current_font_size}px; }}
+    img {{ max-width: 50%; height: auto; }}
+    </style>
         </head><body>
         <h2><a href='{link}' target='_blank'>{title}</a></h2>
         <div>{content}</div>
@@ -1117,7 +1302,16 @@ class RSSReader(QMainWindow):
     def open_settings(self) -> None:
         dlg = SettingsDialog(self)
         if dlg.exec_() == dlg.Accepted:
-            pass
+            # Read updated font size and apply instantly
+            try:
+                from PyQt5.QtCore import QSettings
+                settings = QSettings('rocker', 'SmallRSSReader')
+                fs = settings.value('content_font_size', None)
+                if fs is not None:
+                    self.current_font_size = int(fs)
+                    self.apply_font_size()
+            except Exception:
+                pass
             self._update_tray()
 
     def update_refresh_timer(self) -> None:
@@ -1132,6 +1326,29 @@ class RSSReader(QMainWindow):
         self._refresh_timer.start()
 
     def apply_font_size(self) -> None:
+        # Apply to articles list and header immediately
+        try:
+            font = QFont(self.default_font.family(), int(self.current_font_size))
+            self.articlesTree.setFont(font)
+            try:
+                self.articlesTree.header().setFont(font)
+            except Exception:
+                pass
+            # Apply to existing items
+            count = self.articlesTree.topLevelItemCount()
+            cols = self.articlesTree.columnCount()
+            for i in range(count):
+                it = self.articlesTree.topLevelItem(i)
+                if not it:
+                    continue
+                for c in range(cols):
+                    try:
+                        it.setFont(c, font)
+                    except Exception:
+                        pass
+            self.articlesTree.viewport().update()
+        except Exception:
+            pass
         # Re-render current article with updated size
         self._on_article_selected()
 
@@ -1166,6 +1383,18 @@ class RSSReader(QMainWindow):
                 self.storage.save_column_widths(self.column_widths)
             except Exception:
                 pass
+
+    def _on_header_section_double_clicked(self, index: int) -> None:
+        """Resize a column to fit its contents and persist widths."""
+        try:
+            self.articlesTree.resizeColumnToContents(index)
+        except Exception:
+            pass
+        # Persist via the same path as manual resize
+        try:
+            self._on_section_resized(index, 0, self.articlesTree.columnWidth(index))
+        except Exception:
+            pass
 
     # ----------------- Read/unread & filters -----------------
     def _toggle_unread_filter(self, checked: bool) -> None:
@@ -1510,6 +1739,15 @@ class RSSReader(QMainWindow):
             pass
         # save window geometry/state
         save_window_state(self)
+        # persist splitter sizes and font size
+        try:
+            from PyQt5.QtCore import QSettings
+            settings = QSettings('rocker', 'SmallRSSReader')
+            if hasattr(self, '_splitter') and self._splitter:
+                settings.setValue('splitter_sizes', self._splitter.sizes())
+            settings.setValue('content_font_size', int(self.current_font_size))
+        except Exception:
+            pass
         # Hide tray on quit for cleaner shutdown UX
         try:
             if getattr(self, 'tray', None):

@@ -51,7 +51,12 @@ class SettingsDialog(QDialog):
         layout = QFormLayout(self)
         self.api_key_input = QLineEdit(self)
         self.api_key_input.setEchoMode(QLineEdit.Password)
-        self.api_key_input.setText(getattr(self.parent, 'api_key', ''))
+        # Load from secrets helper (Keychain) if available; fallback to parent value
+        try:
+            from rss_reader.utils.secrets import get_omdb_api_key
+            self.api_key_input.setText(get_omdb_api_key())
+        except Exception:
+            self.api_key_input.setText(getattr(self.parent, 'api_key', ''))
         layout.addRow("OMDb API Key:", self.api_key_input)
         self.api_key_notice = QLabel()
         self.api_key_notice.setStyleSheet("color: red;")
@@ -115,6 +120,12 @@ class SettingsDialog(QDialog):
         refresh_interval = self.refresh_interval_input.value()
         font_name = self.font_name_combo.currentFont().family()
         font_size = self.font_size_spin.value()
+        # Persist API key to Keychain when possible; fallback to QSettings
+        try:
+            from rss_reader.utils.secrets import set_omdb_api_key
+            set_omdb_api_key(api_key)
+        except Exception:
+            pass
         if hasattr(self.parent, 'api_key'):
             self.parent.api_key = api_key
         if hasattr(self.parent, 'refresh_interval'):
@@ -127,7 +138,15 @@ class SettingsDialog(QDialog):
         tray_icon_enabled = self.tray_icon_checkbox.isChecked()
         icloud_enabled = self.icloud_backup_checkbox.isChecked()
         settings = QSettings('rocker', 'SmallRSSReader')
-        settings.setValue('omdb_api_key', api_key)
+        # Keep a plaintext fallback only if Keychain wasn't used
+        try:
+            from rss_reader.utils.secrets import _use_keyring  # type: ignore
+            if not _use_keyring():
+                settings.setValue('omdb_api_key', api_key)
+            else:
+                settings.setValue('omdb_api_key', '')
+        except Exception:
+            settings.setValue('omdb_api_key', api_key)
         settings.setValue('refresh_interval', refresh_interval)
         settings.setValue('font_name', font_name)
         settings.setValue('font_size', font_size)
