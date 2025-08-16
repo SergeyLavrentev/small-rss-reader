@@ -189,6 +189,13 @@ class RSSReader(QMainWindow):
             self.articlesTree.setMinimumWidth(260)
         except Exception:
             pass
+        # Keep a consistent left offset in the Title column by reserving icon space
+        # regardless of read/unread state (we'll use a transparent placeholder for read)
+        try:
+            from PyQt5.QtCore import QSize
+            self.articlesTree.setIconSize(QSize(12, 12))  # small but noticeable gap from the splitter
+        except Exception:
+            pass
         # Apply initial font size to the list and header
         try:
             init_font = QFont(self.default_font.family(), int(self.current_font_size))
@@ -1025,7 +1032,8 @@ class RSSReader(QMainWindow):
             aid = self.get_article_id(e)
             if aid in self.read_articles:
                 try:
-                    item.setIcon(0, QIcon())
+                    # Use transparent placeholder so text doesn't jump when dot disappears
+                    item.setIcon(0, QIcon(self._unread_dot_pixmap(8, QColor(0, 0, 0, 0))))
                 except Exception:
                     pass
             else:
@@ -1274,7 +1282,8 @@ class RSSReader(QMainWindow):
             try:
                 item = self.articlesTree.currentItem()
                 if item:
-                    item.setIcon(0, QIcon())
+                    # Keep left offset by using transparent placeholder instead of removing icon
+                    item.setIcon(0, QIcon(self._unread_dot_pixmap(8, QColor(0, 0, 0, 0))))
                 self._update_feed_unread_badges()
             except Exception:
                 pass
