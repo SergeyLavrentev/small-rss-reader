@@ -1,6 +1,9 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QTreeWidgetItem, QTreeWidget
-from PyQt5.QtWebEngineWidgets import QWebEnginePage
+try:
+    from PyQt5.QtWebEngineWidgets import QWebEnginePage
+except Exception:  # pragma: no cover - not available in test-light mode
+    QWebEnginePage = object  # type: ignore
 from PyQt5.QtGui import QDesktopServices
 
 

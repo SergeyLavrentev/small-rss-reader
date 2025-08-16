@@ -8,12 +8,9 @@ unit tests; UI-heavy pieces live in rss_reader.ui/ and services/ packages.
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 import subprocess
 from datetime import datetime, timedelta
-from collections import deque
-import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 import webbrowser
@@ -24,19 +21,13 @@ from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QSplitter,
-    QLabel,
     QTreeWidget,
     QTreeWidgetItem,
     QAction,
     QFileDialog,
     QMessageBox,
     QInputDialog,
-    QToolBar,
-    QLineEdit,
     QStyle,
-    QCheckBox,
-    QLabel,
-    QSizePolicy,
     QTextBrowser,
 )
 from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent
@@ -45,7 +36,6 @@ from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
 
 from rss_reader.utils.net import compute_article_id
 from rss_reader.utils.domains import _domain_variants
-from rss_reader.utils.paths import resource_path
 from rss_reader.ui.widgets import FeedsTreeWidget, ArticleTreeWidgetItem, WebEnginePage
 from rss_reader.ui.dialogs import AddFeedDialog, SettingsDialog
 from rss_reader.ui.actions import create_actions as _ui_create_actions
@@ -100,7 +90,6 @@ class RSSReader(QMainWindow):
         self.read_articles = set()
         self.column_widths: Dict[str, List[int]] = {}
         self.group_settings: Dict[str, Dict[str, bool]] = {}
-        self.group_name_mapping: Dict[str, str] = {}
         self.favicon_cache: Dict[str, QIcon] = {}
         self.data_changed = False
         # Optional storage (created only in interactive runs to keep tests lightweight)
@@ -834,7 +823,7 @@ class RSSReader(QMainWindow):
         for e in visible_entries:
             title = e.get('title') or e.get('link') or 'Untitled'
             dt = self.get_entry_date(e)
-            date_str = dt.strftime('%Y-%m-%d %H:%M') if dt != datetime.min else ''
+            date_str = dt.strftime('%d.%m.%Y') if dt != datetime.min else ''
             # OMDb-derived fields (only if enabled)
             imdb = year = director = actors = genre = ''
             rec = {}
