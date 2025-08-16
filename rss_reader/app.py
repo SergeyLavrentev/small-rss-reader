@@ -37,6 +37,7 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QLabel,
     QSizePolicy,
+    QTextBrowser,
 )
 from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent
 from PyQt5.QtWebEngineWidgets import QWebEngineView
@@ -188,11 +189,18 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
-        # Right: article content
-        self.webView = QWebEngineView(splitter)
-        self.webView.setObjectName("contentView")
-        self.webView.setPage(WebEnginePage(self.webView))
-        self.webView.setHtml("<html><body><p>Select an article to view its content</p></body></html>")
+        # Right: article content — avoid QWebEngineView under tests to prevent segfaults
+        use_light_content = bool(os.environ.get("SMALL_RSS_TESTS"))
+        if use_light_content:
+            view = QTextBrowser(splitter)
+            view.setObjectName("contentView")
+            view.setHtml("<html><body><p>Select an article to view its content</p></body></html>")
+            self.webView = view
+        else:
+            self.webView = QWebEngineView(splitter)
+            self.webView.setObjectName("contentView")
+            self.webView.setPage(WebEnginePage(self.webView))
+            self.webView.setHtml("<html><body><p>Select an article to view its content</p></body></html>")
 
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
@@ -1099,7 +1107,14 @@ class RSSReader(QMainWindow):
         <div>{content}</div>
         </body></html>
         """
-        self.webView.setHtml(html)
+        try:
+            self.webView.setHtml(html)
+        except Exception:
+            # QTextBrowser uses setHtml too; this is just in case
+            try:
+                self.webView.setText(html)
+            except Exception:
+                pass
         # notifications (optional)
         self._notify_new_read()
 
