@@ -222,6 +222,8 @@ class QuickPreview(QWidget):
             pass
         return super().eventFilter(obj, event)
 
+    # no-op helper removed; Space shortcut closes directly
+
     def _nav(self, delta: int) -> None:
         try:
             if hasattr(self._app, '_quick_move_selection'):

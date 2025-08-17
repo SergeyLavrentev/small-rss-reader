@@ -1834,14 +1834,7 @@ class RSSReader(QMainWindow):
             if key in (Qt.Key_Return, Qt.Key_Enter):
                 self._open_current_article_in_browser()
                 return
-            # Space toggles minimalist preview of the current article
-            if key == Qt.Key_Space:
-                # If preview is open, close it instead of scrolling
-                if self._preview is not None:
-                    self._toggle_quick_preview()
-                    return
-                self._toggle_quick_preview()
-                return
+            # Space handling is scoped to the articles list via eventFilter/shortcut
             # Pass Up/Down to preview window if it's open to keep UX consistent
             if key in (Qt.Key_Up, Qt.Key_Down) and self._preview is not None:
                 if key == Qt.Key_Up:
@@ -2127,17 +2120,30 @@ class RSSReader(QMainWindow):
                     self.searchEdit.clear()
                     return True
             # Space toggles Quick Preview when focus is on the articles list (or its viewport)
-            if event.type() in (QEvent.KeyPress, QEvent.ShortcutOverride) and event.key() == Qt.Key_Space:
+            # Use ShortcutOverride to initiate toggle; also consume subsequent KeyPress to avoid re-trigger.
+            if event.type() == QEvent.ShortcutOverride and event.key() == Qt.Key_Space:
                 at = getattr(self, 'articlesTree', None)
                 if at:
                     vp = getattr(at, 'viewport', lambda: None)()
                     if obj is at or obj is vp or at.isAncestorOf(obj):
+                        # Toggle once on ShortcutOverride
                         self._toggle_quick_preview()
+                        # Mark that we've handled Space this cycle
+                        self._space_toggle_handled = True
                         try:
                             event.accept()
                         except Exception:
                             pass
                         return True
+            if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Space:
+                # If the previous ShortcutOverride already toggled, swallow this KeyPress
+                if getattr(self, '_space_toggle_handled', False):
+                    try:
+                        event.accept()
+                    except Exception:
+                        pass
+                    self._space_toggle_handled = False
+                    return True
             # Коалесцированное сохранение геометрии окна при изменении размера/перемещении
             if obj is self and event.type() in (QEvent.Resize, QEvent.Move):
                 try:
