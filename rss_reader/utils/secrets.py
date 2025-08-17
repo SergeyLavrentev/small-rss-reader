@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+from rss_reader.utils.settings import qsettings
 import re
 
 
@@ -16,16 +17,14 @@ def _use_keyring() -> bool:
 
 def _get_qsettings_value(key: str, default: str = "") -> str:
     try:
-        from PyQt5.QtCore import QSettings
-        return QSettings('rocker', 'SmallRSSReader').value(key, default, type=str) or default
+        return qsettings().value(key, default, type=str) or default
     except Exception:
         return default
 
 
 def _set_qsettings_value(key: str, value: str) -> None:
     try:
-        from PyQt5.QtCore import QSettings
-        QSettings('rocker', 'SmallRSSReader').setValue(key, value)
+        qsettings().setValue(key, value)
     except Exception:
         pass
 

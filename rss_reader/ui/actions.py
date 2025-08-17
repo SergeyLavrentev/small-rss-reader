@@ -5,6 +5,7 @@ from typing import Any
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QAction, QMessageBox, QStyle
+from rss_reader.utils.settings import qsettings
 
 
 def create_actions(app: Any) -> None:
@@ -54,16 +55,14 @@ def create_actions(app: Any) -> None:
     def _inc():
         try:
             app.current_font_size = min(48, int(app.current_font_size) + 1)
-            from PyQt5.QtCore import QSettings
-            QSettings('rocker', 'SmallRSSReader').setValue('content_font_size', app.current_font_size)
+            qsettings().setValue('content_font_size', app.current_font_size)
             app.apply_font_size()
         except Exception:
             pass
     def _dec():
         try:
             app.current_font_size = max(8, int(app.current_font_size) - 1)
-            from PyQt5.QtCore import QSettings
-            QSettings('rocker', 'SmallRSSReader').setValue('content_font_size', app.current_font_size)
+            qsettings().setValue('content_font_size', app.current_font_size)
             app.apply_font_size()
         except Exception:
             pass

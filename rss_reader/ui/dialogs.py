@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QFont, QIcon, QPixmap
 from PyQt5.QtCore import Qt, QSettings
+from rss_reader.utils.settings import qsettings
 
 
 
@@ -33,7 +34,6 @@ class AddFeedDialog(QDialog):
     def accept(self):
         feed_name, feed_url = self.get_inputs()
         if not feed_url:
-            # parent expected to have warn()
             if hasattr(self.parent(), 'warn'):
                 self.parent().warn("Input Error", "Feed URL is required.")
             return
@@ -50,70 +50,77 @@ class SettingsDialog(QDialog):
     def setup_ui(self):
         layout = QFormLayout(self)
         self.api_key_input = QLineEdit(self)
-        # Show the API key plainly (no masking) per simplified storage policy
         self.api_key_input.setEchoMode(QLineEdit.Normal)
-        # Load from app settings first; fallback to parent attribute
-        settings = QSettings('rocker', 'SmallRSSReader')
+        settings = qsettings()
         existing_key = settings.value('omdb_api_key', '', type=str) or ''
         if not existing_key:
             existing_key = getattr(self.parent, 'api_key', '') or ''
         self.api_key_input.setText(existing_key)
-        # Keep parent cache in sync so notice reflects reality
         try:
             if hasattr(self.parent, 'api_key') and existing_key:
                 self.parent.api_key = existing_key
         except Exception:
             pass
         layout.addRow("OMDb API Key:", self.api_key_input)
-        # Row with Test button
+
         test_row = QHBoxLayout()
         self.test_key_btn = QPushButton("Test OMDb Key", self)
         self.test_key_btn.clicked.connect(self.test_api_key)
         test_row.addWidget(self.test_key_btn)
         test_row.addStretch(1)
         layout.addRow("", self._wrap_in_widget(test_row))
+
         self.api_key_notice = QLabel()
         self.api_key_notice.setStyleSheet("color: red;")
         self.update_api_key_notice()
         layout.addRow("", self.api_key_notice)
+
         self.refresh_interval_input = QSpinBox(self)
         self.refresh_interval_input.setRange(1, 1440)
         self.refresh_interval_input.setValue(getattr(self.parent, 'refresh_interval', 60))
         layout.addRow("Refresh Interval (minutes):", self.refresh_interval_input)
+
         self.font_name_combo = QFontComboBox(self)
         self.font_name_combo.setCurrentFont(getattr(self.parent, 'default_font', QFont("Arial", 12)))
         layout.addRow("Font Name:", self.font_name_combo)
+
         self.font_size_spin = QSpinBox(self)
         self.font_size_spin.setRange(8, 48)
         self.font_size_spin.setValue(getattr(self.parent, 'current_font_size', 12))
         layout.addRow("Font Size:", self.font_size_spin)
+
         self.global_notifications_checkbox = QCheckBox("Enable Notifications", self)
-        settings = QSettings('rocker', 'SmallRSSReader')
         global_notifications = settings.value('notifications_enabled', False, type=bool)
         self.global_notifications_checkbox.setChecked(global_notifications)
         layout.addRow("Global Notifications:", self.global_notifications_checkbox)
+
         self.tray_icon_checkbox = QCheckBox("Enable Tray Icon", self)
         tray_icon_enabled = settings.value('tray_icon_enabled', True, type=bool)
         self.tray_icon_checkbox.setChecked(tray_icon_enabled)
         layout.addRow("Tray Icon:", self.tray_icon_checkbox)
+
         self.icloud_backup_checkbox = QCheckBox("Enable iCloud Backup", self)
         icloud_enabled = settings.value('icloud_backup_enabled', False, type=bool)
         self.icloud_backup_checkbox.setChecked(icloud_enabled)
         layout.addRow("iCloud Backup:", self.icloud_backup_checkbox)
+
         self.restore_backup_button = QPushButton("Restore from iCloud", self)
         self.restore_backup_button.clicked.connect(self.restore_backup)
         layout.addRow("", self.restore_backup_button)
+
         self.log_level_combo = QComboBox(self)
-        self.log_level_combo.addItems(["ERROR", "WARNING", "INFO", "DEBUG"]) 
+        self.log_level_combo.addItems(["ERROR", "WARNING", "INFO", "DEBUG"])
         current_level = settings.value('log_level', 'INFO')
         if current_level not in ["ERROR", "WARNING", "INFO", "DEBUG"]:
             current_level = 'INFO'
         self.log_level_combo.setCurrentText(current_level)
         layout.addRow("Log level:", self.log_level_combo)
+
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         layout.addRow(self.buttons)
+
         self.max_days_input = QSpinBox(self)
         self.max_days_input.setRange(1, 365)
         self.max_days_input.setValue(getattr(self.parent, 'max_days', 30))
@@ -138,7 +145,6 @@ class SettingsDialog(QDialog):
 
     def save_settings(self):
         api_key = (self.api_key_input.text() or "").strip()
-        # Normalize locally: strip whitespace/invisible characters
         sanitized = ''.join((api_key or '').split())
         if sanitized != api_key:
             api_key = sanitized
@@ -148,11 +154,9 @@ class SettingsDialog(QDialog):
         font_name = self.font_name_combo.currentFont().family()
         font_size = self.font_size_spin.value()
 
-        # Persist API key directly in QSettings (no Keychain)
-        settings = QSettings('rocker', 'SmallRSSReader')
+        settings = qsettings()
         settings.setValue('omdb_api_key', api_key)
 
-        # reset OMDb queue auth-failed state if present
         try:
             if hasattr(self.parent, '_omdb_mgr') and self.parent._omdb_mgr:
                 self.parent._omdb_mgr.set_auth_failed(False)
@@ -195,7 +199,6 @@ class SettingsDialog(QDialog):
             except Exception:
                 pass
 
-        # If API key was entered, kick OMDb fetching for current feed
         try:
             if api_key and hasattr(self.parent, '_on_feed_selected'):
                 self.parent._on_feed_selected()

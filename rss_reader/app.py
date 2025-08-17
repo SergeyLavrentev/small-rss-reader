@@ -17,7 +17,6 @@ try:
         os.environ['QT_LOGGING_RULES'] = (_rules + ';' + _supp) if _rules else _supp
 except Exception:
     pass
-
 from PyQt5.QtGui import QIcon, QPixmap, QFont, QCloseEvent, QPainter, QColor
 from PyQt5.QtWidgets import (
     QMainWindow,
@@ -35,15 +34,10 @@ from PyQt5.QtWidgets import (
     QLabel,
 )
 from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent, QUrl, QRunnable
-import os as _os
-if not (_os.environ.get('SMALL_RSS_TESTS') or _os.environ.get('PYTEST_CURRENT_TEST')):
-    from PyQt5.QtWebEngineWidgets import QWebEngineView
-else:  # pragma: no cover - tests run with QTextBrowser
-    QWebEngineView = object  # type: ignore
 
 # В тестовой среде глушим шумное предупреждение QtWebEngine об удалении профиля/страницы
 try:
-    if _os.environ.get('SMALL_RSS_TESTS') or _os.environ.get('PYTEST_CURRENT_TEST'):
+    if os.environ.get('SMALL_RSS_TESTS') or os.environ.get('PYTEST_CURRENT_TEST'):
         from PyQt5.QtCore import qInstallMessageHandler
         _prev_qt_handler = None
 
@@ -61,10 +55,12 @@ try:
 except Exception:
     pass
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
+from rss_reader.utils.settings import qsettings
 
 from rss_reader.utils.net import compute_article_id
 from rss_reader.utils.domains import _domain_variants
-from rss_reader.ui.widgets import FeedsTreeWidget, ArticleTreeWidgetItem, WebEnginePage
+from rss_reader.ui.widgets import FeedsTreeWidget, ArticleTreeWidgetItem
+from rss_reader.ui.preview import QuickPreview
 from rss_reader.ui.dialogs import AddFeedDialog, SettingsDialog
 from rss_reader.ui.actions import create_actions as _ui_create_actions
 from rss_reader.ui.menus import create_menu as _ui_create_menu
@@ -130,8 +126,7 @@ class RSSReader(QMainWindow):
         self.current_font_size = 16
         # try load saved font size
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
+            settings = qsettings()
             fs = settings.value('content_font_size', None)
             if fs is not None:
                 self.current_font_size = int(fs)
@@ -149,6 +144,8 @@ class RSSReader(QMainWindow):
         # Cache for cleaned article HTML by article id
         self.article_html_cache: Dict[str, str] = {}
         self._page_fetching_aids = set()
+        # Quick preview window (lazy)
+        self._preview = None
 
         # Interactive runs: show a basic UI so the window isn't empty
         try:
@@ -163,8 +160,7 @@ class RSSReader(QMainWindow):
         self.setWindowTitle("Small RSS Reader")
         # Logging: configure from QSettings (default INFO)
         try:
-            from PyQt5.QtCore import QSettings
-            level_name = QSettings('rocker', 'SmallRSSReader').value('log_level', 'INFO')
+            level_name = qsettings().value('log_level', 'INFO')
             level = getattr(logging, str(level_name).upper(), logging.INFO)
             log_path = get_user_data_path('rss_reader.log')
             logging.basicConfig(
@@ -181,8 +177,7 @@ class RSSReader(QMainWindow):
         self._create_menu()
         # Initialize unread-only from settings so action/checkbox start in sync
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
+            settings = qsettings()
             checked = settings.value('show_only_unread', False, type=bool)
             self.show_unread_only = bool(checked)
             try:
@@ -293,6 +288,11 @@ class RSSReader(QMainWindow):
         self.articlesTree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.articlesTree.customContextMenuRequested.connect(self._on_articles_context_menu)
         self.articlesTree.header().sectionResized.connect(self._on_section_resized)
+        # Intercept Space on articles list to toggle Quick Preview
+        try:
+            self.articlesTree.installEventFilter(self)
+        except Exception:
+            pass
         # Auto-resize column to contents on header double-click
         try:
             self.articlesTree.header().sectionDoubleClicked.connect(self._on_header_section_double_clicked)
@@ -305,7 +305,7 @@ class RSSReader(QMainWindow):
             pass
 
         # Right: article content — avoid QWebEngineView under tests to prevent segfaults
-        use_light_content = bool(os.environ.get("SMALL_RSS_TESTS"))
+        use_light_content = bool(os.environ.get("SMALL_RSS_TESTS") or os.environ.get('PYTEST_CURRENT_TEST'))
         if use_light_content:
             view = QTextBrowser(splitter)
             view.setObjectName("contentView")
@@ -319,9 +319,12 @@ class RSSReader(QMainWindow):
                 pass
             self.webView = view
         else:
-            self.webView = QWebEngineView(splitter)
+            # Lazy import to avoid loading QtWebEngine during tests
+            from PyQt5.QtWebEngineWidgets import QWebEngineView as _QWebEngineView  # type: ignore
+            from rss_reader.ui.widgets import WebEnginePage as _WebEnginePage  # type: ignore
+            self.webView = _QWebEngineView(splitter)
             self.webView.setObjectName("contentView")
-            self.webView.setPage(WebEnginePage(self.webView))
+            self.webView.setPage(_WebEnginePage(self.webView))
             self.webView.setHtml("<html><body><p>Select an article to view its content</p></body></html>")
         try:
             self.webView.setMinimumWidth(320)
@@ -338,8 +341,7 @@ class RSSReader(QMainWindow):
             pass
         # Restore splitter sizes if saved
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
+            settings = qsettings()
             sizes = settings.value('splitter_sizes')
             if sizes:
                 splitter.setSizes([int(x) for x in list(sizes)])
@@ -442,8 +444,7 @@ class RSSReader(QMainWindow):
         # Restore window geometry/state, maximize on first run
         load_window_state(self)
         try:
-            from PyQt5.QtCore import QSettings
-            s = QSettings('rocker', 'SmallRSSReader')
+            s = qsettings()
             if not s.value('window_geometry') and not s.value('window_state'):
                 try:
                     self.setWindowState(self.windowState() | Qt.WindowMaximized)
@@ -1178,8 +1179,7 @@ class RSSReader(QMainWindow):
         # Если в хранилище пусто — попробуем поднять из QSettings для переживания переустановки
         if not widths:
             try:
-                from PyQt5.QtCore import QSettings
-                v = QSettings('rocker', 'SmallRSSReader').value(f'column_widths:{feed_url}')
+                v = qsettings().value(f'column_widths:{feed_url}')
                 if v:
                     widths = [int(x) for x in list(v)]
                     self.column_widths[feed_url] = widths
@@ -1204,8 +1204,7 @@ class RSSReader(QMainWindow):
                 ]
                 # Сохраним дефолты ещё и в QSettings, чтобы переживали переустановку
                 try:
-                    from PyQt5.QtCore import QSettings
-                    QSettings('rocker', 'SmallRSSReader').setValue(f'column_widths:{feed_url}', self.column_widths[feed_url])
+                    qsettings().setValue(f'column_widths:{feed_url}', self.column_widths[feed_url])
                 except Exception:
                     pass
                 if self.storage:
@@ -1277,8 +1276,7 @@ class RSSReader(QMainWindow):
     def _get_omdb_api_key(self) -> str:
         # Read OMDb key directly from QSettings (no Keychain)
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
+            settings = qsettings()
             return settings.value('omdb_api_key', '', type=str) or ''
         except Exception:
             return ''
@@ -1398,6 +1396,12 @@ class RSSReader(QMainWindow):
             return
         self._show_article(entry)
         self._update_tray()
+        # If Quick Preview is open, keep it in sync with the selection
+        try:
+            if self._preview is not None:
+                self._update_quick_preview()
+        except Exception:
+            pass
 
     def _show_article(self, entry: Dict[str, Any]) -> None:
         # mark as read
@@ -1455,8 +1459,8 @@ class RSSReader(QMainWindow):
             headless_tests = False
         if not showed_inline and link:
             try:
-                # If it's a QWebEngineView, load the URL directly
-                if isinstance(self.webView, QWebEngineView):
+                # If web view supports load (Qt WebEngine), load the URL directly
+                if hasattr(self.webView, 'load'):
                     self.webView.load(QUrl(link))
                     showed_inline = True
                 # If it's a QTextBrowser (tests or light mode), try to fetch HTML
@@ -1620,8 +1624,7 @@ class RSSReader(QMainWindow):
         if dlg.exec_() == dlg.Accepted:
             # Read updated font size and apply instantly
             try:
-                from PyQt5.QtCore import QSettings
-                settings = QSettings('rocker', 'SmallRSSReader')
+                settings = qsettings()
                 fs = settings.value('content_font_size', None)
                 if fs is not None:
                     self.current_font_size = int(fs)
@@ -1696,8 +1699,7 @@ class RSSReader(QMainWindow):
         self.column_widths[url] = widths
         # Дублируем в QSettings, чтобы переживало переустановку
         try:
-            from PyQt5.QtCore import QSettings
-            s = QSettings('rocker', 'SmallRSSReader')
+            s = qsettings()
             s.setValue(f'column_widths:{url}', widths)
         except Exception:
             pass
@@ -1722,9 +1724,8 @@ class RSSReader(QMainWindow):
     def _save_splitter_sizes(self) -> None:
         """Persist splitter sizes immediately to QSettings."""
         try:
-            from PyQt5.QtCore import QSettings
             if hasattr(self, '_splitter') and self._splitter:
-                QSettings('rocker', 'SmallRSSReader').setValue('splitter_sizes', self._splitter.sizes())
+                qsettings().setValue('splitter_sizes', self._splitter.sizes())
         except Exception:
             pass
 
@@ -1733,8 +1734,7 @@ class RSSReader(QMainWindow):
         self.show_unread_only = checked
         # persist to settings
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
+            settings = qsettings()
             settings.setValue('show_only_unread', bool(checked))
         except Exception:
             pass
@@ -1818,12 +1818,94 @@ class RSSReader(QMainWindow):
     # ----------------- Key handling -----------------
     def keyPressEvent(self, event):  # noqa: N802
         try:
-            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            key = event.key()
+            if key in (Qt.Key_Return, Qt.Key_Enter):
                 self._open_current_article_in_browser()
+                return
+            # Space toggles minimalist preview of the current article
+            if key == Qt.Key_Space:
+                # If preview is open, close it instead of scrolling
+                if self._preview is not None:
+                    self._toggle_quick_preview()
+                    return
+                self._toggle_quick_preview()
+                return
+            # Pass Up/Down to preview window if it's open to keep UX consistent
+            if key in (Qt.Key_Up, Qt.Key_Down) and self._preview is not None:
+                if key == Qt.Key_Up:
+                    self._quick_move_selection(-1)
+                else:
+                    self._quick_move_selection(+1)
+                self._update_quick_preview()
+                return
+            # Esc closes preview if open
+            if key == Qt.Key_Escape and self._preview is not None:
+                self._toggle_quick_preview()
                 return
         except Exception:
             pass
         super().keyPressEvent(event)
+
+    # -------- Quick preview helpers --------
+    def _toggle_quick_preview(self) -> None:
+        try:
+            if self._preview is not None:
+                self._preview.close()
+                self._preview = None
+                return
+            # Create and show centered
+            entry = self._current_entry()
+            if not entry:
+                # Try select first article in the list
+                try:
+                    if self.articlesTree.topLevelItemCount() > 0:
+                        first = self.articlesTree.topLevelItem(0)
+                        if first:
+                            self.articlesTree.setCurrentItem(first)
+                            entry = first.data(0, Qt.UserRole)
+                except Exception:
+                    pass
+            if not entry:
+                return
+            self._preview = QuickPreview(self)
+            self._preview.load_entry(entry)
+            self._preview.show_centered()
+        except Exception:
+            self._preview = None
+
+    def _current_entry(self) -> Optional[Dict[str, Any]]:
+        try:
+            it = self.articlesTree.currentItem()
+            return it.data(0, Qt.UserRole) if it else None
+        except Exception:
+            return None
+
+    def _update_quick_preview(self) -> None:
+        try:
+            if not self._preview:
+                return
+            entry = self._current_entry()
+            if entry:
+                self._preview.load_entry(entry)
+        except Exception:
+            pass
+
+    def _quick_move_selection(self, delta: int) -> None:
+        try:
+            count = self.articlesTree.topLevelItemCount()
+            if count == 0:
+                return
+            cur = self.articlesTree.currentItem()
+            # Find current index
+            idx = 0
+            for i in range(count):
+                if self.articlesTree.topLevelItem(i) is cur:
+                    idx = i
+                    break
+            idx = max(0, min(count - 1, idx + int(delta or 0)))
+            self.articlesTree.setCurrentItem(self.articlesTree.topLevelItem(idx))
+        except Exception:
+            pass
 
     # ----------------- OPML import/export -----------------
     def _create_menu(self) -> None:
@@ -2010,8 +2092,7 @@ class RSSReader(QMainWindow):
         # delegate to UI helper if enabled in settings
         enabled = True
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
+            settings = qsettings()
             enabled = settings.value('tray_icon_enabled', True, type=bool)
         except Exception:
             pass
@@ -2023,6 +2104,11 @@ class RSSReader(QMainWindow):
             if obj is getattr(self, 'searchEdit', None) and event.type() == QEvent.KeyPress:
                 if event.key() == Qt.Key_Escape:
                     self.searchEdit.clear()
+                    return True
+            # Space toggles Quick Preview when focus is on the articles list
+            if obj is getattr(self, 'articlesTree', None) and event.type() == QEvent.KeyPress:
+                if event.key() == Qt.Key_Space:
+                    self._toggle_quick_preview()
                     return True
             # Коалесцированное сохранение геометрии окна при изменении размера/перемещении
             if obj is self and event.type() in (QEvent.Resize, QEvent.Move):
@@ -2038,8 +2124,7 @@ class RSSReader(QMainWindow):
     def _notify_new_read(self) -> None:
         # simple notification when marking as read, respects settings flag if present
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
+            settings = qsettings()
             enabled = settings.value('notifications_enabled', False, type=bool)
             if enabled and getattr(self, 'tray', None):
                 self.tray.showMessage('Small RSS Reader', 'Article marked as read', QSystemTrayIcon.Information, 2000)
@@ -2070,8 +2155,7 @@ class RSSReader(QMainWindow):
                 pass
         # auto-backup to iCloud if enabled
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
+            settings = qsettings()
             if settings.value('icloud_backup_enabled', False, type=bool):
                 self.backup_to_icloud()
         except Exception:
@@ -2080,8 +2164,7 @@ class RSSReader(QMainWindow):
         save_window_state(self)
         # persist splitter sizes and font size
         try:
-            from PyQt5.QtCore import QSettings
-            settings = QSettings('rocker', 'SmallRSSReader')
+            settings = qsettings()
             if hasattr(self, '_splitter') and self._splitter:
                 settings.setValue('splitter_sizes', self._splitter.sizes())
             settings.setValue('content_font_size', int(self.current_font_size))

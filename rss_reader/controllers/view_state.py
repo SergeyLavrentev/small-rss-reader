@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 from typing import Any, Optional, Type
-
 from PyQt5.QtCore import QSettings
-
-
-ORG = 'rocker'
-APP = 'SmallRSSReader'
+from rss_reader.utils.settings import qsettings
 
 
 def get_setting(key: str, default: Any = None, typ: Optional[Type] = str) -> Any:
     try:
-        settings = QSettings(ORG, APP)
+        settings = qsettings()
         if typ is None:
             return settings.value(key, default)
         return settings.value(key, default, type=typ)  # type: ignore[arg-type]
@@ -21,7 +17,7 @@ def get_setting(key: str, default: Any = None, typ: Optional[Type] = str) -> Any
 
 def set_setting(key: str, value: Any) -> None:
     try:
-        settings = QSettings(ORG, APP)
+        settings = qsettings()
         settings.setValue(key, value)
     except Exception:
         pass
@@ -34,7 +30,7 @@ def load_window_state(app) -> None:
     Expects attributes: toolbar, actToggleToolbar, actToggleMenuBar (optional).
     """
     try:
-        settings = QSettings(ORG, APP)
+        settings = qsettings()
         geom = settings.value('window_geometry')
         state = settings.value('window_state')
         tb_vis = settings.value('toolbar_visible', True, type=bool)
@@ -64,7 +60,7 @@ def load_window_state(app) -> None:
 def save_window_state(app) -> None:
     """Persist window geometry/state and UI visibility flags."""
     try:
-        settings = QSettings(ORG, APP)
+        settings = qsettings()
         settings.setValue('window_geometry', app.saveGeometry())
         settings.setValue('window_state', app.saveState())
         try:
