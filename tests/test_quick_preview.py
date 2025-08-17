@@ -115,3 +115,50 @@ def test_quick_preview_up_down_navigates_and_updates(ui_app, qtbot, monkeypatch)
     prev_index = _current_index()
     qtbot.waitUntil(lambda: app._preview is None, timeout=2000)
     assert _current_index() == prev_index
+
+
+def test_quick_preview_arrows_do_not_scroll_content(ui_app, qtbot, monkeypatch):
+    app = ui_app
+    _prepare_feed(app)
+
+    class Resp:
+        def __init__(self, text):
+            self.text = text
+
+    # Long HTML to ensure scroll bar appears
+    long_html = "P1\n" + ("<p>line</p>\n" * 2000)
+    long_html2 = "P2\n" + ("<p>row</p>\n" * 2000)
+
+    def fake_get(url, *args, **kwargs):
+        if url.endswith('x1'):
+            return Resp(long_html)
+        return Resp(long_html2)
+
+    monkeypatch.setitem(__import__('sys').modules, 'requests', type('R', (), {'get': staticmethod(fake_get)}))
+
+    app._toggle_quick_preview()
+    assert app._preview is not None and app._preview.isVisible()
+    view = app._preview.view
+
+    # Wait until content loaded and scroll bar available
+    if hasattr(view, 'toPlainText'):
+        qtbot.waitUntil(lambda: 'P1' in view.toPlainText(), timeout=3000)
+    sb = view.verticalScrollBar()
+    qtbot.waitUntil(lambda: sb.maximum() > 0, timeout=3000)
+    assert sb.value() == 0
+
+    # Press Down on preview window: navigate to next article, should still be at top (no scroll inside page)
+    qtbot.keyPress(app._preview, Qt.Key_Down)
+    if hasattr(view, 'toPlainText'):
+        qtbot.waitUntil(lambda: 'P2' in view.toPlainText(), timeout=3000)
+    sb2 = view.verticalScrollBar()
+    qtbot.waitUntil(lambda: sb2.maximum() > 0, timeout=3000)
+    assert sb2.value() == 0
+
+    # Press Up on the inner view directly: navigate back and still no scroll
+    qtbot.keyPress(view, Qt.Key_Up)
+    if hasattr(view, 'toPlainText'):
+        qtbot.waitUntil(lambda: 'P1' in view.toPlainText(), timeout=3000)
+    sb3 = view.verticalScrollBar()
+    qtbot.waitUntil(lambda: sb3.maximum() > 0, timeout=3000)
+    assert sb3.value() == 0
