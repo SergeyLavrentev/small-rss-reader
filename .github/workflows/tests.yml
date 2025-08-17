@@ -1,9 +1,9 @@
-name: tests
+name: tests (manual only)
 
+# Temporarily disable automatic test runs on GitHub Actions.
+# Only manual runs via "Run workflow" are allowed.
 on:
-  push:
-    branches: [ feature/**, main, master ]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   macos-tests:
