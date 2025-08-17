@@ -17,7 +17,7 @@ try:
         os.environ['QT_LOGGING_RULES'] = (_rules + ';' + _supp) if _rules else _supp
 except Exception:
     pass
-from PyQt5.QtGui import QIcon, QPixmap, QFont, QCloseEvent, QPainter, QColor
+from PyQt5.QtGui import QIcon, QPixmap, QFont, QCloseEvent, QPainter, QColor, QKeySequence
 from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (
     QStyle,
     QTextBrowser,
     QLabel,
+    QShortcut,
 )
 from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent, QUrl, QRunnable
 
@@ -288,9 +289,12 @@ class RSSReader(QMainWindow):
         self.articlesTree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.articlesTree.customContextMenuRequested.connect(self._on_articles_context_menu)
         self.articlesTree.header().sectionResized.connect(self._on_section_resized)
-        # Intercept Space on articles list to toggle Quick Preview
+    # Intercept Space on articles list to toggle Quick Preview
         try:
             self.articlesTree.installEventFilter(self)
+            # Key events are delivered to the viewport; filter there too
+            if self.articlesTree.viewport():
+                self.articlesTree.viewport().installEventFilter(self)
         except Exception:
             pass
         # Auto-resize column to contents on header double-click
@@ -362,6 +366,14 @@ class RSSReader(QMainWindow):
                 splitter.setSizes([max(180, sizes_now[0] or 180), max(260, sizes_now[1] or 260), max(320, sizes_now[2] or 320)])
         except Exception:
             pass
+
+        # Global Space shortcut: toggles Quick Preview when focus is in the articles list
+        try:
+            self._sc_space = QShortcut(QKeySequence(Qt.Key_Space), self)
+            self._sc_space.setContext(Qt.ApplicationShortcut)
+            self._sc_space.activated.connect(self._on_space_shortcut)
+        except Exception:
+            self._sc_space = None
 
         self.setCentralWidget(central)
         # Коалесцированный автосейв геометрии окна
@@ -1907,6 +1919,15 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
+    def _on_space_shortcut(self) -> None:
+        try:
+            at = getattr(self, 'articlesTree', None)
+            # Space should toggle preview only when focus is in the articles list (or its viewport)
+            if at and (self.focusWidget() is at or self.focusWidget() is getattr(at, 'viewport', lambda: None)()):
+                self._toggle_quick_preview()
+        except Exception:
+            pass
+
     # ----------------- OPML import/export -----------------
     def _create_menu(self) -> None:
         # delegate to UI helper
@@ -2105,11 +2126,18 @@ class RSSReader(QMainWindow):
                 if event.key() == Qt.Key_Escape:
                     self.searchEdit.clear()
                     return True
-            # Space toggles Quick Preview when focus is on the articles list
-            if obj is getattr(self, 'articlesTree', None) and event.type() == QEvent.KeyPress:
-                if event.key() == Qt.Key_Space:
-                    self._toggle_quick_preview()
-                    return True
+            # Space toggles Quick Preview when focus is on the articles list (or its viewport)
+            if event.type() in (QEvent.KeyPress, QEvent.ShortcutOverride) and event.key() == Qt.Key_Space:
+                at = getattr(self, 'articlesTree', None)
+                if at:
+                    vp = getattr(at, 'viewport', lambda: None)()
+                    if obj is at or obj is vp or at.isAncestorOf(obj):
+                        self._toggle_quick_preview()
+                        try:
+                            event.accept()
+                        except Exception:
+                            pass
+                        return True
             # Коалесцированное сохранение геометрии окна при изменении размера/перемещении
             if obj is self and event.type() in (QEvent.Resize, QEvent.Move):
                 try:

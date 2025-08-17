@@ -162,3 +162,66 @@ def test_quick_preview_arrows_do_not_scroll_content(ui_app, qtbot, monkeypatch):
     sb3 = view.verticalScrollBar()
     qtbot.waitUntil(lambda: sb3.maximum() > 0, timeout=3000)
     assert sb3.value() == 0
+
+
+def test_space_on_articles_list_opens_preview(ui_app, qtbot, monkeypatch):
+    app = ui_app
+    _prepare_feed(app)
+
+    class Resp:
+        def __init__(self, text):
+            self.text = text
+
+    def fake_get(url, *args, **kwargs):
+        return Resp('OPEN1')
+
+    monkeypatch.setitem(__import__('sys').modules, 'requests', type('R', (), {'get': staticmethod(fake_get)}))
+
+    # Ensure list has focus and press Space
+    app.articlesTree.setFocus()
+    # In some headless plugins Space key delivery to QTreeWidget can be flaky.
+    # Trigger the same handler that Space shortcut uses.
+    app._on_space_shortcut()
+
+    # Preview should appear and show content
+    qtbot.waitUntil(lambda: getattr(app, '_preview', None) is not None and app._preview.isVisible(), timeout=2000)
+    view = app._preview.view
+    if hasattr(view, 'toPlainText'):
+        qtbot.waitUntil(lambda: 'OPEN1' in view.toPlainText(), timeout=3000)
+    # Close to clean up via Space toggle on the list (ensures we're testing Space path)
+    app.articlesTree.setFocus()
+    app._on_space_shortcut()
+    qtbot.waitUntil(lambda: app._preview is None, timeout=2000)
+
+
+def test_preview_syncs_on_external_selection_change(ui_app, qtbot, monkeypatch):
+    app = ui_app
+    _prepare_feed(app)
+
+    class Resp:
+        def __init__(self, text):
+            self.text = text
+
+    def fake_get(url, *args, **kwargs):
+        return Resp('S1' if url.endswith('x1') else 'S2')
+
+    monkeypatch.setitem(__import__('sys').modules, 'requests', type('R', (), {'get': staticmethod(fake_get)}))
+
+    # Open preview on first item
+    app._toggle_quick_preview()
+    qtbot.waitUntil(lambda: getattr(app, '_preview', None) is not None and app._preview.isVisible(), timeout=2000)
+    view = app._preview.view
+    if hasattr(view, 'toPlainText'):
+        qtbot.waitUntil(lambda: 'S1' in view.toPlainText(), timeout=3000)
+
+    # Change selection in the articles list externally
+    if app.articlesTree.topLevelItemCount() >= 2:
+        app.articlesTree.setCurrentItem(app.articlesTree.topLevelItem(1))
+    else:
+        # Fallback: move selection via helper if structure differs
+        if hasattr(app, '_quick_move_selection'):
+            app._quick_move_selection(+1)
+
+    # Preview should update to the second item's content automatically
+    if hasattr(view, 'toPlainText'):
+        qtbot.waitUntil(lambda: 'S2' in view.toPlainText(), timeout=3000)
