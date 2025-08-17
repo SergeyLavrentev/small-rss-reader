@@ -76,9 +76,7 @@ class QuickPreview(QWidget):
             self.installEventFilter(self)
             self.view.installEventFilter(self)
             # Also add shortcuts with WidgetWithChildren context to override internal page scrolling
-            sc_close_space = QShortcut(QKeySequence(Qt.Key_Space), self)
-            sc_close_space.setContext(Qt.WidgetWithChildrenShortcut)
-            sc_close_space.activated.connect(self.close)
+            # Note: Space is handled via eventFilter/keyPressEvent to ensure event.accept() and prevent propagation
             sc_close_esc = QShortcut(QKeySequence(Qt.Key_Escape), self)
             sc_close_esc.setContext(Qt.WidgetWithChildrenShortcut)
             sc_close_esc.activated.connect(self.close)
@@ -169,6 +167,10 @@ class QuickPreview(QWidget):
         try:
             self.raise_()
             self.activateWindow()
+            try:
+                self.setFocus(Qt.ActiveWindowFocusReason)
+            except Exception:
+                pass
         except Exception:
             pass
 
