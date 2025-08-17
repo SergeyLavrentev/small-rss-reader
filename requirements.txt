@@ -8,5 +8,6 @@ jaraco.text>=4.0.0
 jaraco.context>=6.0.1
 jaraco.functools>=4.1.0
 py2app
+keyring
 pytest
 pytest-qt
