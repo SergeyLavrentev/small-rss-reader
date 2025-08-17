@@ -9,6 +9,15 @@ from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlparse
 import webbrowser
 
+# В тестах глушим шумные логи Qt WebEngine, чтобы не мешали выводу pytest
+try:
+    if os.environ.get('SMALL_RSS_TESTS') or os.environ.get('PYTEST_CURRENT_TEST'):
+        _rules = os.environ.get('QT_LOGGING_RULES', '')
+        _supp = 'qt.webengine.*=false;qt.webengineprofile.*=false;qt.webenginecontext.*=false'
+        os.environ['QT_LOGGING_RULES'] = (_rules + ';' + _supp) if _rules else _supp
+except Exception:
+    pass
+
 from PyQt5.QtGui import QIcon, QPixmap, QFont, QCloseEvent, QPainter, QColor
 from PyQt5.QtWidgets import (
     QMainWindow,
@@ -26,7 +35,31 @@ from PyQt5.QtWidgets import (
     QLabel,
 )
 from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent, QUrl, QRunnable
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+import os as _os
+if not (_os.environ.get('SMALL_RSS_TESTS') or _os.environ.get('PYTEST_CURRENT_TEST')):
+    from PyQt5.QtWebEngineWidgets import QWebEngineView
+else:  # pragma: no cover - tests run with QTextBrowser
+    QWebEngineView = object  # type: ignore
+
+# В тестовой среде глушим шумное предупреждение QtWebEngine об удалении профиля/страницы
+try:
+    if _os.environ.get('SMALL_RSS_TESTS') or _os.environ.get('PYTEST_CURRENT_TEST'):
+        from PyQt5.QtCore import qInstallMessageHandler
+        _prev_qt_handler = None
+
+        def _qt_msg_filter(msg_type, context, message):  # noqa: ANN001
+            m = str(message)
+            if 'WebEnginePage still not deleted' in m or 'Release of profile requested' in m:
+                return
+            try:
+                if _prev_qt_handler:
+                    _prev_qt_handler(msg_type, context, message)
+            except Exception:
+                pass
+
+        _prev_qt_handler = qInstallMessageHandler(_qt_msg_filter)
+except Exception:
+    pass
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
 
 from rss_reader.utils.net import compute_article_id
@@ -174,6 +207,11 @@ class RSSReader(QMainWindow):
         splitter = QSplitter(Qt.Horizontal, central)
         layout.addWidget(splitter)
         self._splitter = splitter
+        # Автосохранение размеров сплиттера при перемещении
+        try:
+            splitter.splitterMoved.connect(lambda _pos, _idx: self._save_splitter_sizes())
+        except Exception:
+            pass
         # Thin handles + resize cursor
         try:
             splitter.setStyleSheet(
@@ -324,6 +362,17 @@ class RSSReader(QMainWindow):
             pass
 
         self.setCentralWidget(central)
+        # Коалесцированный автосейв геометрии окна
+        try:
+            from PyQt5.QtCore import QTimer
+            self._geom_save_timer = QTimer(self)
+            self._geom_save_timer.setSingleShot(True)
+            self._geom_save_timer.setInterval(800)
+            self._geom_save_timer.timeout.connect(lambda: save_window_state(self))
+            # Перехват изменения размера/перемещения окна для триггера таймера
+            self.installEventFilter(self)
+        except Exception:
+            self._geom_save_timer = None  # type: ignore
 
     # Status bar intentionally disabled per requirement — do not create it
     # self._omdbStatusLabel is not created; related updates are guarded by hasattr checks elsewhere
@@ -351,12 +400,6 @@ class RSSReader(QMainWindow):
         # OMDb worker signals (created lazily)
         try:
             from rss_reader.services.omdb import OmdbWorker
-            # Migrate OMDb key from QSettings to Keychain if available
-            try:
-                from rss_reader.utils.secrets import migrate_omdb_key_from_qsettings
-                migrate_omdb_key_from_qsettings()
-            except Exception:
-                pass
             self._omdb_worker = OmdbWorker()
             # queue manager wiring
             self._omdb_mgr = OmdbQueueManager(self)
@@ -402,7 +445,10 @@ class RSSReader(QMainWindow):
             from PyQt5.QtCore import QSettings
             s = QSettings('rocker', 'SmallRSSReader')
             if not s.value('window_geometry') and not s.value('window_state'):
-                self.showMaximized()
+                try:
+                    self.setWindowState(self.windowState() | Qt.WindowMaximized)
+                except Exception:
+                    self.showMaximized()
         except Exception:
             pass
 
@@ -1129,6 +1175,16 @@ class RSSReader(QMainWindow):
 
         # apply column widths (with first-run defaults)
         widths = self.column_widths.get(feed_url)
+        # Если в хранилище пусто — попробуем поднять из QSettings для переживания переустановки
+        if not widths:
+            try:
+                from PyQt5.QtCore import QSettings
+                v = QSettings('rocker', 'SmallRSSReader').value(f'column_widths:{feed_url}')
+                if v:
+                    widths = [int(x) for x in list(v)]
+                    self.column_widths[feed_url] = widths
+            except Exception:
+                pass
         if widths:
             for i, w in enumerate(widths):
                 if w:
@@ -1146,6 +1202,12 @@ class RSSReader(QMainWindow):
                 self.column_widths[feed_url] = [
                     self.articlesTree.columnWidth(i) for i in range(self.articlesTree.columnCount())
                 ]
+                # Сохраним дефолты ещё и в QSettings, чтобы переживали переустановку
+                try:
+                    from PyQt5.QtCore import QSettings
+                    QSettings('rocker', 'SmallRSSReader').setValue(f'column_widths:{feed_url}', self.column_widths[feed_url])
+                except Exception:
+                    pass
                 if self.storage:
                     try:
                         self.storage.save_column_widths(self.column_widths)
@@ -1213,14 +1275,7 @@ class RSSReader(QMainWindow):
 
     # ----------------- OMDb background fetching -----------------
     def _get_omdb_api_key(self) -> str:
-        # Prefer Keychain-backed value via secrets helper; fallback to QSettings
-        try:
-            from rss_reader.utils.secrets import get_omdb_api_key
-            key = get_omdb_api_key()
-            if isinstance(key, str):
-                return key
-        except Exception:
-            pass
+        # Read OMDb key directly from QSettings (no Keychain)
         try:
             from PyQt5.QtCore import QSettings
             settings = QSettings('rocker', 'SmallRSSReader')
@@ -1639,6 +1694,13 @@ class RSSReader(QMainWindow):
         url = item.data(0, Qt.UserRole)
         widths = [self.articlesTree.columnWidth(i) for i in range(self.articlesTree.columnCount())]
         self.column_widths[url] = widths
+        # Дублируем в QSettings, чтобы переживало переустановку
+        try:
+            from PyQt5.QtCore import QSettings
+            s = QSettings('rocker', 'SmallRSSReader')
+            s.setValue(f'column_widths:{url}', widths)
+        except Exception:
+            pass
         if self.storage:
             try:
                 self.storage.save_column_widths(self.column_widths)
@@ -1654,6 +1716,15 @@ class RSSReader(QMainWindow):
         # Persist via the same path as manual resize
         try:
             self._on_section_resized(index, 0, self.articlesTree.columnWidth(index))
+        except Exception:
+            pass
+
+    def _save_splitter_sizes(self) -> None:
+        """Persist splitter sizes immediately to QSettings."""
+        try:
+            from PyQt5.QtCore import QSettings
+            if hasattr(self, '_splitter') and self._splitter:
+                QSettings('rocker', 'SmallRSSReader').setValue('splitter_sizes', self._splitter.sizes())
         except Exception:
             pass
 
@@ -1953,6 +2024,13 @@ class RSSReader(QMainWindow):
                 if event.key() == Qt.Key_Escape:
                     self.searchEdit.clear()
                     return True
+            # Коалесцированное сохранение геометрии окна при изменении размера/перемещении
+            if obj is self and event.type() in (QEvent.Resize, QEvent.Move):
+                try:
+                    if getattr(self, '_geom_save_timer', None):
+                        self._geom_save_timer.start()
+                except Exception:
+                    pass
         except Exception:
             pass
         return super().eventFilter(obj, event)

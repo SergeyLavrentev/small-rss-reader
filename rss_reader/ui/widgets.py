@@ -1,10 +1,16 @@
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QTreeWidgetItem, QTreeWidget
-try:
-    from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineView
-except Exception:  # pragma: no cover - not available in test-light mode
+import os as _os
+# В тестовом окружении не импортируем QtWebEngine, чтобы не создавать профили/страницы
+if _os.environ.get('SMALL_RSS_TESTS') or _os.environ.get('PYTEST_CURRENT_TEST'):
     QWebEnginePage = object  # type: ignore
     QWebEngineView = object  # type: ignore
+else:  # pragma: no cover - UI path
+    try:
+        from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineView
+    except Exception:  # pragma: no cover
+        QWebEnginePage = object  # type: ignore
+        QWebEngineView = object  # type: ignore
 from PyQt5.QtGui import QDesktopServices
 
 
@@ -73,6 +79,11 @@ class WebEnginePage(QWebEnginePage):
                     except Exception:
                         pass
             page.urlChanged.connect(_open)
+            # Safety: if no URL ever arrives (popup without navigation), delete the page later
+            try:
+                QTimer.singleShot(2000, page.deleteLater)
+            except Exception:
+                pass
             return page
         except Exception:
             return None

@@ -50,14 +50,11 @@ class SettingsDialog(QDialog):
     def setup_ui(self):
         layout = QFormLayout(self)
         self.api_key_input = QLineEdit(self)
-        self.api_key_input.setEchoMode(QLineEdit.Password)
-        # Load from secrets helper (Keychain) if available; fallback to parent value if empty
-        existing_key = ''
-        try:
-            from rss_reader.utils.secrets import get_omdb_api_key
-            existing_key = get_omdb_api_key() or ''
-        except Exception:
-            existing_key = ''
+        # Show the API key plainly (no masking) per simplified storage policy
+        self.api_key_input.setEchoMode(QLineEdit.Normal)
+        # Load from app settings first; fallback to parent attribute
+        settings = QSettings('rocker', 'SmallRSSReader')
+        existing_key = settings.value('omdb_api_key', '', type=str) or ''
         if not existing_key:
             existing_key = getattr(self.parent, 'api_key', '') or ''
         self.api_key_input.setText(existing_key)
@@ -141,24 +138,20 @@ class SettingsDialog(QDialog):
 
     def save_settings(self):
         api_key = (self.api_key_input.text() or "").strip()
-        # Normalize using shared sanitizer (handles spaces and invisible chars)
-        try:
-            from rss_reader.utils.secrets import sanitize_omdb_api_key
-            sanitized = sanitize_omdb_api_key(api_key)
-        except Exception:
-            sanitized = api_key.replace(" ", "")
+        # Normalize locally: strip whitespace/invisible characters
+        sanitized = ''.join((api_key or '').split())
         if sanitized != api_key:
             api_key = sanitized
             self.api_key_input.setText(api_key)
+
         refresh_interval = self.refresh_interval_input.value()
         font_name = self.font_name_combo.currentFont().family()
         font_size = self.font_size_spin.value()
-        # Persist API key via secrets helper (handles Keychain + fallback)
-        try:
-            from rss_reader.utils.secrets import set_omdb_api_key
-            set_omdb_api_key(api_key)
-        except Exception:
-            pass
+
+        # Persist API key directly in QSettings (no Keychain)
+        settings = QSettings('rocker', 'SmallRSSReader')
+        settings.setValue('omdb_api_key', api_key)
+
         # reset OMDb queue auth-failed state if present
         try:
             if hasattr(self.parent, '_omdb_mgr') and self.parent._omdb_mgr:
@@ -167,6 +160,7 @@ class SettingsDialog(QDialog):
                 self.parent._clear_omdb_status()
         except Exception:
             pass
+
         if hasattr(self.parent, 'api_key'):
             self.parent.api_key = api_key
         if hasattr(self.parent, 'refresh_interval'):
@@ -175,28 +169,39 @@ class SettingsDialog(QDialog):
             self.parent.current_font_size = font_size
         if hasattr(self.parent, 'default_font'):
             self.parent.default_font = QFont(font_name, font_size)
+
         notifications_enabled = self.global_notifications_checkbox.isChecked()
         tray_icon_enabled = self.tray_icon_checkbox.isChecked()
         icloud_enabled = self.icloud_backup_checkbox.isChecked()
-        settings = QSettings('rocker', 'SmallRSSReader')
+        log_level = self.log_level_combo.currentText() if hasattr(self, 'log_level_combo') else 'INFO'
+
         settings.setValue('refresh_interval', refresh_interval)
         settings.setValue('font_name', font_name)
         settings.setValue('font_size', font_size)
         settings.setValue('notifications_enabled', notifications_enabled)
         settings.setValue('tray_icon_enabled', tray_icon_enabled)
         settings.setValue('icloud_backup_enabled', icloud_enabled)
+        settings.setValue('log_level', log_level)
+
         if hasattr(self.parent, 'icloud_backup_enabled'):
             self.parent.icloud_backup_enabled = icloud_enabled
         if hasattr(self.parent, 'update_refresh_timer'):
             self.parent.update_refresh_timer()
         if hasattr(self.parent, 'apply_font_size'):
             self.parent.apply_font_size()
+        if hasattr(self.parent, 'set_log_level'):
+            try:
+                self.parent.set_log_level(log_level)
+            except Exception:
+                pass
+
         # If API key was entered, kick OMDb fetching for current feed
         try:
             if api_key and hasattr(self.parent, '_on_feed_selected'):
                 self.parent._on_feed_selected()
         except Exception:
             pass
+
         self.update_api_key_notice()
 
     def accept(self):
@@ -205,12 +210,8 @@ class SettingsDialog(QDialog):
 
     def test_api_key(self):
         key = (self.api_key_input.text() or "").strip()
-        # Normalize with the same sanitizer used for storage
-        try:
-            from rss_reader.utils.secrets import sanitize_omdb_api_key
-            key_sanitized = sanitize_omdb_api_key(key)
-        except Exception:
-            key_sanitized = key.replace(" ", "")
+        # Normalize with the same local sanitizer used for storage
+        key_sanitized = ''.join((key or '').split())
         if key_sanitized != key:
             key = key_sanitized
             self.api_key_input.setText(key)
