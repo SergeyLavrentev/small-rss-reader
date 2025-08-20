@@ -32,6 +32,11 @@ class Storage:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        # Enforce foreign key constraints so ON DELETE CASCADE works
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+        except Exception:
+            pass
         return conn
 
     def _init_db(self) -> None:
@@ -241,7 +246,20 @@ class Storage:
 
     def remove_feed(self, url: str) -> None:
         with self._connect() as con:
-            con.execute("DELETE FROM feeds WHERE url=?", (url,))
+            cur = con.cursor()
+            # Resolve feed id
+            cur.execute("SELECT id FROM feeds WHERE url=?", (url,))
+            row = cur.fetchone()
+            if not row:
+                return
+            feed_id = row[0]
+            # Delete entries for the feed (robust even if FK PRAGMA is off)
+            try:
+                cur.execute("DELETE FROM entries WHERE feed_id=?", (feed_id,))
+            except Exception:
+                pass
+            # Delete the feed itself
+            cur.execute("DELETE FROM feeds WHERE id=?", (feed_id,))
             con.commit()
 
     def update_feed_url(self, old_url: str, new_url: str) -> None:

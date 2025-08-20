@@ -801,14 +801,146 @@ class RSSReader(QMainWindow):
         if not item:
             return
         url = item.data(0, Qt.UserRole)
+        # If a group node is selected, do nothing (only leaf feed items can be removed)
+        if not url:
+            try:
+                QMessageBox.information(self, "Remove Feed", "Select a specific feed inside the group to remove.")
+            except Exception:
+                pass
+            return
         if QMessageBox.question(self, "Remove Feed", f"Remove {url}?") != QMessageBox.Yes:
             return
-        # remove from storage and memory
+        # Remove from storage first
         if self.storage:
             try:
                 self.storage.remove_feed(url)
             except Exception:
                 pass
+        # Remove from in-memory list
+        try:
+            self.feeds = [f for f in (self.feeds or []) if f.get('url') != url]
+        except Exception:
+            pass
+        # Drop per-feed settings/caches
+        try:
+            self.column_widths.pop(url, None)
+        except Exception:
+            pass
+        try:
+            self.omdb_columns_by_feed.pop(url, None)
+        except Exception:
+            pass
+        # Remove per-feed group settings if present and persist
+        if url in (self.group_settings or {}):
+            try:
+                self.group_settings.pop(url, None)
+                if self.storage:
+                    self.storage.save_group_settings(self.group_settings)
+            except Exception:
+                pass
+        # Also purge legacy per-feed column widths in QSettings
+        try:
+            qsettings().remove(f'column_widths:{url}')
+        except Exception:
+            pass
+        # Rebuild feeds tree and set a sensible selection
+        self._rebuild_feeds_tree()
+        # Focus next available feed (first leaf)
+        next_item = None
+        try:
+            for it in self._iter_feed_items():
+                next_item = it
+                break
+        except Exception:
+            pass
+        if next_item is not None:
+            try:
+                self.feedsTree.setCurrentItem(next_item)
+                self._on_feed_selected()
+            except Exception:
+                pass
+        else:
+            # No feeds left: clear articles and preview
+            try:
+                self.articlesTree.clear()
+            except Exception:
+                pass
+        # Update tray badges/status
+        self._update_tray()
+        self._update_feed_unread_badges()
+
+    def remove_group_and_feeds(self, domain: str) -> None:
+        """Remove all feeds belonging to a domain group and clean related settings.
+
+        This removes from storage (if available), in-memory lists, per-feed
+        settings (column widths, OMDb columns, group settings entries keyed by URL),
+        and the group settings keyed by the domain itself. Finally rebuilds the
+        feeds tree and updates UI badges.
+        """
+        if not domain:
+            return
+        # Gather URLs by domain from in-memory feeds
+        try:
+            urls = [f.get('url') for f in (self.feeds or []) if (urlparse(f.get('url') or '').netloc or f.get('url')) == domain]
+        except Exception:
+            urls = []
+        if not urls:
+            return
+        # Storage deletion first so entries are purged
+        if self.storage:
+            for u in urls:
+                try:
+                    self.storage.remove_feed(u)
+                except Exception:
+                    pass
+        # In-memory cleanup
+        try:
+            self.feeds = [f for f in (self.feeds or []) if f.get('url') not in set(urls)]
+        except Exception:
+            pass
+        for u in urls:
+            try:
+                self.column_widths.pop(u, None)
+            except Exception:
+                pass
+            try:
+                self.omdb_columns_by_feed.pop(u, None)
+            except Exception:
+                pass
+            try:
+                qsettings().remove(f'column_widths:{u}')
+            except Exception:
+                pass
+            # remove per-feed group settings
+            try:
+                if u in (self.group_settings or {}):
+                    self.group_settings.pop(u, None)
+            except Exception:
+                pass
+        # remove group-level settings by domain
+        try:
+            if domain in (self.group_settings or {}):
+                self.group_settings.pop(domain, None)
+            if self.storage:
+                self.storage.save_group_settings(self.group_settings)
+        except Exception:
+            pass
+        # Rebuild and refresh UI
+        self._rebuild_feeds_tree()
+        try:
+            next_item = None
+            for it in self._iter_feed_items():
+                next_item = it
+                break
+            if next_item is not None:
+                self.feedsTree.setCurrentItem(next_item)
+                self._on_feed_selected()
+            else:
+                self.articlesTree.clear()
+        except Exception:
+            pass
+        self._update_tray()
+        self._update_feed_unread_badges()
 
     # Context menu for feeds tree
     def _on_feeds_context_menu(self, pos) -> None:
@@ -829,6 +961,8 @@ class RSSReader(QMainWindow):
                 actOmdbDomain.setChecked(bool(curd.get('omdb_enabled')))
             except Exception:
                 pass
+            menu.addSeparator()
+            actRemoveGroup = menu.addAction(f"Remove this group and all feeds ({domain})…")
             chosen = menu.exec_(self.feedsTree.viewport().mapToGlobal(pos))
             if chosen == actOmdbDomain:
                 try:
@@ -867,6 +1001,12 @@ class RSSReader(QMainWindow):
                         ents = fd.get('entries', []) if fd else []
                         self._populate_articles(f_url, ents)
                         self._maybe_fetch_omdb_for_entries(f_url, ents)
+                except Exception:
+                    pass
+            elif chosen == actRemoveGroup:
+                try:
+                    if QMessageBox.question(self, "Remove Group", f"Remove group '{domain}' and all its feeds?") == QMessageBox.Yes:
+                        self.remove_group_and_feeds(domain)
                 except Exception:
                     pass
             return
