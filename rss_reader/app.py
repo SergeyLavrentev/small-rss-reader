@@ -281,6 +281,11 @@ class RSSReader(QMainWindow):
             hdr = self.articlesTree.header()
             hdr.setSortIndicatorShown(True)
             hdr.setSectionsClickable(True)
+            # Allow much narrower columns if the user wants compact layout
+            try:
+                hdr.setMinimumSectionSize(24)
+            except Exception:
+                pass
         except Exception:
             pass
         self.articlesTree.itemSelectionChanged.connect(self._on_article_selected)
@@ -299,7 +304,7 @@ class RSSReader(QMainWindow):
                 self.articlesTree.viewport().installEventFilter(self)
         except Exception:
             pass
-        # Auto-resize column to contents on header double-click
+    # Auto-resize column on header double-click with toggle behavior
         try:
             self.articlesTree.header().sectionDoubleClicked.connect(self._on_header_section_double_clicked)
         except Exception:
@@ -1977,9 +1982,40 @@ class RSSReader(QMainWindow):
                 pass
 
     def _on_header_section_double_clicked(self, index: int) -> None:
-        """Resize a column to fit its contents and persist widths."""
+        """Smart resize on double-click: toggle between header width and contents.
+
+        - First double-click shrinks column to the header text width (plus a small padding and
+          sort indicator if visible) to make columns as narrow as possible while keeping the
+          header readable.
+        - Second double-click resizes to contents (Qt's built-in heuristic).
+        The toggle state is per-column and stored on the instance.
+        """
         try:
-            self.articlesTree.resizeColumnToContents(index)
+            from PyQt5.QtCore import QSize
+            from PyQt5.QtGui import QFontMetrics
+            hdr = self.articlesTree.header()
+            # Initialize toggle state storage lazily
+            if not hasattr(self, "_header_resize_toggle"):
+                self._header_resize_toggle = {}
+
+            toggle = self._header_resize_toggle.get(index, False)
+            if not toggle:
+                # Step 1: shrink to header text width
+                header_text = self.articlesTree.headerItem().text(index)
+                fm = QFontMetrics(hdr.font())
+                text_w = fm.horizontalAdvance(header_text)
+                # Account for left/right header margins and sort indicator area
+                # Typical indicator width ~12-16px; add a small padding.
+                pad = 12
+                indicator_w = 16 if hdr.isSortIndicatorShown() and hdr.sortIndicatorSection() == index else 0
+                target = max(hdr.minimumSectionSize(), text_w + pad + indicator_w)
+                self.articlesTree.setColumnWidth(index, target)
+            else:
+                # Step 2: expand to contents
+                self.articlesTree.resizeColumnToContents(index)
+
+            # Flip toggle for next time
+            self._header_resize_toggle[index] = not toggle
         except Exception:
             pass
         # Persist via the same path as manual resize
