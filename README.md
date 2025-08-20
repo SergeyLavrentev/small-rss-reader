@@ -78,16 +78,11 @@ High level
 - Async work: QThreadPool + QRunnable for RSS and OMDb fetchers; rate-limited queue for OMDb.
 - Persistence: SQLite (`db.sqlite3`) via a lightweight storage layer; QSettings for preferences/UI state.
 - Packaging: py2app application bundle built via `make build`.
-
-Key modules
-- `small_rss_reader.py` — thin entrypoint shim:
-   - Shows splash screen and constructs `rss_reader.app.RSSReader`.
    - Re-exports `RSSReader` and `get_user_data_path` for tests.
 - `rss_reader/app.py` — main application window and orchestration:
    - Builds menus, toolbar (icons-only), tray icon, splitter layout, search, and unread filter.
    - Manages feeds and articles, selection, unread/read state, badges, and opening links.
    - Background refresh, OMDb queueing, rate limiting, and UI updates.
-   - Import/Export (JSON, OPML), iCloud backup/restore, and settings persistence via QSettings.
 - `storage.py` — SQLite access layer:
    - Tables: feeds, read_articles, group_settings (per-domain flags like `omdb_enabled`), column_widths, icon_cache, movie_cache.
    - Safe migration from legacy JSON on first run.
@@ -97,7 +92,6 @@ Key modules
 - `rss_reader/utils/paths.py` — helpers for resource paths and user data location.
 
 Threading model
-- A shared `QThreadPool` runs RSS and OMDb tasks (as `QRunnable`).
 - OMDb requests are de-duplicated by normalized title and limited by a timer-driven dispatcher.
 
 ### Diagrams

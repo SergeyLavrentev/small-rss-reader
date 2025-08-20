@@ -27,9 +27,24 @@ class ArticleTreeWidgetItem(QTreeWidgetItem):
 
         if hasattr(data1, 'timestamp') and hasattr(data2, 'timestamp'):
             return data1 < data2
+        # Numeric-aware sorting: ints/floats and numeric strings
         try:
-            if isinstance(data1, float) and isinstance(data2, float):
-                return data1 < data2
+            def _to_num(x):
+                if isinstance(x, (int, float)):
+                    return float(x)
+                if isinstance(x, str):
+                    s = x.strip().replace('\xa0', '')
+                    s = s.replace('−', '-').replace('–', '-')
+                    if s and (s.lstrip('+-').replace('.', '', 1).isdigit()):
+                        try:
+                            return float(s)
+                        except Exception:
+                            return None
+                return None
+            n1 = _to_num(data1)
+            n2 = _to_num(data2)
+            if n1 is not None and n2 is not None:
+                return n1 < n2
         except Exception:
             pass
         return str(data1) < str(data2)

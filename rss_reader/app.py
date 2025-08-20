@@ -109,6 +109,8 @@ class RSSReader(QMainWindow):
     # Signals for article page prefetch
     page_fetched = pyqtSignal(str, str, str)  # aid, link, html
     page_fetch_failed = pyqtSignal(str)
+    # Habr metrics: emits (aid, data_dict) where data = {rating:int, up:int, down:int, comments:int}
+    habr_metrics_fetched = pyqtSignal(str, object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -411,6 +413,12 @@ class RSSReader(QMainWindow):
             self.page_fetch_failed.connect(lambda _aid: None)
         except Exception:
             pass
+        # Habr metrics updates
+        try:
+            self.habr_metrics_fetched.connect(self._on_habr_metrics_fetched)
+        except Exception:
+            pass
+        self.habr_metrics = {}  # aid -> {rating:int, up:int, down:int, comments:int}
         # OMDb worker signals (created lazily)
         try:
             from rss_reader.services.omdb import OmdbWorker
@@ -1033,7 +1041,12 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
-    # Columns based on OMDb flag (для OMDb показываем расширенный набор колонок, теперь с колонкой IMDb)
+        # Columns based on OMDb flag (для OMDb показываем расширенный набор колонок, теперь с колонкой IMDb)
+        is_habr = False
+        try:
+            is_habr = bool(feed_url and 'habr.com' in str(feed_url))
+        except Exception:
+            is_habr = False
         omdb_enabled = self._is_omdb_enabled(feed_url)
         if omdb_enabled:
             cols = [
@@ -1049,6 +1062,8 @@ class RSSReader(QMainWindow):
             ]
         else:
             cols = ["Title", "Date"]
+            if is_habr:
+                cols += ["Rating", "Comments"]
         # explicitly set column count then labels to ensure shrink
         try:
             self.articlesTree.setColumnCount(len(cols))
@@ -1110,6 +1125,21 @@ class RSSReader(QMainWindow):
                     row.append(runtime)
                 elif c == "Rated":
                     row.append(rated)
+                elif c == "Rating":
+                    try:
+                        aid = self.get_article_id(e)
+                        m = self.habr_metrics.get(aid) or {}
+                        txt = m.get('rating_text') or ''
+                        row.append(txt)
+                    except Exception:
+                        row.append('')
+                elif c == "Comments":
+                    try:
+                        aid = self.get_article_id(e)
+                        m = self.habr_metrics.get(aid) or {}
+                        row.append(str(m.get('comments', '')))
+                    except Exception:
+                        row.append('')
                 else:
                     row.append('')
             item = ArticleTreeWidgetItem(row)
@@ -1142,6 +1172,32 @@ class RSSReader(QMainWindow):
                         rv = None
                     if rv is not None:
                         item.setData(idxi, Qt.UserRole, rv)
+                    # No other fallbacks: we trust the score counter as the single source of truth
+                # numeric roles for Habr metrics
+                if "Rating" in hdr_cols:
+                    try:
+                        idxr = hdr_cols.index("Rating")
+                        aidr = self.get_article_id(e)
+                        mr = self.habr_metrics.get(aidr) or {}
+                        r_val = mr.get('rating')
+                        if isinstance(r_val, int):
+                            item.setData(idxr, Qt.UserRole, int(r_val))
+                        else:
+                            item.setData(idxr, Qt.UserRole, 0)
+                    except Exception:
+                        pass
+                if "Comments" in hdr_cols:
+                    try:
+                        idxc = hdr_cols.index("Comments")
+                        aidc = self.get_article_id(e)
+                        mc = self.habr_metrics.get(aidc) or {}
+                        c_val = mc.get('comments')
+                        if isinstance(c_val, int):
+                            item.setData(idxc, Qt.UserRole, int(c_val))
+                        else:
+                            item.setData(idxc, Qt.UserRole, 0)
+                    except Exception:
+                        pass
             except Exception:
                 pass
             # mark read visually
@@ -1179,12 +1235,17 @@ class RSSReader(QMainWindow):
                 except Exception:
                     pass
 
-        # Sort by Date if present
-        try:
-            sort_idx = cols.index("Date") if "Date" in cols else max(0, len(cols) - 1)
-            self.articlesTree.sortItems(sort_idx, Qt.DescendingOrder)
-        except Exception:
-            pass
+        # Schedule Habr metrics fetch for habr.com feeds (skip in tests)
+        if not headless_tests and is_habr:
+            for e in visible_entries:
+                try:
+                    aid = self.get_article_id(e)
+                    # Always refresh to avoid stale values; cache will be updated by signal
+                    link = (e.get('link') or '').strip()
+                    if link:
+                        self.thread_pool.start(_HabrMetricsRunnable(aid, link, self))
+                except Exception:
+                    pass
 
         # apply column widths (with first-run defaults)
         widths = self.column_widths.get(feed_url)
@@ -1208,7 +1269,8 @@ class RSSReader(QMainWindow):
                     # Title, Date, Year, IMDb, Director, Actors, Genre, Runtime, Rated
                     defaults = [520, 140, 70, 60, 180, 240, 180, 100, 80]
                 else:
-                    defaults = [540, 140]      # Title, Date
+                    # Title, Date (+ optional Habr: Rating, Comments)
+                    defaults = [540, 140] + ([80, 100] if is_habr else [])
                 for i, w in enumerate(defaults[: self.articlesTree.columnCount()]):
                     self.articlesTree.setColumnWidth(i, int(w))
                 self.column_widths[feed_url] = [
@@ -1230,6 +1292,59 @@ class RSSReader(QMainWindow):
         # After listing, try to fetch OMDb data for missing items (async)
         try:
             self._maybe_fetch_omdb_for_entries(feed_url, visible_entries)
+        except Exception:
+            pass
+
+        # Sort by Date if present
+        try:
+            sort_idx = cols.index("Date") if "Date" in cols else max(0, len(cols) - 1)
+            self.articlesTree.sortItems(sort_idx, Qt.DescendingOrder)
+        except Exception:
+            pass
+
+    def _find_article_item_by_aid(self, aid: str):
+        try:
+            tree = self.articlesTree
+            for i in range(tree.topLevelItemCount()):
+                it = tree.topLevelItem(i)
+                e = it.data(0, Qt.UserRole) or {}
+                if self.get_article_id(e) == aid:
+                    return it
+        except Exception:
+            pass
+        return None
+
+    @pyqtSlot(str, object)
+    def _on_habr_metrics_fetched(self, aid: str, data: object) -> None:
+        try:
+            if not isinstance(data, dict):
+                return
+            self.habr_metrics[aid] = data
+            it = self._find_article_item_by_aid(aid)
+            if not it:
+                return
+            # update columns if present
+            try:
+                hdr = [self.articlesTree.headerItem().text(i) for i in range(self.articlesTree.columnCount())]
+            except Exception:
+                hdr = []
+            if "Rating" in hdr:
+                idxr = hdr.index("Rating")
+                txt = data.get('rating_text') or ''
+                it.setText(idxr, txt)
+                try:
+                    r_val = data.get('rating')
+                    it.setData(idxr, Qt.UserRole, int(r_val) if isinstance(r_val, int) else 0)  # for sorting
+                except Exception:
+                    pass
+            if "Comments" in hdr:
+                idxc = hdr.index("Comments")
+                it.setText(idxc, str(data.get('comments', '')))
+                try:
+                    c_val = data.get('comments')
+                    it.setData(idxc, Qt.UserRole, int(c_val) if isinstance(c_val, int) else 0)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1925,28 +2040,30 @@ class RSSReader(QMainWindow):
     def _create_menu(self) -> None:
         # delegate to UI helper
         _ui_create_menu(self)
-        
     # ----------------- OPML import/export -----------------
     def export_opml(self) -> None:
         try:
-            opml_export(self, self.feeds)
+            items = [{'title': f.get('title') or (f.get('url') or ''), 'url': f.get('url') or ''} for f in (self.feeds or [])]
+            from rss_reader.io.opml import export_opml as _export
+            _export(self, items)
         except Exception:
             self.warn("Error", "Failed to export OPML")
 
     def import_opml(self) -> None:
         try:
-            items = opml_import(self)
+            from rss_reader.io.opml import import_opml as _import
+            items = _import(self)
             for it in items:
-                url = it.get('url')
-                title = it.get('title') or url
+                url = (it.get('url') or '').strip()
+                title = (it.get('title') or url).strip()
                 if not url or any(f['url'] == url for f in self.feeds):
                     continue
-                if self.storage:
-                    try:
+                try:
+                    if self.storage:
                         self.storage.upsert_feed(title, url)
-                    except Exception:
-                        pass
-                self.feeds.append({'title': title, 'url': url, 'entries': []})
+                    self.feeds.append({'title': title, 'url': url, 'entries': []})
+                except Exception:
+                    pass
             try:
                 self._rebuild_feeds_tree()
             except Exception:
@@ -2276,6 +2393,8 @@ class _PageFetchRunnable(QRunnable):
         try:
             import requests
             from bs4 import BeautifulSoup
+            import os
+            import os as _os
             resp = requests.get(self.link, timeout=8, headers={
                 'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'
             })
@@ -2305,3 +2424,144 @@ class _PageFetchRunnable(QRunnable):
                 self.app.page_fetch_failed.emit(self.aid)
             except Exception:
                 pass
+
+
+# Background Habr metrics fetch runnable (module-level)
+class _HabrMetricsRunnable(QRunnable):  # pragma: no cover - network
+    def __init__(self, aid: str, link: str, app: RSSReader) -> None:
+        super().__init__()
+        self.aid = aid
+        self.link = link
+        self.app = app
+
+    def run(self) -> None:
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            headers = {'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'}
+            resp = requests.get(self.link, timeout=8, headers=headers)
+            text = resp.text if hasattr(resp, 'text') else ''
+            rating = None  # numeric for sorting
+            rating_text = ''  # exact text for display (with + or − as on page)
+            up = down = None
+            comments = None
+            if text:
+                try:
+                    soup = BeautifulSoup(text, 'html.parser')
+                    # 1) Rating (preferred): votes lever score counter
+                    #
+                    # Habr renders two counters with the same data-test-id="votes-score-counter":
+                    #  - tm-votes-lever__score-counter_rating      → aggregate decimal score (e.g., 295.23) — NOT what we want
+                    #  - tm-votes-lever__score-counter_positive/negative → the visible integer with sign (e.g., +6) — EXACTLY what we want
+                    #
+                    # Strategy:
+                    #  1) Prefer the first element carrying positive/negative class.
+                    #  2) Otherwise, take the first element that is not *_rating.
+                    #  3) As a last resort, fall back to the first occurrence.
+                    #
+                    # We use the raw text for display (rating_text) and parse a numeric value separately
+                    # for sorting only (stored in the item UserRole). We don't modify the shown text.
+                    try:
+                        # Select the explicit counter elements
+                        candidates = soup.select('span.tm-votes-lever__score-counter[data-test-id="votes-score-counter"]')
+                        _dbg = bool(os.environ.get('SMALL_RSS_DEBUG_HABR'))
+                        if _dbg:
+                            try:
+                                print(f"[HABR] url={self.link} candidates={len(candidates)}", flush=True)
+                                for i, el in enumerate(candidates[:3]):
+                                    try:
+                                        snippet = str(el)
+                                        if len(snippet) > 300:
+                                            snippet = snippet[:300] + '…'
+                                        classes = ' '.join(el.get('class') or [])
+                                        txt = el.get_text(strip=True)
+                                        print(f"[HABR] cand[{i}] classes='{classes}' text='{txt}' html='{snippet}'", flush=True)
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                        # Choose preferred candidate:
+                        # 1) one with explicit positive/negative class
+                        # 2) otherwise, first one that is not *_rating (decimal aggregate)
+                        # 3) otherwise, fall back to first
+                        rating_el = None
+                        chosen_idx = None
+                        for i, el in enumerate(candidates):
+                            classes = ' '.join(el.get('class') or [])
+                            if 'tm-votes-lever__score-counter_positive' in classes or 'tm-votes-lever__score-counter_negative' in classes:
+                                rating_el = el
+                                chosen_idx = i
+                                break
+                        if rating_el is None:
+                            for i, el in enumerate(candidates):
+                                classes = ' '.join(el.get('class') or [])
+                                if 'tm-votes-lever__score-counter_rating' not in classes:
+                                    rating_el = el
+                                    chosen_idx = i
+                                    break
+                        if rating_el is None and candidates:
+                            rating_el = candidates[0]
+                            chosen_idx = 0
+                        if rating_el is not None:
+                            raw = rating_el.get_text(strip=True)
+                            # If sign missing in text, infer from class (positive/negative) and add it to display
+                            classes = ' '.join(rating_el.get('class') or [])
+                            if raw and raw[0] not in ['+', '-', '\u2212']:
+                                if 'negative' in classes:
+                                    rating_text = '-' + (raw or '')
+                                    inferred = '-'
+                                elif 'positive' in classes:
+                                    rating_text = '+' + (raw or '')
+                                    inferred = '+'
+                                else:
+                                    rating_text = raw or ''
+                                    inferred = ''
+                            else:
+                                rating_text = raw or ''
+                                inferred = ''
+                            # Numeric parsing for sorting
+                            val = (raw or '')
+                            # Keep display as-is, but normalize for numeric only
+                            val_num = val.replace('\u2212', '-').replace('\xa0', '').replace('\u202f', '').replace(' ', '')
+                            import re
+                            m = re.match(r'^[+\-]?\d+', val_num)
+                            if not m and inferred:
+                                m = re.match(r'^\d+', val_num)
+                                if m:
+                                    val_num = inferred + m.group(0)
+                            if m:
+                                try:
+                                    rating = int(m.group(0) if inferred == '' else val_num)
+                                except Exception:
+                                    pass
+                            if _dbg:
+                                try:
+                                    print(f"[HABR] chosen idx={chosen_idx} classes='{classes}' raw='{raw}' rating_text='{rating_text}' rating_num='{rating}'", flush=True)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
+                    # 2) Rating fallback intentionally removed: per requirement, use only votes-score-counter value
+                    # Comments: find counter element
+                    c = soup.select_one(
+                        'span.tm-article-comments-counter-link__value, '
+                        'span.tm-article-comments-counter-link__value_contrasted'
+                    )
+                    if c and c.text:
+                        try:
+                            comments = int(''.join(ch for ch in c.text if ch.isdigit()))
+                        except Exception:
+                            comments = None
+                except Exception:
+                    pass
+            data = {
+                'rating_text': rating_text,
+                'rating': rating if isinstance(rating, int) else None,
+                'up': up,
+                'down': down,
+                'comments': comments,
+            }
+            self.app.habr_metrics_fetched.emit(self.aid, data)
+        except Exception:
+            pass
