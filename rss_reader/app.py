@@ -158,6 +158,41 @@ class RSSReader(QMainWindow):
         if not headless:
             self._init_full_ui()
 
+    def _get_entry_link(self, e: Dict[str, Any]) -> str:
+        """Return best-effort article URL from a feed entry.
+
+        Order: entry['link'] → first entry['links'][rel=alternate] → first entry['links'] → entry['id'].
+        Returns empty string if nothing is found.
+        """
+        try:
+            link = (e.get('link') or '').strip()
+            if link:
+                return link
+            links = e.get('links') or []
+            if isinstance(links, list) and links:
+                try:
+                    alt = next((x for x in links if isinstance(x, dict) and (x.get('rel') or '') == 'alternate'), None)
+                except Exception:
+                    alt = None
+                href = (alt or {}).get('href') if isinstance(alt, dict) else None
+                if href:
+                    return str(href).strip()
+                first = links[0]
+                if isinstance(first, dict):
+                    href = first.get('href')
+                    if href:
+                        return str(href).strip()
+                elif isinstance(first, str):
+                    if first.strip():
+                        return first.strip()
+            # fallback to id
+            ident = e.get('id')
+            if ident and str(ident).strip().startswith('http'):
+                return str(ident).strip()
+        except Exception:
+            pass
+        return ''
+
     # ---- Full UI for interactive runs ----
     def _init_full_ui(self) -> None:
         self.setWindowTitle("Small RSS Reader")
@@ -1207,7 +1242,9 @@ class RSSReader(QMainWindow):
             ]
         else:
             cols = ["Title", "Date"]
-            if is_habr:
+        # Всегда добавляем метрики Habr на Habr-фидах, даже если OMDb включён
+        if is_habr:
+            if "Rating" not in cols:
                 cols += ["Rating", "Comments"]
         # explicitly set column count then labels to ensure shrink
         try:
@@ -1372,7 +1409,7 @@ class RSSReader(QMainWindow):
                     aid = self.get_article_id(e)
                     if aid in self.article_html_cache or aid in self._page_fetching_aids:
                         continue
-                    link = (e.get('link') or '').strip()
+                    link = self._get_entry_link(e)
                     has_inline = bool(e.get('content') or e.get('summary') or e.get('description'))
                     if link and not has_inline:
                         self._page_fetching_aids.add(aid)
@@ -1386,7 +1423,7 @@ class RSSReader(QMainWindow):
                 try:
                     aid = self.get_article_id(e)
                     # Always refresh to avoid stale values; cache will be updated by signal
-                    link = (e.get('link') or '').strip()
+                    link = self._get_entry_link(e)
                     if link:
                         self.thread_pool.start(_HabrMetricsRunnable(aid, link, self))
                 except Exception:
@@ -1411,11 +1448,15 @@ class RSSReader(QMainWindow):
             # First run: set defaults and remember
             try:
                 if omdb_enabled:
-                    # Title, Date, Year, IMDb, Director, Actors, Genre, Runtime, Rated
+                    # Title, Date, Year, IMDb, Director, Actors, Genre, Runtime, Rated (+ optional Habr: Rating, Comments)
                     defaults = [520, 140, 70, 60, 180, 240, 180, 100, 80]
+                    if is_habr:
+                        defaults += [80, 100]
                 else:
                     # Title, Date (+ optional Habr: Rating, Comments)
-                    defaults = [540, 140] + ([80, 100] if is_habr else [])
+                    defaults = [540, 140]
+                    if is_habr:
+                        defaults += [80, 100]
                 for i, w in enumerate(defaults[: self.articlesTree.columnCount()]):
                     self.articlesTree.setColumnWidth(i, int(w))
                 self.column_widths[feed_url] = [
@@ -2613,131 +2654,151 @@ class _HabrMetricsRunnable(QRunnable):  # pragma: no cover - network
     def run(self) -> None:
         try:
             import requests
-            from bs4 import BeautifulSoup
-            headers = {'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'}
-            resp = requests.get(self.link, timeout=8, headers=headers)
-            text = resp.text if hasattr(resp, 'text') else ''
-            rating = None  # numeric for sorting
-            rating_text = ''  # exact text for display (with + or − as on page)
-            up = down = None
-            comments = None
-            if text:
+            # Use browser-like headers to avoid simplified/bot markup
+            headers = {
+                'User-Agent': (
+                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) '
+                    'Chrome/124.0.0.0 Safari/537.36'
+                ),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Referer': 'https://habr.com/',
+            }
+            resp = requests.get(self.link, timeout=8, headers=headers, allow_redirects=True)
+            if bool(os.environ.get('SMALL_RSS_DEBUG_HABR')):
                 try:
-                    soup = BeautifulSoup(text, 'html.parser')
-                    # 1) Rating (preferred): votes lever score counter
-                    #
-                    # Habr renders two counters with the same data-test-id="votes-score-counter":
-                    #  - tm-votes-lever__score-counter_rating      → aggregate decimal score (e.g., 295.23) — NOT what we want
-                    #  - tm-votes-lever__score-counter_positive/negative → the visible integer with sign (e.g., +6) — EXACTLY what we want
-                    #
-                    # Strategy:
-                    #  1) Prefer the first element carrying positive/negative class.
-                    #  2) Otherwise, take the first element that is not *_rating.
-                    #  3) As a last resort, fall back to the first occurrence.
-                    #
-                    # We use the raw text for display (rating_text) and parse a numeric value separately
-                    # for sorting only (stored in the item UserRole). We don't modify the shown text.
-                    try:
-                        # Select the explicit counter elements
-                        candidates = soup.select('span.tm-votes-lever__score-counter[data-test-id="votes-score-counter"]')
-                        _dbg = bool(os.environ.get('SMALL_RSS_DEBUG_HABR'))
-                        if _dbg:
-                            try:
-                                print(f"[HABR] url={self.link} candidates={len(candidates)}", flush=True)
-                                for i, el in enumerate(candidates[:3]):
-                                    try:
-                                        snippet = str(el)
-                                        if len(snippet) > 300:
-                                            snippet = snippet[:300] + '…'
-                                        classes = ' '.join(el.get('class') or [])
-                                        txt = el.get_text(strip=True)
-                                        print(f"[HABR] cand[{i}] classes='{classes}' text='{txt}' html='{snippet}'", flush=True)
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
-                        # Choose preferred candidate:
-                        # 1) one with explicit positive/negative class
-                        # 2) otherwise, first one that is not *_rating (decimal aggregate)
-                        # 3) otherwise, fall back to first
-                        rating_el = None
-                        chosen_idx = None
-                        for i, el in enumerate(candidates):
-                            classes = ' '.join(el.get('class') or [])
-                            if 'tm-votes-lever__score-counter_positive' in classes or 'tm-votes-lever__score-counter_negative' in classes:
-                                rating_el = el
-                                chosen_idx = i
-                                break
-                        if rating_el is None:
-                            for i, el in enumerate(candidates):
-                                classes = ' '.join(el.get('class') or [])
-                                if 'tm-votes-lever__score-counter_rating' not in classes:
-                                    rating_el = el
-                                    chosen_idx = i
-                                    break
-                        if rating_el is None and candidates:
-                            rating_el = candidates[0]
-                            chosen_idx = 0
-                        if rating_el is not None:
-                            raw = rating_el.get_text(strip=True)
-                            # If sign missing in text, infer from class (positive/negative) and add it to display
-                            classes = ' '.join(rating_el.get('class') or [])
-                            if raw and raw[0] not in ['+', '-', '\u2212']:
-                                if 'negative' in classes:
-                                    rating_text = '-' + (raw or '')
-                                    inferred = '-'
-                                elif 'positive' in classes:
-                                    rating_text = '+' + (raw or '')
-                                    inferred = '+'
-                                else:
-                                    rating_text = raw or ''
-                                    inferred = ''
-                            else:
-                                rating_text = raw or ''
-                                inferred = ''
-                            # Numeric parsing for sorting
-                            val = (raw or '')
-                            # Keep display as-is, but normalize for numeric only
-                            val_num = val.replace('\u2212', '-').replace('\xa0', '').replace('\u202f', '').replace(' ', '')
-                            import re
-                            m = re.match(r'^[+\-]?\d+', val_num)
-                            if not m and inferred:
-                                m = re.match(r'^\d+', val_num)
-                                if m:
-                                    val_num = inferred + m.group(0)
-                            if m:
-                                try:
-                                    rating = int(m.group(0) if inferred == '' else val_num)
-                                except Exception:
-                                    pass
-                            if _dbg:
-                                try:
-                                    print(f"[HABR] chosen idx={chosen_idx} classes='{classes}' raw='{raw}' rating_text='{rating_text}' rating_num='{rating}'", flush=True)
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-
-                    # 2) Rating fallback intentionally removed: per requirement, use only votes-score-counter value
-                    # Comments: find counter element
-                    c = soup.select_one(
-                        'span.tm-article-comments-counter-link__value, '
-                        'span.tm-article-comments-counter-link__value_contrasted'
-                    )
-                    if c and c.text:
-                        try:
-                            comments = int(''.join(ch for ch in c.text if ch.isdigit()))
-                        except Exception:
-                            comments = None
+                    print(f"[HABR] GET {self.link} -> {getattr(resp, 'status_code', '?')}", flush=True)
                 except Exception:
                     pass
-            data = {
-                'rating_text': rating_text,
-                'rating': rating if isinstance(rating, int) else None,
-                'up': up,
-                'down': down,
-                'comments': comments,
-            }
+            text = resp.text if hasattr(resp, 'text') else ''
+            data = _parse_habr_metrics_from_html(text or '')
             self.app.habr_metrics_fetched.emit(self.aid, data)
         except Exception:
             pass
+
+def _parse_habr_metrics_from_html(html: str) -> Dict[str, Any]:
+    """Parse Habr article page HTML and extract metrics.
+
+    Returns dict: {
+        'rating_text': str,  # text with sign for display (may be empty)
+        'rating': Optional[int],
+        'up': Optional[int],
+        'down': Optional[int],
+        'comments': Optional[int],
+    }
+
+    Supports both legacy and current Habr markup.
+    """
+    rating: Optional[int] = None
+    rating_text = ''
+    up = down = None
+    comments: Optional[int] = None
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html or '', 'html.parser')
+
+        # ---- Rating parsing (as before, but isolated here) ----
+        try:
+            candidates = soup.select('span.tm-votes-lever__score-counter[data-test-id="votes-score-counter"]')
+            rating_el = None
+            for el in candidates:
+                classes = ' '.join(el.get('class') or [])
+                if 'tm-votes-lever__score-counter_positive' in classes or 'tm-votes-lever__score-counter_negative' in classes:
+                    rating_el = el
+                    break
+            if rating_el is None:
+                for el in candidates:
+                    classes = ' '.join(el.get('class') or [])
+                    if 'tm-votes-lever__score-counter_rating' not in classes:
+                        rating_el = el
+                        break
+            if rating_el is None and candidates:
+                rating_el = candidates[0]
+            if rating_el is not None:
+                raw = rating_el.get_text(strip=True)
+                classes = ' '.join(rating_el.get('class') or [])
+                if raw and raw[0] not in ['+', '-', '\u2212']:
+                    if 'negative' in classes:
+                        rating_text = '-' + (raw or '')
+                        inferred = '-'
+                    elif 'positive' in classes:
+                        rating_text = '+' + (raw or '')
+                        inferred = '+'
+                    else:
+                        rating_text = raw or ''
+                        inferred = ''
+                else:
+                    rating_text = raw or ''
+                    inferred = ''
+                # numeric
+                val_num = (raw or '').replace('\u2212', '-').replace('\xa0', '').replace('\u202f', '').replace(' ', '')
+                import re as _re
+                m = _re.match(r'^[+\-]?\d+', val_num)
+                if not m and inferred:
+                    m = _re.match(r'^\d+', val_num)
+                    if m:
+                        val_num = inferred + m.group(0)
+                if m:
+                    try:
+                        rating = int(m.group(0) if inferred == '' else val_num)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # ---- Comments parsing: support new and old markup ----
+        # 1) New (observed Sep 2025):
+        #    <span class="value value--contrasted"> Комментарии 34 </span>
+        #    or similar element containing the word "Комментарии" and a number.
+        # 2) Legacy:
+        #    span.tm-article-comments-counter-link__value(_contrasted)
+        try:
+            import re as _re
+            # primary new selectors first
+            cand_nodes = []
+            cand_nodes += soup.select('span.value.value--contrasted')
+            cand_nodes += soup.select('[data-test-id="comments-counter"]')
+            # legacy selectors
+            cand_nodes += soup.select('span.tm-article-comments-counter-link__value, span.tm-article-comments-counter-link__value_contrasted')
+            # a bit broader fallback
+            cand_nodes += soup.select('span.value')
+
+            def _extract_comments_from_text(t: str) -> Optional[int]:
+                if not t:
+                    return None
+                text = ' '.join(t.split())
+                if 'комментар' in text.lower():
+                    m = _re.search(r'(\d{1,6})', text)
+                    if m:
+                        try:
+                            return int(m.group(1))
+                        except Exception:
+                            return None
+                # also allow pure numeric nodes (legacy value-only)
+                m2 = _re.fullmatch(r'\D*(\d{1,6})\D*', text)
+                if m2:
+                    try:
+                        return int(m2.group(1))
+                    except Exception:
+                        return None
+                return None
+
+            for node in cand_nodes:
+                comments = _extract_comments_from_text(node.get_text(" ", strip=True))
+                if isinstance(comments, int):
+                    break
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    return {
+        'rating_text': rating_text,
+        'rating': rating if isinstance(rating, int) else None,
+        'up': up,
+        'down': down,
+        'comments': comments if isinstance(comments, int) else None,
+    }
