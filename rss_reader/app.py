@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QAction,
+    QActionGroup,
     QFileDialog,
     QMessageBox,
     QInputDialog,
@@ -119,6 +120,8 @@ class RSSReader(QMainWindow):
         self.feeds: List[Dict[str, Any]] = []
         self.read_articles = set()
         self.column_widths: Dict[str, List[int]] = {}
+        self.column_configs: Dict[str, Dict[str, Any]] = {}
+        self._column_scope_by_feed: Dict[str, str] = {}
         self.group_settings: Dict[str, Dict[str, bool]] = {}
         self.favicon_cache: Dict[str, QIcon] = {}
         self.data_changed = False
@@ -149,6 +152,7 @@ class RSSReader(QMainWindow):
         self._page_fetching_aids = set()
         # Quick preview window (lazy)
         self._preview = None
+        self._applying_sort = False
 
         # Interactive runs: show a basic UI so the window isn't empty
         try:
@@ -316,6 +320,11 @@ class RSSReader(QMainWindow):
             hdr = self.articlesTree.header()
             hdr.setSortIndicatorShown(True)
             hdr.setSectionsClickable(True)
+            hdr.setSectionsMovable(True)
+            hdr.sectionMoved.connect(self._on_section_moved)
+            hdr.sortIndicatorChanged.connect(self._on_sort_changed)
+            hdr.setContextMenuPolicy(Qt.CustomContextMenu)
+            hdr.customContextMenuRequested.connect(self._on_articles_header_menu)
             # Allow much narrower columns if the user wants compact layout
             try:
                 hdr.setMinimumSectionSize(24)
@@ -342,11 +351,6 @@ class RSSReader(QMainWindow):
     # Auto-resize column on header double-click with toggle behavior
         try:
             self.articlesTree.header().sectionDoubleClicked.connect(self._on_header_section_double_clicked)
-        except Exception:
-            pass
-    # Меню заголовка отключено: расширенные OMDb колонки в минимальной конфигурации
-        try:
-            self.articlesTree.header().setContextMenuPolicy(Qt.DefaultContextMenu)
         except Exception:
             pass
 
@@ -683,6 +687,10 @@ class RSSReader(QMainWindow):
             self.feeds = self.storage.get_all_feeds()
             self.read_articles = set(self.storage.load_read_articles())
             self.column_widths = self.storage.load_column_widths()
+            try:
+                self.column_configs = self.storage.load_column_configs()
+            except Exception:
+                self.column_configs = {}
             # optional
             try:
                 self.group_settings = self.storage.load_group_settings()
@@ -1229,7 +1237,7 @@ class RSSReader(QMainWindow):
             is_habr = False
         omdb_enabled = self._is_omdb_enabled(feed_url)
         if omdb_enabled:
-            cols = [
+            base_cols = [
                 "Title",
                 "Date",
                 "Year",
@@ -1241,21 +1249,23 @@ class RSSReader(QMainWindow):
                 "Rated",
             ]
         else:
-            cols = ["Title", "Date"]
+            base_cols = ["Title", "Date"]
         # Всегда добавляем метрики Habr на Habr-фидах, даже если OMDb включён
         if is_habr:
-            if "Rating" not in cols:
-                cols += ["Rating", "Comments"]
+            if "Rating" not in base_cols:
+                base_cols += ["Rating", "Comments"]
+        ordered_cols, visible_cols, sort_col_name, sort_order = self._apply_column_preferences(feed_url, base_cols)
         # explicitly set column count then labels to ensure shrink
         try:
-            self.articlesTree.setColumnCount(len(cols))
+            self.articlesTree.setColumnCount(len(ordered_cols))
         except Exception:
             pass
-        self.articlesTree.setHeaderLabels(cols)
+        self.articlesTree.setHeaderLabels(ordered_cols)
+        self._apply_column_visibility(ordered_cols, visible_cols)
 
         # index of Date column for sorting and role storage
         try:
-            date_col_index = cols.index("Date")
+            date_col_index = ordered_cols.index("Date")
         except ValueError:
             date_col_index = 0
 
@@ -1288,7 +1298,7 @@ class RSSReader(QMainWindow):
                 except Exception:
                     pass
             row: List[str] = []
-            for c in cols:
+            for c in ordered_cols:
                 if c == "Title":
                     row.append(title)
                 elif c == "Date":
@@ -1334,7 +1344,7 @@ class RSSReader(QMainWindow):
                 pass
             # store numeric roles for Year to improve sorting
             try:
-                hdr_cols = cols
+                hdr_cols = ordered_cols
                 if "Year" in hdr_cols:
                     idxy = hdr_cols.index("Year")
                     try:
@@ -1441,27 +1451,35 @@ class RSSReader(QMainWindow):
             except Exception:
                 pass
         if widths:
-            for i, w in enumerate(widths):
+            count = self.articlesTree.columnCount()
+            for i, w in enumerate(widths[:count]):
                 if w:
                     self.articlesTree.setColumnWidth(i, int(w))
+            if len(widths) != count:
+                try:
+                    self.column_widths[feed_url] = widths[:count]
+                except Exception:
+                    pass
         else:
             # First run: set defaults and remember
             try:
-                if omdb_enabled:
-                    # Title, Date, Year, IMDb, Director, Actors, Genre, Runtime, Rated (+ optional Habr: Rating, Comments)
-                    defaults = [520, 140, 70, 60, 180, 240, 180, 100, 80]
-                    if is_habr:
-                        defaults += [80, 100]
-                else:
-                    # Title, Date (+ optional Habr: Rating, Comments)
-                    defaults = [540, 140]
-                    if is_habr:
-                        defaults += [80, 100]
-                for i, w in enumerate(defaults[: self.articlesTree.columnCount()]):
+                default_map = {
+                    "Title": 520 if omdb_enabled else 540,
+                    "Date": 140,
+                    "Year": 70,
+                    "IMDb": 60,
+                    "Director": 180,
+                    "Actors": 240,
+                    "Genre": 180,
+                    "Runtime": 100,
+                    "Rated": 80,
+                    "Rating": 80,
+                    "Comments": 100,
+                }
+                defaults = [int(default_map.get(name, 120)) for name in ordered_cols]
+                for i, w in enumerate(defaults):
                     self.articlesTree.setColumnWidth(i, int(w))
-                self.column_widths[feed_url] = [
-                    self.articlesTree.columnWidth(i) for i in range(self.articlesTree.columnCount())
-                ]
+                self.column_widths[feed_url] = defaults
                 # Сохраним дефолты ещё и в QSettings, чтобы переживали переустановку
                 try:
                     qsettings().setValue(f'column_widths:{feed_url}', self.column_widths[feed_url])
@@ -1481,12 +1499,23 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
-        # Sort by Date if present
+        # Sort using saved preference (fallback to Date desc)
         try:
-            sort_idx = cols.index("Date") if "Date" in cols else max(0, len(cols) - 1)
-            self.articlesTree.sortItems(sort_idx, Qt.DescendingOrder)
+            if sort_col_name and sort_col_name in ordered_cols:
+                sort_idx = ordered_cols.index(sort_col_name)
+                sort_ord = Qt.SortOrder(int(sort_order)) if sort_order is not None else Qt.DescendingOrder
+            else:
+                sort_idx = ordered_cols.index("Date") if "Date" in ordered_cols else max(0, len(ordered_cols) - 1)
+                sort_ord = Qt.DescendingOrder
+            self._applying_sort = True
+            self.articlesTree.sortItems(sort_idx, sort_ord)
         except Exception:
             pass
+        finally:
+            try:
+                self._applying_sort = False
+            except Exception:
+                pass
 
     def _find_article_item_by_aid(self, aid: str):
         try:
@@ -1548,9 +1577,240 @@ class RSSReader(QMainWindow):
         except Exception:
             return False
 
+    # ----------------- Column preferences (visibility/order/sort) -----------------
+    def _column_pref_targets(self, feed_url: str) -> Tuple[str, str]:
+        domain = urlparse(feed_url).netloc or feed_url
+        return feed_url, domain
+
+    def _effective_column_config(self, feed_url: str) -> Tuple[Dict[str, Any], Optional[str]]:
+        if not feed_url:
+            return {}, None
+        if feed_url in (self.column_configs or {}):
+            return self.column_configs.get(feed_url) or {}, feed_url
+        _, domain = self._column_pref_targets(feed_url)
+        if domain and domain in (self.column_configs or {}):
+            return self.column_configs.get(domain) or {}, domain
+        return {}, None
+
+    def _current_column_order(self) -> List[str]:
+        try:
+            header = self.articlesTree.header()
+        except Exception:
+            return []
+        try:
+            count = self.articlesTree.columnCount()
+            names = [self.articlesTree.headerItem().text(i) for i in range(count)]
+            order: List[Optional[str]] = [None] * count
+            for logical, name in enumerate(names):
+                vis = header.visualIndex(logical)
+                if 0 <= vis < count:
+                    order[vis] = name
+            return [c for c in order if c is not None]
+        except Exception:
+            return []
+
+    def _logical_index_for_column(self, name: str) -> Optional[int]:
+        try:
+            for i in range(self.articlesTree.columnCount()):
+                if self.articlesTree.headerItem().text(i) == name:
+                    return i
+        except Exception:
+            pass
+        return None
+
+    def _capture_current_widths(self, feed_url: str) -> List[int]:
+        if not feed_url:
+            return []
+        try:
+            header = self.articlesTree.header()
+            count = self.articlesTree.columnCount()
+            widths = [0] * count
+            for logical in range(count):
+                vis = header.visualIndex(logical)
+                if 0 <= vis < count:
+                    widths[vis] = self.articlesTree.columnWidth(logical)
+            self.column_widths[feed_url] = widths
+            try:
+                qsettings().setValue(f'column_widths:{feed_url}', widths)
+            except Exception:
+                pass
+            if self.storage:
+                try:
+                    self.storage.save_column_widths(self.column_widths)
+                except Exception:
+                    pass
+            return widths
+        except Exception:
+            return []
+
+    def _persist_column_prefs(
+        self,
+        feed_url: str,
+        *,
+        visible: Optional[List[str]] = None,
+        order: Optional[List[str]] = None,
+        sort_column: Optional[str] = None,
+        sort_order: Optional[int] = None,
+        scope: Optional[str] = None,
+        clear: bool = False,
+    ) -> None:
+        if not feed_url:
+            return
+        feed_target, domain = self._column_pref_targets(feed_url)
+        chosen_scope = scope or self._column_scope_by_feed.get(feed_url) or 'feed'
+        if chosen_scope not in ('feed', 'group'):
+            chosen_scope = 'feed'
+        self._column_scope_by_feed[feed_url] = chosen_scope
+        target = feed_target if (chosen_scope != 'group' or not domain) else domain
+        if clear:
+            try:
+                self.column_configs.pop(target, None)
+            except Exception:
+                pass
+        else:
+            cfg = dict(self.column_configs.get(target) or {})
+            if visible is not None:
+                cfg['visible'] = list(visible)
+            if order is not None:
+                cfg['order'] = list(order)
+            if sort_column is not None:
+                cfg['sort_column'] = sort_column
+            if sort_order is not None:
+                cfg['sort_order'] = int(sort_order)
+            self.column_configs[target] = cfg
+        if self.storage:
+            try:
+                self.storage.save_column_configs(self.column_configs)
+            except Exception:
+                pass
+
+    def _apply_column_preferences(
+        self, feed_url: str, base_cols: List[str]
+    ) -> Tuple[List[str], List[str], Optional[str], Optional[int]]:
+        cfg, _ = self._effective_column_config(feed_url)
+        order_pref = cfg.get('order') if isinstance(cfg, dict) else None
+        visible_pref = cfg.get('visible') if isinstance(cfg, dict) else None
+        order = [c for c in (order_pref or []) if c in base_cols]
+        for c in base_cols:
+            if c not in order:
+                order.append(c)
+        visible = [c for c in order if (visible_pref is None or c in visible_pref)]
+        if "Title" in order and "Title" not in visible:
+            visible.insert(0, "Title")
+        if not visible:
+            visible = [c for c in order if c] or ["Title"]
+        sort_col = cfg.get('sort_column') if isinstance(cfg, dict) else None
+        sort_order = cfg.get('sort_order') if isinstance(cfg, dict) else None
+        if sort_col not in order:
+            sort_col = None
+            sort_order = None
+        return order, visible, sort_col, sort_order if sort_order is not None else None
+
+    def _apply_column_visibility(self, ordered_cols: List[str], visible_cols: List[str]) -> None:
+        try:
+            vis_set = set(visible_cols or [])
+            for idx, name in enumerate(ordered_cols):
+                hide = name not in vis_set
+                if name == "Title":
+                    hide = False
+                self.articlesTree.setColumnHidden(idx, hide)
+        except Exception:
+            pass
+
+    def _toggle_column_visibility(self, feed_url: str, column_name: str, visible: bool) -> None:
+        if not feed_url:
+            return
+        if column_name == "Title" and not visible:
+            return
+        logical = self._logical_index_for_column(column_name)
+        if logical is None:
+            return
+        try:
+            self.articlesTree.setColumnHidden(logical, not visible)
+        except Exception:
+            pass
+        # Recompute visible list in current visual order
+        current_order = self._current_column_order()
+        visible_now: List[str] = []
+        for name in current_order:
+            li = self._logical_index_for_column(name)
+            if li is None:
+                continue
+            if name == "Title" or not self.articlesTree.isColumnHidden(li):
+                if name not in visible_now:
+                    visible_now.append(name)
+        if "Title" not in visible_now and self._logical_index_for_column("Title") is not None:
+            visible_now.insert(0, "Title")
+        self._persist_column_prefs(feed_url, visible=visible_now)
+
     def _on_articles_header_menu(self, pos) -> None:
-        # Меню отключено — расширенные колонки OMDb не используются
-        return
+        item = self.feedsTree.currentItem()
+        if not item:
+            return
+        feed_url = item.data(0, Qt.UserRole) or ""
+        if not feed_url:
+            return
+        _, domain = self._column_pref_targets(feed_url)
+        header = self.articlesTree.header()
+        cols = self._current_column_order() or [self.articlesTree.headerItem().text(i) for i in range(self.articlesTree.columnCount())]
+        visible_cols: List[str] = []
+        try:
+            for logical in range(self.articlesTree.columnCount()):
+                name = self.articlesTree.headerItem().text(logical)
+                if not self.articlesTree.isColumnHidden(logical):
+                    visible_cols.append(name)
+        except Exception:
+            visible_cols = cols
+
+        menu = QMenu(self)
+        scope_menu = menu.addMenu("Save scope")
+        scope_group = QActionGroup(menu)
+        act_feed_scope = scope_menu.addAction("This feed only")
+        act_feed_scope.setCheckable(True)
+        act_group_scope = None
+        current_scope = self._column_scope_by_feed.get(feed_url, 'feed')
+        act_feed_scope.setChecked(current_scope == 'feed')
+        scope_group.addAction(act_feed_scope)
+        if domain:
+            act_group_scope = scope_menu.addAction(f"Group: {domain}")
+            act_group_scope.setCheckable(True)
+            act_group_scope.setChecked(current_scope == 'group')
+            scope_group.addAction(act_group_scope)
+
+        # Column visibility toggles
+        menu.addSeparator()
+        for name in cols:
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(name in visible_cols)
+            if name == "Title":
+                act.setEnabled(False)
+            act.toggled.connect(lambda checked, col=name: self._toggle_column_visibility(feed_url, col, checked))
+
+        menu.addSeparator()
+        reset_feed = menu.addAction("Reset feed columns to defaults")
+        reset_group = None
+        if domain:
+            reset_group = menu.addAction(f"Reset group '{domain}' columns")
+
+        chosen = menu.exec_(header.mapToGlobal(pos))
+
+        if chosen == reset_feed:
+            self._persist_column_prefs(feed_url, clear=True, scope='feed')
+            try:
+                self._on_feed_selected()
+            except Exception:
+                pass
+        elif reset_group is not None and chosen == reset_group:
+            self._persist_column_prefs(feed_url, clear=True, scope='group')
+            try:
+                self._on_feed_selected()
+            except Exception:
+                pass
+        elif chosen == act_feed_scope:
+            self._column_scope_by_feed[feed_url] = 'feed'
+        elif act_group_scope is not None and chosen == act_group_scope:
+            self._column_scope_by_feed[feed_url] = 'group'
 
     def _apply_toolbar_styles(self) -> None:
         # delegate to UI helper
@@ -2008,19 +2268,47 @@ class RSSReader(QMainWindow):
         if not item:
             return
         url = item.data(0, Qt.UserRole)
-        widths = [self.articlesTree.columnWidth(i) for i in range(self.articlesTree.columnCount())]
-        self.column_widths[url] = widths
-        # Дублируем в QSettings, чтобы переживало переустановку
+        self._capture_current_widths(url)
+
+    def _on_section_moved(self, logical_index: int, old_visual: int, new_visual: int) -> None:
+        item = self.feedsTree.currentItem()
+        if not item:
+            return
+        feed_url = item.data(0, Qt.UserRole) or ""
+        if not feed_url:
+            return
+        header = self.articlesTree.header()
+        names = [self.articlesTree.headerItem().text(i) for i in range(self.articlesTree.columnCount())]
+        order: List[str] = []
         try:
-            s = qsettings()
-            s.setValue(f'column_widths:{url}', widths)
+            ordered = [None] * len(names)
+            for logical, name in enumerate(names):
+                vis = header.visualIndex(logical)
+                if 0 <= vis < len(names):
+                    ordered[vis] = name
+            order = [c for c in ordered if c]
         except Exception:
-            pass
-        if self.storage:
-            try:
-                self.storage.save_column_widths(self.column_widths)
-            except Exception:
-                pass
+            order = names
+        if order:
+            self._persist_column_prefs(feed_url, order=order)
+        self._capture_current_widths(feed_url)
+
+    def _on_sort_changed(self, logical: int, order: Qt.SortOrder) -> None:
+        if getattr(self, '_applying_sort', False):
+            return
+        item = self.feedsTree.currentItem()
+        if not item:
+            return
+        feed_url = item.data(0, Qt.UserRole) or ""
+        if not feed_url:
+            return
+        try:
+            name = self.articlesTree.headerItem().text(logical)
+        except Exception:
+            name = None
+        if not name:
+            return
+        self._persist_column_prefs(feed_url, sort_column=name, sort_order=int(order))
 
     def _on_header_section_double_clicked(self, index: int) -> None:
         """Smart resize on double-click: toggle between header width and contents.
@@ -2327,9 +2615,11 @@ class RSSReader(QMainWindow):
         if isinstance(data, dict):
             feeds = data.get('feeds', [])
             col_widths = data.get('column_widths', {})
+            col_cfg = data.get('column_configs', {})
         else:
             feeds = data or []
             col_widths = {}
+            col_cfg = {}
 
         added = 0
         for feed in feeds:
@@ -2361,6 +2651,14 @@ class RSSReader(QMainWindow):
             except Exception:
                 pass
 
+        if col_cfg and isinstance(col_cfg, dict):
+            try:
+                self.column_configs.update(col_cfg)
+                if self.storage:
+                    self.storage.save_column_configs(self.column_configs)
+            except Exception:
+                pass
+
         return added
 
     def export_json_feeds(self) -> None:
@@ -2375,6 +2673,7 @@ class RSSReader(QMainWindow):
         payload = {
             'feeds': self.feeds,
             'column_widths': self.column_widths,
+            'column_configs': self.column_configs,
         }
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -2519,6 +2818,7 @@ class RSSReader(QMainWindow):
             try:
                 self.storage.save_read_articles(list(self.read_articles))
                 self.storage.save_column_widths(self.column_widths)
+                self.storage.save_column_configs(self.column_configs)
             except Exception:
                 pass
         # auto-backup to iCloud if enabled

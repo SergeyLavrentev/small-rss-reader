@@ -63,6 +63,27 @@ def test_storage_column_widths_roundtrip(tmp_path):
     assert loaded == cw
 
 
+def test_storage_column_configs_roundtrip(tmp_path):
+    s = Storage(str(tmp_path / "db.sqlite3"))
+    cfg = {
+        "https://feed.example.org/rss": {
+            "visible": ["Title", "Date"],
+            "order": ["Date", "Title"],
+            "sort_column": "Date",
+            "sort_order": 1,
+        },
+        "example.org": {
+            "visible": ["Title"],
+            "order": ["Title", "Date"],
+            "sort_column": "Title",
+            "sort_order": 0,
+        },
+    }
+    s.save_column_configs(cfg)
+    loaded = s.load_column_configs()
+    assert loaded == cfg
+
+
 def test_storage_movie_cache_roundtrip(tmp_path):
     s = Storage(str(tmp_path / "db.sqlite3"))
     cache = {

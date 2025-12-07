@@ -72,7 +72,8 @@ OPTIONS = {
         'NSPrincipalClass': 'NSApplication'
     },
     'verbose': True,
-    'compressed': True
+    'compressed': True,
+    'strip': False,
 }
 
 setup(

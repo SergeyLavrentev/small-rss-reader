@@ -92,6 +92,17 @@ class Storage:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS column_configs (
+                    target TEXT PRIMARY KEY,
+                    visible TEXT,
+                    ordering TEXT,
+                    sort_column TEXT,
+                    sort_order INTEGER DEFAULT 0
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS movie_cache (
                     title TEXT PRIMARY KEY,
                     json TEXT NOT NULL
@@ -382,6 +393,49 @@ class Storage:
                         "INSERT OR REPLACE INTO column_widths(feed_url, col_index, width) VALUES(?,?,?)",
                         (url, idx, int(w or 0)),
                     )
+            con.commit()
+
+    # ---------------------- Column configs (visibility/order/sort) ----------------------
+    def load_column_configs(self) -> Dict[str, Dict[str, Any]]:
+        with self._connect() as con:
+            result: Dict[str, Dict[str, Any]] = {}
+            cur = con.cursor()
+            for r in cur.execute("SELECT target, visible, ordering, sort_column, sort_order FROM column_configs"):
+                cfg: Dict[str, Any] = {}
+                try:
+                    cfg['visible'] = json.loads(r['visible']) if r['visible'] else None
+                except Exception:
+                    cfg['visible'] = None
+                try:
+                    cfg['order'] = json.loads(r['ordering']) if r['ordering'] else None
+                except Exception:
+                    cfg['order'] = None
+                if r['sort_column'] is not None:
+                    cfg['sort_column'] = r['sort_column']
+                if r['sort_order'] is not None:
+                    cfg['sort_order'] = int(r['sort_order'])
+                result[r['target']] = cfg
+            return result
+
+    def save_column_configs(self, column_configs: Dict[str, Dict[str, Any]]) -> None:
+        with self._connect() as con:
+            cur = con.cursor()
+            cur.execute("DELETE FROM column_configs")
+            for target, cfg in (column_configs or {}).items():
+                visible = cfg.get('visible') if isinstance(cfg, dict) else None
+                order = cfg.get('order') if isinstance(cfg, dict) else None
+                sort_column = cfg.get('sort_column') if isinstance(cfg, dict) else None
+                sort_order = cfg.get('sort_order') if isinstance(cfg, dict) else None
+                cur.execute(
+                    "INSERT OR REPLACE INTO column_configs(target, visible, ordering, sort_column, sort_order) VALUES(?,?,?,?,?)",
+                    (
+                        target,
+                        json.dumps(visible) if visible is not None else None,
+                        json.dumps(order) if order is not None else None,
+                        sort_column,
+                        int(sort_order) if sort_order is not None else None,
+                    ),
+                )
             con.commit()
 
     # ---------------------- Movie cache ----------------------

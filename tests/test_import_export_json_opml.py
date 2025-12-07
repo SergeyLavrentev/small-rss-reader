@@ -23,6 +23,7 @@ def test_import_json_to_path_roundtrip(tmp_path, app_headless):
             {'title': 'F2', 'url': 'https://ex2/rss', 'entries': [{'title': 'B'}]},
         ],
         'column_widths': {'https://ex1/rss': [100, 80]},
+        'column_configs': {'https://ex1/rss': {'visible': ['Title'], 'order': ['Title', 'Date'], 'sort_column': 'Date', 'sort_order': 1}},
     }
     p = tmp_path / 'feeds.json'
     p.write_text(json.dumps(data))
@@ -32,7 +33,7 @@ def test_import_json_to_path_roundtrip(tmp_path, app_headless):
     out = tmp_path / 'out.json'
     app.export_json_to_path(str(out))
     out_data = json.loads(out.read_text())
-    assert 'feeds' in out_data and 'column_widths' in out_data
+    assert 'feeds' in out_data and 'column_widths' in out_data and 'column_configs' in out_data
 
 
 @pytest.mark.skip(reason="Excluded: uses QFileDialog modal via import_json(); not suitable for headless auto tests")
