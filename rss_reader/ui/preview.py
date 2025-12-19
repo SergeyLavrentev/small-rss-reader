@@ -235,6 +235,35 @@ class QuickPreview(QWidget):
             pass
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        # Best-effort cleanup for QtWebEngine.
+        # On macOS especially, leaving a QWebEnginePage alive during application shutdown
+        # can lead to crashes ("WebEnginePage still not deleted").
+        try:
+            if getattr(self, '_use_web', False):
+                view = getattr(self, 'view', None)
+                try:
+                    if view is not None and hasattr(view, 'stop'):
+                        view.stop()
+                except Exception:
+                    pass
+                try:
+                    if view is not None and hasattr(view, 'setUrl'):
+                        view.setUrl(QUrl('about:blank'))
+                except Exception:
+                    pass
+                try:
+                    page = view.page() if view is not None and hasattr(view, 'page') else None
+                    if page is not None and hasattr(page, 'deleteLater'):
+                        page.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    if view is not None and hasattr(view, 'deleteLater'):
+                        view.deleteLater()
+                except Exception:
+                    pass
+        except Exception:
+            pass
         try:
             if hasattr(self._app, '_preview'):
                 self._app._preview = None

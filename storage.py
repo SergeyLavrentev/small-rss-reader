@@ -73,6 +73,13 @@ class Storage:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS favorite_articles (
+                    id TEXT PRIMARY KEY
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS group_settings (
                     group_name TEXT PRIMARY KEY,
                     omdb_enabled INTEGER DEFAULT 0,
@@ -344,6 +351,19 @@ class Storage:
             cur.execute("DELETE FROM read_articles")
             for aid in ids:
                 cur.execute("INSERT OR IGNORE INTO read_articles(id) VALUES(?)", (aid,))
+            con.commit()
+
+    # ---------------------- Favorite articles ----------------------
+    def load_favorite_articles(self) -> List[str]:
+        with self._connect() as con:
+            return [r['id'] for r in con.execute("SELECT id FROM favorite_articles")]
+
+    def save_favorite_articles(self, ids: List[str]) -> None:
+        with self._connect() as con:
+            cur = con.cursor()
+            cur.execute("DELETE FROM favorite_articles")
+            for aid in ids:
+                cur.execute("INSERT OR IGNORE INTO favorite_articles(id) VALUES(?)", (aid,))
             con.commit()
 
     # ---------------------- Group settings ----------------------

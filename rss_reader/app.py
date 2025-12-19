@@ -3,6 +3,8 @@ import os
 import sys
 import logging
 import subprocess
+import math
+import threading
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -17,7 +19,7 @@ try:
         os.environ['QT_LOGGING_RULES'] = (_rules + ';' + _supp) if _rules else _supp
 except Exception:
     pass
-from PyQt5.QtGui import QIcon, QPixmap, QFont, QCloseEvent, QPainter, QColor, QKeySequence
+from PyQt5.QtGui import QIcon, QPixmap, QFont, QCloseEvent, QPainter, QColor, QKeySequence, QPolygonF, QCursor
 from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -35,7 +37,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QShortcut,
 )
-from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent, QUrl, QRunnable
+from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent, QUrl, QRunnable, QPointF
 
 # В тестовой среде глушим шумное предупреждение QtWebEngine об удалении профиля/страницы
 try:
@@ -71,7 +73,12 @@ from rss_reader.ui.toolbar import setup_toolbar as _ui_setup_toolbar, apply_tool
 from storage import Storage
 from rss_reader.io.opml import export_opml as opml_export, import_opml as opml_import
 from rss_reader.io.json_io import import_json as json_import, export_json as json_export
-from rss_reader.backup.icloud import backup_db as icloud_backup_db, restore_db as icloud_restore_db
+from rss_reader.backup.icloud import (
+    backup_db as icloud_backup_db,
+    restore_db as icloud_restore_db,
+    backup_feeds_json as icloud_backup_feeds_json,
+    restore_feeds_json as icloud_restore_feeds_json,
+)
 from rss_reader.features.omdb.queue import OmdbQueueManager
 from rss_reader.controllers.view_state import load_window_state, save_window_state
 
@@ -91,6 +98,9 @@ def get_user_data_path(filename: str) -> str:
         except Exception:
             pass
     return _default_get_user_data_path(filename)
+
+
+FAVORITES_FEED_URL = "__favorites__"
 
 
 class RSSReader(QMainWindow):
@@ -119,12 +129,14 @@ class RSSReader(QMainWindow):
         self.max_days = 30
         self.feeds: List[Dict[str, Any]] = []
         self.read_articles = set()
+        self.favorite_articles = set()
         self.column_widths: Dict[str, List[int]] = {}
         self.column_configs: Dict[str, Dict[str, Any]] = {}
         self._column_scope_by_feed: Dict[str, str] = {}
         self.group_settings: Dict[str, Dict[str, bool]] = {}
         self.favicon_cache: Dict[str, QIcon] = {}
         self.data_changed = False
+        self.feeds_changed_this_session = False
         # Optional storage (created only in interactive runs to keep tests lightweight)
         self.storage = None
         self.refresh_interval = 60
@@ -153,6 +165,12 @@ class RSSReader(QMainWindow):
         # Quick preview window (lazy)
         self._preview = None
         self._applying_sort = False
+        self._article_icon_cache: Dict[tuple, QIcon] = {}
+        self._toggling_favorite = False
+        self._suppress_mark_read_once_aid: Optional[str] = None
+        self._last_article_click_star = False
+        self._last_article_click_item = None
+        self._shutting_down = False
 
         # Interactive runs: show a basic UI so the window isn't empty
         try:
@@ -300,11 +318,10 @@ class RSSReader(QMainWindow):
             self.articlesTree.setMinimumWidth(260)
         except Exception:
             pass
-        # Keep a consistent left offset in the Title column by reserving icon space
-        # regardless of read/unread state (we'll use a transparent placeholder for read)
+        # Icon column: favorite star (filled/outline) + unread dot overlay
         try:
             from PyQt5.QtCore import QSize
-            self.articlesTree.setIconSize(QSize(12, 12))  # small but noticeable gap from the splitter
+            self.articlesTree.setIconSize(QSize(14, 14))
         except Exception:
             pass
         # Apply initial font size to the list and header
@@ -333,6 +350,11 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
         self.articlesTree.itemSelectionChanged.connect(self._on_article_selected)
+        # Clicking the left icon column toggles favorites
+        try:
+            self.articlesTree.itemClicked.connect(self._on_article_item_clicked)
+        except Exception:
+            pass
         # Open in browser on activation (double-click or Enter/Return)
         self.articlesTree.itemActivated.connect(lambda _i, _c: self._open_current_article_in_browser())
         self.articlesTree.setRootIsDecorated(False)
@@ -520,6 +542,23 @@ class RSSReader(QMainWindow):
     # ---- IDs / dates ----
     def get_article_id(self, entry: Dict[str, Any]) -> str:
         return compute_article_id(entry)
+
+    def _start_daemon_runnable(self, runnable: QRunnable) -> None:
+        """Run QRunnable.run() in a daemon Python thread.
+
+        This avoids Qt thread pool threads keeping the process alive on exit
+        while still reusing existing runnable implementations.
+        """
+        try:
+            if getattr(self, '_shutting_down', False):
+                return
+        except Exception:
+            return
+        try:
+            t = threading.Thread(target=runnable.run, daemon=True)
+            t.start()
+        except Exception:
+            pass
     # ---- Icons helper ----
     def _theme_icon(self, names: List[str], fallback: QStyle.StandardPixmap) -> QIcon:
         try:
@@ -555,11 +594,9 @@ class RSSReader(QMainWindow):
             return True
         # Duplicate guard (excluding current)
         if any(f['url'] == new_url for f in self.feeds if f.get('url') != old_url):
-            pass
             return False
         feed_data = next((f for f in self.feeds if f.get('url') == old_url), None)
         if not feed_data:
-            pass
             return False
         # Migrate column widths
         if old_url in self.column_widths:
@@ -580,6 +617,7 @@ class RSSReader(QMainWindow):
             except Exception:
                 pass
         self.data_changed = True
+        self.feeds_changed_this_session = True
         # Rebuild tree in case domain grouping changed; reselect updated feed
         try:
             self._rebuild_feeds_tree()
@@ -597,18 +635,57 @@ class RSSReader(QMainWindow):
 
     # ---- Backup / Restore ----
     def backup_to_icloud(self) -> None:
-        source = get_user_data_path('db.sqlite3')
         try:
-            icloud_backup_db(source)
+            settings = qsettings()
+            include_read = settings.value('icloud_backup_include_read_status', True, type=bool)
         except Exception:
-            pass
+            include_read = True
+
+        if include_read:
+            source = get_user_data_path('db.sqlite3')
+            try:
+                icloud_backup_db(source)
+            except Exception:
+                pass
+        else:
+            try:
+                icloud_backup_feeds_json(self.feeds)
+            except Exception:
+                pass
 
     def restore_from_icloud(self) -> None:
         dest = get_user_data_path('db.sqlite3')
         try:
-            icloud_restore_db(dest)
+            restored_db = bool(icloud_restore_db(dest))
         except Exception:
-            pass
+            restored_db = False
+
+        if restored_db:
+            try:
+                self._load_state_from_storage()
+                self._on_feed_selected()
+            except Exception:
+                pass
+            return
+
+        # Fallback: feeds-only restore
+        feeds = None
+        try:
+            feeds = icloud_restore_feeds_json()
+        except Exception:
+            feeds = None
+        if feeds and self.storage:
+            try:
+                for it in feeds:
+                    url = (it.get('url') or '').strip()
+                    title = (it.get('title') or url).strip()
+                    if not url:
+                        continue
+                    self.storage.upsert_feed(title, url)
+                self._load_state_from_storage()
+                self._on_feed_selected()
+            except Exception:
+                pass
 
     # ---- Favicons ----
     def on_icon_fetched(self, domain: str, data: bytes) -> None:
@@ -686,6 +763,10 @@ class RSSReader(QMainWindow):
         try:
             self.feeds = self.storage.get_all_feeds()
             self.read_articles = set(self.storage.load_read_articles())
+            try:
+                self.favorite_articles = set(self.storage.load_favorite_articles())
+            except Exception:
+                self.favorite_articles = set()
             self.column_widths = self.storage.load_column_widths()
             try:
                 self.column_configs = self.storage.load_column_configs()
@@ -745,7 +826,7 @@ class RSSReader(QMainWindow):
             if top is None:
                 continue
             url = top.data(0, Qt.UserRole)
-            if url:
+            if url and url != FAVORITES_FEED_URL:
                 yield top
             else:
                 for j in range(top.childCount()):
@@ -767,6 +848,21 @@ class RSSReader(QMainWindow):
                 pass
 
             self.feedsTree.clear()
+
+            # Favorites pseudo-feed (only when there are favorites)
+            fav_item = None
+            try:
+                has_favorites = bool(self.favorite_articles)
+            except Exception:
+                has_favorites = False
+            if has_favorites:
+                fav_item = QTreeWidgetItem(["Favorites"])
+                fav_item.setData(0, Qt.UserRole, FAVORITES_FEED_URL)
+                try:
+                    fav_item.setFirstColumnSpanned(False)
+                except Exception:
+                    pass
+                self.feedsTree.addTopLevelItem(fav_item)
             # Build mapping: domain -> list of feeds
             domain_map: Dict[str, List[Dict[str, Any]]] = {}
             for f in self.feeds:
@@ -776,6 +872,8 @@ class RSSReader(QMainWindow):
 
             # Create items: group only when domain has >1 feeds
             url_to_item: Dict[str, QTreeWidgetItem] = {}
+            if fav_item is not None:
+                url_to_item[FAVORITES_FEED_URL] = fav_item
             for domain, flist in domain_map.items():
                 if len(flist) > 1:
                     group_item = QTreeWidgetItem([domain])
@@ -828,6 +926,7 @@ class RSSReader(QMainWindow):
                     pass
             feed = {'title': title, 'url': url, 'entries': []}
             self.feeds.append(feed)
+            self.feeds_changed_this_session = True
             # Rebuild to place the new feed in its domain group if needed
             self._rebuild_feeds_tree()
             # Try to locate the new item
@@ -839,7 +938,6 @@ class RSSReader(QMainWindow):
                         break
             except Exception:
                 pass
-            pass
             self.refresh_feed(url)
             if item:
                 self.feedsTree.setCurrentItem(item)
@@ -858,6 +956,7 @@ class RSSReader(QMainWindow):
             return
         if QMessageBox.question(self, "Remove Feed", f"Remove {url}?") != QMessageBox.Yes:
             return
+        self.feeds_changed_this_session = True
         # Remove from storage first
         if self.storage:
             try:
@@ -1142,22 +1241,36 @@ class RSSReader(QMainWindow):
         self.refresh_feed(url)
 
     def refresh_all_feeds(self) -> None:
+        try:
+            if getattr(self, '_shutting_down', False):
+                return
+        except Exception:
+            return
         for feed in self.feeds:
             self.refresh_feed(feed.get('url'))
 
     def refresh_feed(self, url: str) -> None:
+        try:
+            if getattr(self, '_shutting_down', False):
+                return
+        except Exception:
+            return
         try:
             from rss_reader.services.feeds import Worker, FetchFeedRunnable
             worker = Worker()
             worker.feed_fetched.connect(self._on_feed_fetched)
             runnable = FetchFeedRunnable(url, worker)
             self.thread_pool.start(runnable)
-            pass
         except Exception:
             pass
 
     @pyqtSlot(str, object)
     def _on_feed_fetched(self, url: str, feed_obj: Any) -> None:
+        try:
+            if getattr(self, '_shutting_down', False):
+                return
+        except Exception:
+            return
         if not feed_obj:
             pass
             return
@@ -1189,6 +1302,27 @@ class RSSReader(QMainWindow):
         if not item:
             return
         url = item.data(0, Qt.UserRole)
+
+        # Favorites pseudo-feed: aggregate entries from all feeds
+        if url == FAVORITES_FEED_URL:
+            fav_ids = set(self.favorite_articles or set())
+            entries: List[Dict[str, Any]] = []
+            seen: set = set()
+            try:
+                for f in (self.feeds or []):
+                    for e in (f.get('entries', []) or []):
+                        try:
+                            aid = self.get_article_id(e)
+                        except Exception:
+                            continue
+                        if aid in fav_ids and aid not in seen:
+                            seen.add(aid)
+                            entries.append(e)
+            except Exception:
+                pass
+            self._populate_articles(FAVORITES_FEED_URL, entries)
+            return
+
         # If group node selected, move selection to first child feed
         if not url and item.childCount() > 0:
             ch = item.child(0)
@@ -1208,9 +1342,21 @@ class RSSReader(QMainWindow):
         # trigger OMDb fetch for visible entries (if enabled)
         self._maybe_fetch_omdb_for_entries(url, entries)
         # favicon fetch on selection if not present
-        self._ensure_favicon_for_url(url)
+        if url != FAVORITES_FEED_URL:
+            self._ensure_favicon_for_url(url)
 
     def _populate_articles(self, feed_url: str, entries: List[Dict[str, Any]]) -> None:
+        # QTreeWidget can auto-sort while inserting rows when sorting is enabled.
+        # Disable sorting during population; apply the configured sort after.
+        try:
+            was_sorting_enabled = bool(self.articlesTree.isSortingEnabled())
+        except Exception:
+            was_sorting_enabled = True
+        try:
+            self.articlesTree.setSortingEnabled(False)
+        except Exception:
+            pass
+
         self.articlesTree.clear()
         visible_entries = list(entries or [])
         # unread filter
@@ -1268,6 +1414,12 @@ class RSSReader(QMainWindow):
             date_col_index = ordered_cols.index("Date")
         except ValueError:
             date_col_index = 0
+
+        any_real_date = False
+        try:
+            any_real_date = any(self.get_entry_date(_e) != datetime.min for _e in visible_entries)
+        except Exception:
+            any_real_date = False
 
         for e in visible_entries:
             title = e.get('title') or e.get('link') or 'Untitled'
@@ -1392,20 +1544,17 @@ class RSSReader(QMainWindow):
                         pass
             except Exception:
                 pass
-            # mark read visually
+            # favorite star (filled/outline) + unread dot overlay
             aid = self.get_article_id(e)
-            if aid in self.read_articles:
-                try:
-                    # Use transparent placeholder so text doesn't jump when dot disappears
-                    item.setIcon(0, QIcon(self._unread_dot_pixmap(8, QColor(0, 0, 0, 0))))
-                except Exception:
-                    pass
-            else:
-                # unread -> blue dot icon at column 0
-                try:
-                    item.setIcon(0, QIcon(self._unread_dot_pixmap(8)))
-                except Exception:
-                    pass
+            try:
+                is_fav = aid in (self.favorite_articles or set())
+            except Exception:
+                is_fav = False
+            is_unread = bool(aid not in self.read_articles)
+            try:
+                item.setIcon(0, self._article_status_icon(is_fav=is_fav, is_unread=is_unread))
+            except Exception:
+                pass
             self.articlesTree.addTopLevelItem(item)
 
         # Prefetch pages for items without inline content (skip in tests)
@@ -1416,6 +1565,8 @@ class RSSReader(QMainWindow):
         if not headless_tests:
             for e in visible_entries:
                 try:
+                    if getattr(self, '_shutting_down', False):
+                        break
                     aid = self.get_article_id(e)
                     if aid in self.article_html_cache or aid in self._page_fetching_aids:
                         continue
@@ -1423,7 +1574,7 @@ class RSSReader(QMainWindow):
                     has_inline = bool(e.get('content') or e.get('summary') or e.get('description'))
                     if link and not has_inline:
                         self._page_fetching_aids.add(aid)
-                        self.thread_pool.start(_PageFetchRunnable(aid, link, self))
+                        self._start_daemon_runnable(_PageFetchRunnable(aid, link, self))
                 except Exception:
                     pass
 
@@ -1431,11 +1582,13 @@ class RSSReader(QMainWindow):
         if not headless_tests and is_habr:
             for e in visible_entries:
                 try:
+                    if getattr(self, '_shutting_down', False):
+                        break
                     aid = self.get_article_id(e)
                     # Always refresh to avoid stale values; cache will be updated by signal
                     link = self._get_entry_link(e)
                     if link:
-                        self.thread_pool.start(_HabrMetricsRunnable(aid, link, self))
+                        self._start_daemon_runnable(_HabrMetricsRunnable(aid, link, self))
                 except Exception:
                     pass
 
@@ -1499,16 +1652,28 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
-        # Sort using saved preference (fallback to Date desc)
+        # Sort using saved preference (fallback to Date desc).
+        # If there are no real dates, Date sort can be unstable; fall back to Title asc.
         try:
             if sort_col_name and sort_col_name in ordered_cols:
                 sort_idx = ordered_cols.index(sort_col_name)
                 sort_ord = Qt.SortOrder(int(sort_order)) if sort_order is not None else Qt.DescendingOrder
             else:
-                sort_idx = ordered_cols.index("Date") if "Date" in ordered_cols else max(0, len(ordered_cols) - 1)
+                sort_idx = ordered_cols.index("Date") if "Date" in ordered_cols else 0
                 sort_ord = Qt.DescendingOrder
-            self._applying_sort = True
-            self.articlesTree.sortItems(sort_idx, sort_ord)
+
+            if ("Date" in ordered_cols) and (ordered_cols[sort_idx] == "Date") and (not any_real_date) and ("Title" in ordered_cols):
+                sort_idx = ordered_cols.index("Title")
+                sort_ord = Qt.AscendingOrder
+
+            if was_sorting_enabled:
+                self.articlesTree.setSortingEnabled(True)
+                self._applying_sort = True
+                try:
+                    self.articlesTree.header().setSortIndicator(int(sort_idx), sort_ord)
+                except Exception:
+                    pass
+                self.articlesTree.sortItems(int(sort_idx), sort_ord)
         except Exception:
             pass
         finally:
@@ -1516,6 +1681,141 @@ class RSSReader(QMainWindow):
                 self._applying_sort = False
             except Exception:
                 pass
+            try:
+                self.articlesTree.setSortingEnabled(bool(was_sorting_enabled))
+            except Exception:
+                pass
+
+    def _article_status_icon(self, is_fav: bool, is_unread: bool) -> QIcon:
+        key = (bool(is_fav), bool(is_unread))
+        cached = self._article_icon_cache.get(key)
+        if cached is not None:
+            return cached
+
+        size = 14
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        cx = size / 2.0
+        cy = size / 2.0
+        r_outer = (size / 2.0) - 0.8
+        r_inner = r_outer * 0.45
+        pts = []
+        for i in range(10):
+            ang = (-math.pi / 2.0) + (i * math.pi / 5.0)
+            r = r_outer if (i % 2 == 0) else r_inner
+            pts.append(QPointF(cx + r * math.cos(ang), cy + r * math.sin(ang)))
+        poly = QPolygonF(pts)
+
+        if is_fav:
+            painter.setBrush(QColor(255, 215, 0))
+            painter.setPen(QColor(196, 150, 0))
+        else:
+            painter.setBrush(Qt.transparent)
+            painter.setPen(QColor(160, 160, 160, 200))
+        painter.drawPolygon(poly)
+
+        if is_unread:
+            try:
+                dot = self._unread_dot_pixmap(6)
+                painter.drawPixmap(size - dot.width(), size - dot.height(), dot)
+            except Exception:
+                pass
+
+        painter.end()
+        icon = QIcon(pm)
+        self._article_icon_cache[key] = icon
+        return icon
+
+    def _toggle_favorite_for_entry(self, entry: Dict[str, Any]) -> bool:
+        aid = self.get_article_id(entry or {})
+        try:
+            had_any = bool(self.favorite_articles)
+        except Exception:
+            had_any = False
+
+        fav_now = False
+        try:
+            if aid in self.favorite_articles:
+                self.favorite_articles.remove(aid)
+                fav_now = False
+            else:
+                self.favorite_articles.add(aid)
+                fav_now = True
+        except Exception:
+            pass
+
+        if self.storage:
+            try:
+                self.storage.save_favorite_articles(list(self.favorite_articles))
+            except Exception:
+                pass
+
+        try:
+            has_any = bool(self.favorite_articles)
+        except Exception:
+            has_any = False
+        if had_any != has_any:
+            try:
+                cur_feed = self.feedsTree.currentItem()
+                cur_url = cur_feed.data(0, Qt.UserRole) if cur_feed else None
+            except Exception:
+                cur_url = None
+            try:
+                self._rebuild_feeds_tree()
+            except Exception:
+                pass
+            if (not has_any) and cur_url == FAVORITES_FEED_URL:
+                try:
+                    for it in self._iter_feed_items():
+                        self.feedsTree.setCurrentItem(it)
+                        break
+                    self._on_feed_selected()
+                except Exception:
+                    pass
+
+        return fav_now
+
+    def _on_article_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        try:
+            if int(column) != 0:
+                return
+        except Exception:
+            return
+        if not item:
+            return
+        # Toggle favorite only when the click hits the star icon area.
+        try:
+            if not getattr(self, '_last_article_click_star', False):
+                return
+            if getattr(self, '_last_article_click_item', None) is not item:
+                return
+        finally:
+            self._last_article_click_star = False
+            self._last_article_click_item = None
+        try:
+            if self._toggling_favorite:
+                return
+            self._toggling_favorite = True
+            entry = item.data(0, Qt.UserRole) or {}
+            fav_now = self._toggle_favorite_for_entry(entry)
+            try:
+                aid = self.get_article_id(entry)
+                is_unread = bool(aid not in self.read_articles)
+                item.setIcon(0, self._article_status_icon(is_fav=fav_now, is_unread=is_unread))
+            except Exception:
+                pass
+            try:
+                cur_feed = self.feedsTree.currentItem()
+                cur_url = cur_feed.data(0, Qt.UserRole) if cur_feed else None
+                if cur_url == FAVORITES_FEED_URL:
+                    self._on_feed_selected()
+            except Exception:
+                pass
+        finally:
+            self._toggling_favorite = False
 
     def _find_article_item_by_aid(self, aid: str):
         try:
@@ -1565,6 +1865,8 @@ class RSSReader(QMainWindow):
 
     def _is_omdb_enabled(self, feed_url: str) -> bool:
         try:
+            if feed_url == FAVORITES_FEED_URL:
+                return False
             # Prefer explicit per-feed setting; fall back to domain-level
             cfg = (self.group_settings or {}).get(feed_url)
             if cfg is not None and 'omdb_enabled' in cfg:
@@ -1979,22 +2281,30 @@ class RSSReader(QMainWindow):
     def _show_article(self, entry: Dict[str, Any]) -> None:
         # mark as read
         aid = self.get_article_id(entry)
-        if aid not in self.read_articles:
-            self.read_articles.add(aid)
-            if self.storage:
+        try:
+            if self._suppress_mark_read_once_aid == aid:
+                self._suppress_mark_read_once_aid = None
+            elif aid not in self.read_articles:
+                self.read_articles.add(aid)
+                if self.storage:
+                    try:
+                        self.storage.save_read_articles(list(self.read_articles))
+                    except Exception:
+                        pass
+                # update current item visuals and feed badge
                 try:
-                    self.storage.save_read_articles(list(self.read_articles))
+                    item = self.articlesTree.currentItem()
+                    if item:
+                        try:
+                            fav0 = bool(aid in (self.favorite_articles or set()))
+                        except Exception:
+                            fav0 = False
+                        item.setIcon(0, self._article_status_icon(is_fav=fav0, is_unread=False))
+                    self._update_feed_unread_badges()
                 except Exception:
                     pass
-            # update current item visuals and feed badge
-            try:
-                item = self.articlesTree.currentItem()
-                if item:
-                    # Keep left offset by using transparent placeholder instead of removing icon
-                    item.setIcon(0, QIcon(self._unread_dot_pixmap(8, QColor(0, 0, 0, 0))))
-                self._update_feed_unread_badges()
-            except Exception:
-                pass
+        except Exception:
+            pass
         # Build robust HTML (with base href and fallbacks) and show
         # 1) Try inline HTML content
         try:
@@ -2172,6 +2482,11 @@ class RSSReader(QMainWindow):
 
     # ----------------- Favicons -----------------
     def _ensure_favicon_for_url(self, url: str) -> None:
+        try:
+            if getattr(self, '_shutting_down', False):
+                return
+        except Exception:
+            return
         domain = urlparse(url).netloc or url
         if domain in self.favicon_cache:
             return
@@ -2181,7 +2496,7 @@ class RSSReader(QMainWindow):
             self._favicon_fetching.add(domain)
             from rss_reader.services.favicons import FaviconFetchRunnable
             runnable = FaviconFetchRunnable(domain, self)
-            self.thread_pool.start(runnable)
+            self._start_daemon_runnable(runnable)
         except Exception:
             pass
 
@@ -2417,12 +2732,69 @@ class RSSReader(QMainWindow):
         self._update_feed_unread_badges()
 
     def _on_articles_context_menu(self, pos) -> None:
-        item = self.articlesTree.itemAt(pos)
+        # CustomContextMenuRequested position can be in viewport or widget coords depending on platform/styles.
+        # Try viewport coords first, then map, then fall back to cursor.
+        item = None
+        global_pos = None
+        try:
+            item = self.articlesTree.itemAt(pos)
+            global_pos = self.articlesTree.viewport().mapToGlobal(pos)
+        except Exception:
+            pass
+        if item is None:
+            try:
+                vp_pos = self.articlesTree.viewport().mapFrom(self.articlesTree, pos)
+                item = self.articlesTree.itemAt(vp_pos)
+                global_pos = self.articlesTree.viewport().mapToGlobal(vp_pos)
+            except Exception:
+                pass
+        if item is None:
+            try:
+                global_pos = QCursor.pos()
+                vp_pos = self.articlesTree.viewport().mapFromGlobal(global_pos)
+                item = self.articlesTree.itemAt(vp_pos)
+            except Exception:
+                pass
+        if global_pos is None:
+            try:
+                global_pos = self.articlesTree.viewport().mapToGlobal(pos)
+            except Exception:
+                global_pos = self.mapToGlobal(pos)
+
+        if item is None:
+            try:
+                item = self.articlesTree.currentItem()
+            except Exception:
+                item = None
+
+        # Common UX: right-click also selects the item
+        try:
+            if item is not None and self.articlesTree.currentItem() is not item:
+                self.articlesTree.setCurrentItem(item)
+        except Exception:
+            pass
+
         menu = QMenu(self)
         actOpen = menu.addAction("Open in Browser")
+        if not item:
+            actOpen.setEnabled(False)
+
+        is_fav = False
+        try:
+            if item:
+                entry0 = item.data(0, Qt.UserRole) or {}
+                is_fav = self.get_article_id(entry0) in (self.favorite_articles or set())
+        except Exception:
+            is_fav = False
+        actFav = menu.addAction("Remove from Favorites" if is_fav else "Add to Favorites")
+        if not item:
+            actFav.setEnabled(False)
+
         actMarkUnread = menu.addAction("Mark as Unread")
+        if not item:
+            actMarkUnread.setEnabled(False)
         actAllRead = menu.addAction("Mark All as Read")
-        action = menu.exec_(self.articlesTree.viewport().mapToGlobal(pos))
+        action = self._exec_menu(menu, global_pos)
         if action == actOpen and item:
             entry = item.data(0, Qt.UserRole) or {}
             link = entry.get('link')
@@ -2431,11 +2803,31 @@ class RSSReader(QMainWindow):
                     webbrowser.open(link)
                 except Exception:
                     pass
+        elif action == actFav and item:
+            entry = item.data(0, Qt.UserRole) or {}
+            fav_now = self._toggle_favorite_for_entry(entry)
+            try:
+                aid = self.get_article_id(entry)
+                is_unread = bool(aid not in self.read_articles)
+                item.setIcon(0, self._article_status_icon(is_fav=fav_now, is_unread=is_unread))
+            except Exception:
+                pass
+            try:
+                cur_feed = self.feedsTree.currentItem()
+                cur_url = cur_feed.data(0, Qt.UserRole) if cur_feed else None
+                if cur_url == FAVORITES_FEED_URL:
+                    self._on_feed_selected()
+            except Exception:
+                pass
         elif action == actMarkUnread and item:
             entry = item.data(0, Qt.UserRole) or {}
             aid = self.get_article_id(entry)
             if aid in self.read_articles:
                 self.read_articles.remove(aid)
+                try:
+                    self._suppress_mark_read_once_aid = aid
+                except Exception:
+                    pass
                 if self.storage:
                     try:
                         self.storage.save_read_articles(list(self.read_articles))
@@ -2446,6 +2838,12 @@ class RSSReader(QMainWindow):
                 self._update_feed_unread_badges()
         elif action == actAllRead:
             self.mark_all_as_read()
+
+    def _exec_menu(self, menu: QMenu, global_pos):
+        try:
+            return menu.exec_(global_pos)
+        except Exception:
+            return None
 
     # ----------------- Key handling -----------------
     def keyPressEvent(self, event):  # noqa: N802
@@ -2748,6 +3146,22 @@ class RSSReader(QMainWindow):
 
     def eventFilter(self, obj, event):  # noqa: N802
         try:
+            # Favorite star: toggle only when clicking the icon area (not the whole title cell)
+            try:
+                at = getattr(self, 'articlesTree', None)
+                if at and obj is getattr(at, 'viewport', lambda: None)() and event.type() == QEvent.MouseButtonPress:
+                    if getattr(event, 'button', lambda: None)() == Qt.LeftButton:
+                        pos = event.pos()
+                        it = at.itemAt(pos)
+                        if it is not None and self._is_article_star_hotspot(pos):
+                            self._last_article_click_star = True
+                            self._last_article_click_item = it
+                        else:
+                            self._last_article_click_star = False
+                            self._last_article_click_item = None
+            except Exception:
+                pass
+
             if obj is getattr(self, 'searchEdit', None) and event.type() == QEvent.KeyPress:
                 if event.key() == Qt.Key_Escape:
                     self.searchEdit.clear()
@@ -2788,6 +3202,26 @@ class RSSReader(QMainWindow):
             pass
         return super().eventFilter(obj, event)
 
+    def _is_article_star_hotspot(self, viewport_pos) -> bool:
+        """True if viewport_pos hits the star icon zone in column 0."""
+        try:
+            at = self.articlesTree
+            col = int(at.columnAt(int(viewport_pos.x())))
+            if col != 0:
+                return False
+            hdr = at.header()
+            left = int(hdr.sectionPosition(0))
+            x_in_col = int(viewport_pos.x()) - left
+            try:
+                icon_w = int(at.iconSize().width())
+            except Exception:
+                icon_w = 16
+            if icon_w <= 0:
+                icon_w = 16
+            return x_in_col <= (icon_w + 10)
+        except Exception:
+            return False
+
     def _notify_new_read(self) -> None:
         # simple notification when marking as read, respects settings flag if present
         try:
@@ -2813,10 +3247,43 @@ class RSSReader(QMainWindow):
 
     # ----------------- Close/persist -----------------
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        try:
+            self._shutting_down = True
+        except Exception:
+            pass
+
+        # Stop periodic refreshes and drop queued background work to speed up exit.
+        try:
+            if hasattr(self, '_refresh_timer') and self._refresh_timer:
+                self._refresh_timer.stop()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, '_geom_save_timer') and self._geom_save_timer:
+                self._geom_save_timer.stop()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'thread_pool') and self.thread_pool:
+                self.thread_pool.clear()
+        except Exception:
+            pass
+
+        # Close preview early to reduce chances of QtWebEngine shutdown issues.
+        try:
+            if getattr(self, '_preview', None) is not None:
+                self._preview.close()
+                self._preview = None
+        except Exception:
+            self._preview = None
         # save read articles & column widths
         if self.storage:
             try:
                 self.storage.save_read_articles(list(self.read_articles))
+                try:
+                    self.storage.save_favorite_articles(list(self.favorite_articles))
+                except Exception:
+                    pass
                 self.storage.save_column_widths(self.column_widths)
                 self.storage.save_column_configs(self.column_configs)
             except Exception:
@@ -2824,7 +3291,7 @@ class RSSReader(QMainWindow):
         # auto-backup to iCloud if enabled
         try:
             settings = qsettings()
-            if settings.value('icloud_backup_enabled', False, type=bool):
+            if settings.value('icloud_backup_enabled', False, type=bool) and getattr(self, 'feeds_changed_this_session', False):
                 self.backup_to_icloud()
         except Exception:
             pass
@@ -2907,6 +3374,15 @@ class _PageFetchRunnable(QRunnable):
         self.app = app
 
     def run(self) -> None:  # pragma: no cover - network
+        def _safe_emit(signal, *args):
+            try:
+                signal.emit(*args)
+            except RuntimeError:
+                return False
+            except Exception:
+                return False
+            return True
+
         try:
             import requests
             from bs4 import BeautifulSoup
@@ -2935,10 +3411,10 @@ class _PageFetchRunnable(QRunnable):
                     html = f"<html><head><meta charset='utf-8'><base href='{self.link}'></head><body>{cleaned}</body></html>"
             except Exception:
                 pass
-            self.app.page_fetched.emit(self.aid, self.link, html)
+            _safe_emit(self.app.page_fetched, self.aid, self.link, html)
         except Exception:
             try:
-                self.app.page_fetch_failed.emit(self.aid)
+                _safe_emit(self.app.page_fetch_failed, self.aid)
             except Exception:
                 pass
 

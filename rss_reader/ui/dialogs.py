@@ -104,6 +104,11 @@ class SettingsDialog(QDialog):
         self.icloud_backup_checkbox.setChecked(icloud_enabled)
         layout.addRow("iCloud Backup:", self.icloud_backup_checkbox)
 
+        self.icloud_backup_include_read_checkbox = QCheckBox("Backup read/unread status (and favorites)", self)
+        include_read = settings.value('icloud_backup_include_read_status', True, type=bool)
+        self.icloud_backup_include_read_checkbox.setChecked(bool(include_read))
+        layout.addRow("iCloud Backup Content:", self.icloud_backup_include_read_checkbox)
+
         self.restore_backup_button = QPushButton("Restore from iCloud", self)
         self.restore_backup_button.clicked.connect(self.restore_backup)
         layout.addRow("", self.restore_backup_button)
@@ -177,6 +182,7 @@ class SettingsDialog(QDialog):
         notifications_enabled = self.global_notifications_checkbox.isChecked()
         tray_icon_enabled = self.tray_icon_checkbox.isChecked()
         icloud_enabled = self.icloud_backup_checkbox.isChecked()
+        icloud_include_read = self.icloud_backup_include_read_checkbox.isChecked() if hasattr(self, 'icloud_backup_include_read_checkbox') else True
         log_level = self.log_level_combo.currentText() if hasattr(self, 'log_level_combo') else 'INFO'
 
         settings.setValue('refresh_interval', refresh_interval)
@@ -185,6 +191,7 @@ class SettingsDialog(QDialog):
         settings.setValue('notifications_enabled', notifications_enabled)
         settings.setValue('tray_icon_enabled', tray_icon_enabled)
         settings.setValue('icloud_backup_enabled', icloud_enabled)
+        settings.setValue('icloud_backup_include_read_status', bool(icloud_include_read))
         settings.setValue('log_level', log_level)
 
         if hasattr(self.parent, 'icloud_backup_enabled'):

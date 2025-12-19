@@ -20,6 +20,13 @@ class ArticleTreeWidgetItem(QTreeWidgetItem):
         data1 = self.data(column, Qt.UserRole)
         data2 = other.data(column, Qt.UserRole)
 
+        # If we stored a full entry dict in UserRole (common for Title column),
+        # fall back to visible text to keep sorting stable and intuitive.
+        if isinstance(data1, dict):
+            data1 = ''
+        if isinstance(data2, dict):
+            data2 = ''
+
         if data1 is None or data1 == '':
             data1 = self.text(column)
         if data2 is None or data2 == '':
@@ -75,7 +82,7 @@ class WebEnginePage(QWebEnginePage):
         return super().acceptNavigationRequest(url, _type, isMainFrame)
 
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
-        pass
+        return
 
     def handleUnsupportedContent(self, reply):
         reply.abort()

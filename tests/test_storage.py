@@ -41,6 +41,13 @@ def test_storage_read_articles_roundtrip(tmp_path):
     assert set(s.load_read_articles()) == set(ids)
 
 
+def test_storage_favorite_articles_roundtrip(tmp_path):
+    s = Storage(str(tmp_path / "db.sqlite3"))
+    ids = [hashlib.md5(f"fav{i}".encode()).hexdigest() for i in range(3)]
+    s.save_favorite_articles(ids)
+    assert set(s.load_favorite_articles()) == set(ids)
+
+
 def test_storage_group_settings_roundtrip(tmp_path):
     s = Storage(str(tmp_path / "db.sqlite3"))
     gs = {
