@@ -1387,7 +1387,8 @@ class RSSReader(QMainWindow):
         self.articlesTree.clear()
         visible_entries = list(entries or [])
         # unread filter
-        if self.show_unread_only:
+        # Favorites pseudo-feed should always show favorites regardless of read status.
+        if self.show_unread_only and feed_url != FAVORITES_FEED_URL:
             visible_entries = [e for e in visible_entries if self.get_article_id(e) not in self.read_articles]
         # search filter
         try:
@@ -3183,6 +3184,13 @@ class RSSReader(QMainWindow):
                         if it is not None and self._is_article_star_hotspot(pos):
                             self._last_article_click_star = True
                             self._last_article_click_item = it
+                            # Clicking the star should not mark the article as read.
+                            try:
+                                entry0 = it.data(0, Qt.UserRole) or {}
+                                aid0 = self.get_article_id(entry0)
+                                self._suppress_mark_read_once_aid = aid0
+                            except Exception:
+                                pass
                         else:
                             self._last_article_click_star = False
                             self._last_article_click_item = None
