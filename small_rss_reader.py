@@ -62,7 +62,33 @@ def main() -> int:
             splash.finish(w)
     except Exception:
         pass
-    return app.exec_()
+    rc = app.exec_()
+
+    # Ensure widgets are torn down before QApplication destruction.
+    # This helps avoid macOS shutdown hangs/crashes (notably with QtWebEngine).
+    try:
+        try:
+            w.close()
+        except Exception:
+            pass
+        try:
+            if hasattr(w, 'deleteLater'):
+                w.deleteLater()
+        except Exception:
+            pass
+        try:
+            app.processEvents()
+            app.processEvents()
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
+        w = None  # type: ignore
+    except Exception:
+        pass
+
+    return int(rc)
 
 
 if __name__ == "__main__":

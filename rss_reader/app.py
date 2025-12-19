@@ -125,6 +125,17 @@ class RSSReader(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        # Test detection: conftest sets SMALL_RSS_TEST_RUN_ID/SMALL_RSS_TEST_ID.
+        # Some tests intentionally delete PYTEST_CURRENT_TEST, so don't rely on it.
+        try:
+            self._tests_active = bool(
+                os.environ.get('SMALL_RSS_TESTS')
+                or os.environ.get('SMALL_RSS_TEST_RUN_ID')
+                or os.environ.get('SMALL_RSS_TEST_ID')
+                or os.environ.get('PYTEST_CURRENT_TEST')
+            )
+        except Exception:
+            self._tests_active = False
         # Minimal state used by tests
         self.max_days = 30
         self.feeds: List[Dict[str, Any]] = []
@@ -173,6 +184,7 @@ class RSSReader(QMainWindow):
         self._shutting_down = False
 
         # Interactive runs: show a basic UI so the window isn't empty
+        # Tests may still want full UI, but we will disable background network refreshes.
         try:
             headless = bool(os.environ.get("PYTEST_CURRENT_TEST"))
         except Exception:
@@ -511,7 +523,11 @@ class RSSReader(QMainWindow):
 
         # Load initial state
         self._load_state_from_storage()
-        self.update_refresh_timer()
+        try:
+            if not getattr(self, '_tests_active', False):
+                self.update_refresh_timer()
+        except Exception:
+            pass
         self._init_tray_icon()
         # Startup UX: focus first feed and open first article; kick off background refresh
         try:
@@ -520,9 +536,9 @@ class RSSReader(QMainWindow):
                 if first_feed:
                     self.feedsTree.setCurrentItem(first_feed)
                     QTimer.singleShot(0, lambda: self._select_first_article_in_current_feed(open_article=True))
-            # Initial background refresh (non-blocking) — skip in debug mode
+            # Initial background refresh (non-blocking) — skip in debug mode and tests
             import sys as _sys
-            if '--debug' not in (_sys.argv or []):
+            if ('--debug' not in (_sys.argv or [])) and (not getattr(self, '_tests_active', False)):
                 QTimer.singleShot(0, self.refresh_all_feeds)
         except Exception:
             pass
@@ -544,16 +560,27 @@ class RSSReader(QMainWindow):
         return compute_article_id(entry)
 
     def _start_daemon_runnable(self, runnable: QRunnable) -> None:
-        """Run QRunnable.run() in a daemon Python thread.
+        """Run QRunnable in the background.
 
-        This avoids Qt thread pool threads keeping the process alive on exit
-        while still reusing existing runnable implementations.
+        Prefer Qt's global QThreadPool so we can reliably stop/wait during shutdown.
+        Using Python daemon threads can leave work in-flight during interpreter teardown
+        (notably in frozen/py2app builds), leading to hangs/crashes at exit.
         """
         try:
             if getattr(self, '_shutting_down', False):
                 return
         except Exception:
             return
+
+        # Preferred path: QThreadPool (manageable during shutdown).
+        try:
+            if hasattr(self, 'thread_pool') and self.thread_pool:
+                self.thread_pool.start(runnable)
+                return
+        except Exception:
+            pass
+
+        # Fallback: daemon Python thread.
         try:
             t = threading.Thread(target=runnable.run, daemon=True)
             t.start()
@@ -3269,6 +3296,55 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
+        # Best-effort: don't let Qt thread pool threads linger into QApplication teardown.
+        try:
+            if hasattr(self, 'thread_pool') and self.thread_pool and hasattr(self.thread_pool, 'waitForDone'):
+                self.thread_pool.waitForDone(800)
+        except Exception:
+            pass
+
+        # Best-effort cleanup for main content view if it is a QtWebEngine-based widget.
+        # On macOS, leaving a QWebEnginePage alive during application shutdown may hang/crash.
+        try:
+            view = getattr(self, 'webView', None)
+            if view is not None and hasattr(view, 'page'):
+                try:
+                    if hasattr(view, 'stop'):
+                        view.stop()
+                except Exception:
+                    pass
+                try:
+                    if hasattr(view, 'setUrl'):
+                        view.setUrl(QUrl('about:blank'))
+                except Exception:
+                    pass
+                try:
+                    page = view.page() if hasattr(view, 'page') else None
+                    if page is not None and hasattr(page, 'deleteLater'):
+                        page.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    if hasattr(view, 'deleteLater'):
+                        view.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    self.webView = None
+                except Exception:
+                    pass
+                # Give Qt a chance to process deleteLater() while the event loop is still alive.
+                try:
+                    from PyQt5.QtWidgets import QApplication
+                    inst = QApplication.instance()
+                    if inst is not None:
+                        inst.processEvents()
+                        inst.processEvents()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         # Close preview early to reduce chances of QtWebEngine shutdown issues.
         try:
             if getattr(self, '_preview', None) is not None:
@@ -3292,7 +3368,11 @@ class RSSReader(QMainWindow):
         try:
             settings = qsettings()
             if settings.value('icloud_backup_enabled', False, type=bool) and getattr(self, 'feeds_changed_this_session', False):
-                self.backup_to_icloud()
+                # Avoid blocking UI shutdown on network/iCloud operations.
+                try:
+                    threading.Thread(target=self.backup_to_icloud, daemon=True).start()
+                except Exception:
+                    pass
         except Exception:
             pass
         # save window geometry/state
@@ -3309,6 +3389,21 @@ class RSSReader(QMainWindow):
         try:
             if getattr(self, 'tray', None):
                 self.tray.hide()
+                try:
+                    # On some platforms the tray can keep native resources alive; release eagerly.
+                    if hasattr(self.tray, 'setContextMenu'):
+                        self.tray.setContextMenu(None)
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self.tray, 'deleteLater'):
+                        self.tray.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    self.tray = None  # type: ignore
+                except Exception:
+                    pass
         except Exception:
             pass
         super().closeEvent(event)
@@ -3388,7 +3483,7 @@ class _PageFetchRunnable(QRunnable):
             from bs4 import BeautifulSoup
             import os
             import os as _os
-            resp = requests.get(self.link, timeout=8, headers={
+            resp = requests.get(self.link, timeout=4, headers={
                 'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'
             })
             text = resp.text if hasattr(resp, 'text') else ''
@@ -3443,7 +3538,7 @@ class _HabrMetricsRunnable(QRunnable):  # pragma: no cover - network
                 'Pragma': 'no-cache',
                 'Referer': 'https://habr.com/',
             }
-            resp = requests.get(self.link, timeout=8, headers=headers, allow_redirects=True)
+            resp = requests.get(self.link, timeout=4, headers=headers, allow_redirects=True)
             if bool(os.environ.get('SMALL_RSS_DEBUG_HABR')):
                 try:
                     print(f"[HABR] GET {self.link} -> {getattr(resp, 'status_code', '?')}", flush=True)
