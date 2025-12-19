@@ -16,6 +16,7 @@ from rss_reader.app import (
 )
 from rss_reader.utils.settings import qsettings
 from rss_reader.utils.paths import resource_path
+from rss_reader.utils.proxy import apply_proxy_env_from_settings
 
 
 def get_user_data_path(filename: str) -> str:
@@ -24,6 +25,10 @@ def get_user_data_path(filename: str) -> str:
 
 def main() -> int:
     app = QApplication(sys.argv)
+    try:
+        apply_proxy_env_from_settings()
+    except Exception:
+        pass
     debug = ('--debug' in sys.argv)
     # Show splash screen only in non-debug runs to avoid perceived hangs during heavy init
     try:

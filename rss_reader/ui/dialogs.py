@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont, QIcon, QPixmap
 from PyQt5.QtCore import Qt, QSettings
 from rss_reader.utils.settings import qsettings
+from rss_reader.utils.proxy import apply_proxy_env_from_settings
 
 
 
@@ -109,6 +110,30 @@ class SettingsDialog(QDialog):
         self.icloud_backup_include_read_checkbox.setChecked(bool(include_read))
         layout.addRow("iCloud Backup Content:", self.icloud_backup_include_read_checkbox)
 
+        # ---- Proxy settings ----
+        self.proxy_http_input = QLineEdit(self)
+        self.proxy_http_input.setPlaceholderText("http://host:port (or host:port)")
+        self.proxy_https_input = QLineEdit(self)
+        self.proxy_https_input.setPlaceholderText("http://host:port (or host:port)")
+        self.proxy_username_input = QLineEdit(self)
+        self.proxy_username_input.setPlaceholderText("(optional)")
+        self.proxy_password_input = QLineEdit(self)
+        self.proxy_password_input.setPlaceholderText("(optional)")
+        self.proxy_password_input.setEchoMode(QLineEdit.Password)
+
+        try:
+            self.proxy_http_input.setText(settings.value('proxy_http', '', type=str) or '')
+            self.proxy_https_input.setText(settings.value('proxy_https', '', type=str) or '')
+            self.proxy_username_input.setText(settings.value('proxy_username', '', type=str) or '')
+            self.proxy_password_input.setText(settings.value('proxy_password', '', type=str) or '')
+        except Exception:
+            pass
+
+        layout.addRow("HTTP proxy:", self.proxy_http_input)
+        layout.addRow("HTTPS proxy:", self.proxy_https_input)
+        layout.addRow("Proxy username:", self.proxy_username_input)
+        layout.addRow("Proxy password:", self.proxy_password_input)
+
         self.restore_backup_button = QPushButton("Restore from iCloud", self)
         self.restore_backup_button.clicked.connect(self.restore_backup)
         layout.addRow("", self.restore_backup_button)
@@ -185,6 +210,11 @@ class SettingsDialog(QDialog):
         icloud_include_read = self.icloud_backup_include_read_checkbox.isChecked() if hasattr(self, 'icloud_backup_include_read_checkbox') else True
         log_level = self.log_level_combo.currentText() if hasattr(self, 'log_level_combo') else 'INFO'
 
+        proxy_http = (self.proxy_http_input.text() or '').strip() if hasattr(self, 'proxy_http_input') else ''
+        proxy_https = (self.proxy_https_input.text() or '').strip() if hasattr(self, 'proxy_https_input') else ''
+        proxy_username = (self.proxy_username_input.text() or '').strip() if hasattr(self, 'proxy_username_input') else ''
+        proxy_password = (self.proxy_password_input.text() or '') if hasattr(self, 'proxy_password_input') else ''
+
         settings.setValue('refresh_interval', refresh_interval)
         settings.setValue('font_name', font_name)
         settings.setValue('font_size', font_size)
@@ -193,6 +223,16 @@ class SettingsDialog(QDialog):
         settings.setValue('icloud_backup_enabled', icloud_enabled)
         settings.setValue('icloud_backup_include_read_status', bool(icloud_include_read))
         settings.setValue('log_level', log_level)
+        settings.setValue('proxy_http', proxy_http)
+        settings.setValue('proxy_https', proxy_https)
+        settings.setValue('proxy_username', proxy_username)
+        settings.setValue('proxy_password', proxy_password)
+
+        # Apply proxy settings immediately for the running process
+        try:
+            apply_proxy_env_from_settings()
+        except Exception:
+            pass
 
         if hasattr(self.parent, 'icloud_backup_enabled'):
             self.parent.icloud_backup_enabled = icloud_enabled
