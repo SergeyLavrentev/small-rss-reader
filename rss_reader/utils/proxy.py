@@ -66,13 +66,18 @@ def apply_proxy_env_from_settings() -> None:
     This lets `requests`, `urllib`, and other libraries automatically use the proxy.
     """
     s = qsettings()
+    enabled = True
+    try:
+        enabled = bool(s.value('proxy_enabled', False, type=bool))
+    except Exception:
+        enabled = False
     http_url = s.value('proxy_http', '', type=str) or ''
     https_url = s.value('proxy_https', '', type=str) or ''
     username = s.value('proxy_username', '', type=str) or ''
     password = s.value('proxy_password', '', type=str) or ''
 
-    http_norm = normalize_proxy_url(http_url, username=username, password=password)
-    https_norm = normalize_proxy_url(https_url, username=username, password=password)
+    http_norm = normalize_proxy_url(http_url, username=username, password=password) if enabled else ''
+    https_norm = normalize_proxy_url(https_url, username=username, password=password) if enabled else ''
 
     def _set_or_unset(key: str, value: str) -> None:
         try:

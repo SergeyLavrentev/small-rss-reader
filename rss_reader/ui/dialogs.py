@@ -111,6 +111,12 @@ class SettingsDialog(QDialog):
         layout.addRow("iCloud Backup Content:", self.icloud_backup_include_read_checkbox)
 
         # ---- Proxy settings ----
+        self.proxy_enabled_checkbox = QCheckBox("Use proxy", self)
+        try:
+            self.proxy_enabled_checkbox.setChecked(bool(settings.value('proxy_enabled', False, type=bool)))
+        except Exception:
+            self.proxy_enabled_checkbox.setChecked(False)
+
         self.proxy_http_input = QLineEdit(self)
         self.proxy_http_input.setPlaceholderText("http://host:port (or host:port)")
         self.proxy_https_input = QLineEdit(self)
@@ -119,7 +125,7 @@ class SettingsDialog(QDialog):
         self.proxy_username_input.setPlaceholderText("(optional)")
         self.proxy_password_input = QLineEdit(self)
         self.proxy_password_input.setPlaceholderText("(optional)")
-        self.proxy_password_input.setEchoMode(QLineEdit.Password)
+        self.proxy_password_input.setEchoMode(QLineEdit.Normal)
 
         try:
             self.proxy_http_input.setText(settings.value('proxy_http', '', type=str) or '')
@@ -129,6 +135,21 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
 
+        def _apply_proxy_enabled_state() -> None:
+            enabled = bool(self.proxy_enabled_checkbox.isChecked())
+            for w in (self.proxy_http_input, self.proxy_https_input, self.proxy_username_input, self.proxy_password_input):
+                try:
+                    w.setEnabled(enabled)
+                except Exception:
+                    pass
+
+        try:
+            self.proxy_enabled_checkbox.toggled.connect(lambda _v: _apply_proxy_enabled_state())
+        except Exception:
+            pass
+        _apply_proxy_enabled_state()
+
+        layout.addRow("Proxy:", self.proxy_enabled_checkbox)
         layout.addRow("HTTP proxy:", self.proxy_http_input)
         layout.addRow("HTTPS proxy:", self.proxy_https_input)
         layout.addRow("Proxy username:", self.proxy_username_input)
@@ -214,6 +235,7 @@ class SettingsDialog(QDialog):
         proxy_https = (self.proxy_https_input.text() or '').strip() if hasattr(self, 'proxy_https_input') else ''
         proxy_username = (self.proxy_username_input.text() or '').strip() if hasattr(self, 'proxy_username_input') else ''
         proxy_password = (self.proxy_password_input.text() or '') if hasattr(self, 'proxy_password_input') else ''
+        proxy_enabled = bool(self.proxy_enabled_checkbox.isChecked()) if hasattr(self, 'proxy_enabled_checkbox') else False
 
         settings.setValue('refresh_interval', refresh_interval)
         settings.setValue('font_name', font_name)
@@ -223,6 +245,7 @@ class SettingsDialog(QDialog):
         settings.setValue('icloud_backup_enabled', icloud_enabled)
         settings.setValue('icloud_backup_include_read_status', bool(icloud_include_read))
         settings.setValue('log_level', log_level)
+        settings.setValue('proxy_enabled', bool(proxy_enabled))
         settings.setValue('proxy_http', proxy_http)
         settings.setValue('proxy_https', proxy_https)
         settings.setValue('proxy_username', proxy_username)
