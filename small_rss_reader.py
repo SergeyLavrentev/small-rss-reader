@@ -44,6 +44,27 @@ def main() -> int:
         splash = None  # type: ignore
 
     w = RSSReader()
+    # Ensure state is persisted even when quitting via Cmd+Q (aboutToQuit may fire without closeEvent)
+    try:
+        from rss_reader.controllers.view_state import save_window_state
+
+        def _persist_on_quit() -> None:
+            try:
+                if w is not None:
+                    try:
+                        w._save_splitter_sizes()
+                    except Exception:
+                        pass
+                    try:
+                        save_window_state(w)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        app.aboutToQuit.connect(_persist_on_quit)
+    except Exception:
+        pass
     # First run: maximize window even if geometry exists from older versions; then mark as done
     try:
         s = qsettings()

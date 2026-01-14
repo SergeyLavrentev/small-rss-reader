@@ -56,5 +56,13 @@ def qsettings() -> QSettings:
         pass
 
     if is_dev_mode():
-        return QSettings(DEV_ORG, DEV_APP)
+        try:
+            from rss_reader.utils.paths import get_user_data_path
+        except Exception:  # pragma: no cover
+            get_user_data_path = lambda name: name  # type: ignore
+        try:
+            dev_path = get_user_data_path('settings-dev.ini')
+            return QSettings(dev_path, QSettings.IniFormat)
+        except Exception:
+            return QSettings(DEV_ORG, DEV_APP)
     return QSettings(PROD_ORG, PROD_APP)

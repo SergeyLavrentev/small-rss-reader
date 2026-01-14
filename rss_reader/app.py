@@ -37,7 +37,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QShortcut,
 )
-from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent, QUrl, QRunnable, QPointF
+from PyQt5.QtCore import Qt, QThreadPool, pyqtSignal, pyqtSlot, QTimer, QSize, QEvent, QUrl, QRunnable, QPointF, QByteArray
 
 # В тестовой среде глушим шумное предупреждение QtWebEngine об удалении профиля/страницы
 try:
@@ -423,12 +423,46 @@ class RSSReader(QMainWindow):
             splitter.setSizes([280, 420, 720])
         except Exception:
             pass
-        # Restore splitter sizes if saved
+        # Restore splitter sizes/state if saved
+        pending_state = None
+        pending_sizes = None
         try:
             settings = qsettings()
-            sizes = settings.value('splitter_sizes')
-            if sizes:
-                splitter.setSizes([int(x) for x in list(sizes)])
+            # Try to restore from individual panel widths first (most reliable)
+            feeds_w = settings.value('feeds_panel_width', None)
+            articles_w = settings.value('articles_panel_width', None)
+            content_w = settings.value('content_panel_width', None)
+            if feeds_w is not None and articles_w is not None and content_w is not None:
+                try:
+                    splitter.setSizes([int(feeds_w), int(articles_w), int(content_w)])
+                    pending_sizes = [int(feeds_w), int(articles_w), int(content_w)]
+                except Exception:
+                    pass
+            else:
+                # Fallback: try splitter_state
+                state = settings.value('splitter_state', type=QByteArray)
+                if state:
+                    try:
+                        if isinstance(state, QByteArray):
+                            splitter.restoreState(state)
+                        elif isinstance(state, (bytes, bytearray)):
+                            splitter.restoreState(QByteArray(state))
+                    except Exception:
+                        pass
+                    pending_state = state
+                # Fallback to explicit sizes list
+                sizes = settings.value('splitter_sizes')
+                if sizes:
+                    try:
+                        if isinstance(sizes, str):
+                            parts = [p for p in sizes.replace(';', ',').replace(' ', ',').split(',') if p.strip()]
+                            if len(parts) >= 3:
+                                splitter.setSizes([int(p) for p in parts[:3]])
+                        elif len(sizes) >= 3:
+                            splitter.setSizes([int(x) for x in list(sizes)[:3]])
+                    except Exception:
+                        pass
+                    pending_sizes = sizes
         except Exception:
             pass
         # Guard against collapsed panels (ensure 3 panes visible)
@@ -456,6 +490,12 @@ class RSSReader(QMainWindow):
             self._sc_space = None
 
         self.setCentralWidget(central)
+        # Re-apply splitter restore after show/layout; some Qt styles ignore early restore.
+        try:
+            if pending_state is not None or pending_sizes is not None:
+                QTimer.singleShot(0, lambda: self._restore_splitter_state(pending_state, pending_sizes))
+        except Exception:
+            pass
         # Коалесцированный автосейв геометрии окна
         try:
             from PyQt5.QtCore import QTimer
@@ -2700,7 +2740,90 @@ class RSSReader(QMainWindow):
         """Persist splitter sizes immediately to QSettings."""
         try:
             if hasattr(self, '_splitter') and self._splitter:
-                qsettings().setValue('splitter_sizes', self._splitter.sizes())
+                settings = qsettings()
+                sizes = self._splitter.sizes()
+                # Only save if we have all 3 panels (feeds, articles, content)
+                # If count < 3, WebView was already deleted during shutdown
+                if self._splitter.count() >= 3 and len(sizes) >= 3:
+                    settings.setValue('splitter_sizes', sizes)
+                    try:
+                        settings.setValue('feeds_panel_width', int(sizes[0]))
+                        settings.setValue('articles_panel_width', int(sizes[1]))
+                        settings.setValue('content_panel_width', int(sizes[2]))
+                    except Exception:
+                        pass
+                    settings.setValue('splitter_state', self._splitter.saveState())
+                elif sizes:
+                    # Fallback: save at least the left panel width
+                    try:
+                        settings.setValue('feeds_panel_width', int(sizes[0]))
+                    except Exception:
+                        pass
+                try:
+                    settings.sync()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _restore_splitter_state(self, state: object, sizes: object) -> None:
+        """Re-apply splitter state/sizes after the window is shown."""
+        try:
+            if not hasattr(self, '_splitter') or not self._splitter:
+                return
+            splitter = self._splitter
+            settings = qsettings()
+            
+            # Best approach: restore from individual panel widths
+            feeds_w = settings.value('feeds_panel_width', None)
+            articles_w = settings.value('articles_panel_width', None)
+            content_w = settings.value('content_panel_width', None)
+            
+            if feeds_w is not None and articles_w is not None and content_w is not None:
+                try:
+                    splitter.setSizes([int(feeds_w), int(articles_w), int(content_w)])
+                    return  # Success, no need for fallbacks
+                except Exception:
+                    pass
+            
+            # Fallback: try state blob
+            try:
+                if isinstance(state, QByteArray):
+                    splitter.restoreState(state)
+                elif isinstance(state, (bytes, bytearray)):
+                    splitter.restoreState(QByteArray(state))
+            except Exception:
+                pass
+            
+            # Fallback: try sizes list
+            try:
+                target_sizes = None
+                if isinstance(sizes, list) and len(sizes) >= 3:
+                    target_sizes = [int(x) for x in sizes[:3]]
+                elif isinstance(sizes, str):
+                    parts = [p for p in sizes.replace(';', ',').replace(' ', ',').split(',') if p.strip()]
+                    if len(parts) >= 3:
+                        target_sizes = [int(p) for p in parts[:3]]
+                if target_sizes and splitter.count() >= 3:
+                    splitter.setSizes(target_sizes)
+            except Exception:
+                pass
+            
+            # Last fallback: restore just left panel width
+            if feeds_w is not None and splitter.count() >= 3:
+                try:
+                    left = int(feeds_w)
+                    current = splitter.sizes()
+                    total = sum(current) if current else splitter.size().width()
+                    if total > 0 and left > 0:
+                        # Keep proportions for other panels
+                        rest = total - left
+                        r1 = current[1] if len(current) > 1 else 1
+                        r2 = current[2] if len(current) > 2 else 1
+                        denom = (r1 + r2) or 1
+                        splitter.setSizes([left, int(rest * r1 / denom), int(rest * r2 / denom)])
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -3287,6 +3410,13 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
 
+        # IMPORTANT: Save splitter sizes BEFORE any widgets are removed/deleted.
+        # Otherwise splitter.sizes() returns fewer values after WebView deletion.
+        try:
+            self._save_splitter_sizes()
+        except Exception:
+            pass
+
         # Stop periodic refreshes and drop queued background work to speed up exit.
         try:
             if hasattr(self, '_refresh_timer') and self._refresh_timer:
@@ -3390,7 +3520,12 @@ class RSSReader(QMainWindow):
             settings = qsettings()
             if hasattr(self, '_splitter') and self._splitter:
                 settings.setValue('splitter_sizes', self._splitter.sizes())
+                settings.setValue('splitter_state', self._splitter.saveState())
             settings.setValue('content_font_size', int(self.current_font_size))
+            try:
+                settings.sync()
+            except Exception:
+                pass
         except Exception:
             pass
         # Hide tray on quit for cleaner shutdown UX
