@@ -59,7 +59,10 @@ class QuickPreview(QWidget):
             self.view = _QWebEngineView(self)
             try:
                 # Use our custom page to handle external links/target=_blank
-                self.view.setPage(_WebEnginePage(self.view))
+                page = _WebEnginePage(self.view)
+                if hasattr(page, 'enable_preview_dom_cleanup'):
+                    page.enable_preview_dom_cleanup()
+                self.view.setPage(page)
             except Exception:
                 pass
         else:
@@ -206,6 +209,10 @@ class QuickPreview(QWidget):
                 '.tm-article-snippet__hubs', '.tm-article-body__tags',
                 '.tm-article-presenter__footer', '.tm-comment',
                 '.tm-comment-thread', '.tm-page-width',
+                '.banner-slider',
+                '.promo', '.adfox', '.sponsored',
+                '[id*="adfox"]', '[class*="adfox"]',
+                '[id*="sponsored"]', '[class*="sponsored"]',
             ]:
                 try:
                     for n in soup.select(sel):
@@ -213,7 +220,7 @@ class QuickPreview(QWidget):
                 except Exception:
                     pass
 
-            noisy_re = re.compile(r'(ad|ads|banner|promo|related|share|comments?|toolbar|footer|header|menu|sidebar|subscription|recommend)', re.I)
+            noisy_re = re.compile(r'(ad|ads|banner|promo|adfox|sponsored|native-ad|advert|related|share|comments?|toolbar|footer|header|menu|sidebar|subscription|recommend)', re.I)
             for n in list(soup.find_all(True)):
                 try:
                     cl = ' '.join(n.get('class') or [])
@@ -253,6 +260,12 @@ class QuickPreview(QWidget):
 
             for n in list(container.find_all(True)):
                 try:
+                    cls = ' '.join(n.get('class') or [])
+                    nid = n.get('id') or ''
+                    lowered = (cls + ' ' + str(nid)).lower()
+                    if any(tok in lowered for tok in ('banner-slider', 'promo', 'adfox', 'sponsored', 'native-ad', 'advert')):
+                        n.decompose()
+                        continue
                     if n.name in ('button', 'input', 'form', 'aside'):
                         n.decompose()
                         continue

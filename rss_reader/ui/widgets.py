@@ -109,6 +109,44 @@ class WebEnginePage(QWebEnginePage):
             self.scripts().insert(script)
         except Exception:
             pass
+        self._preview_cleanup_enabled = False
+
+    def enable_preview_dom_cleanup(self) -> None:
+        try:
+            if self._preview_cleanup_enabled:
+                return
+        except Exception:
+            pass
+        try:
+            script = QWebEngineScript()
+            script.setName('preview-dom-cleanup')
+            script.setInjectionPoint(QWebEngineScript.DocumentReady)
+            script.setWorldId(QWebEngineScript.MainWorld)
+            script.setRunsOnSubFrames(True)
+            script.setSourceCode(
+                "(function(){"
+                "var sels=["
+                "'.banner-slider','[class*=\\\"banner-slider\\\"]','[id*=\\\"banner-slider\\\"]',"
+                "'.promo','[class*=\\\"promo\\\"]','[id*=\\\"promo\\\"]',"
+                "'.adfox','[class*=\\\"adfox\\\"]','[id*=\\\"adfox\\\"]',"
+                "'.sponsored','[class*=\\\"sponsored\\\"]','[id*=\\\"sponsored\\\"]',"
+                "'[class*=\\\"native-ad\\\"]','[id*=\\\"native-ad\\\"]',"
+                "'[class*=\\\"advert\\\"]','[id*=\\\"advert\\\"]'"
+                "];"
+                "var joined=sels.join(',');"
+                "function sweep(root){"
+                "try{(root||document).querySelectorAll(joined).forEach(function(n){try{n.remove();}catch(e){}});}catch(e){}"
+                "}"
+                "sweep(document);"
+                "try{new MutationObserver(function(){sweep(document);}).observe(document.documentElement||document,{subtree:true,childList:true});}catch(e){}"
+                "try{setTimeout(function(){sweep(document);},350);}catch(e){}"
+                "try{setTimeout(function(){sweep(document);},1200);}catch(e){}"
+                "})();"
+            )
+            self.scripts().insert(script)
+            self._preview_cleanup_enabled = True
+        except Exception:
+            pass
 
     def acceptNavigationRequest(self, url, _type, isMainFrame):
         if (_type == QWebEnginePage.NavigationTypeLinkClicked):

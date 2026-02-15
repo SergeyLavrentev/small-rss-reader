@@ -277,7 +277,12 @@ def test_habr_reader_mode_toggle_cleans_page(ui_app, qtbot, monkeypatch):
         "<header>Habr Header</header>"
         "<nav>Top Menu</nav>"
         "<article class='tm-article-presenter__content tm-article-presenter__content_narrow'>"
-        "<h1>Как я сделал таймер</h1><div class='article-formatted-body'>Текст статьи</div>"
+        "<h1>Как я сделал таймер</h1>"
+        "<div class='article-formatted-body'>Текст статьи"
+        "<div class='banner-slider'><div>Рекламный слайдер</div></div>"
+        "<div id='adfox-slot'><div>Реклама Adfox</div></div>"
+        "<section class='sponsored-block'>Партнёрский материал</section>"
+        "</div>"
         "</article>"
         "<footer>Site Footer</footer>"
         "</body></html>"
@@ -299,3 +304,6 @@ def test_habr_reader_mode_toggle_cleans_page(ui_app, qtbot, monkeypatch):
         qtbot.waitUntil(lambda: 'Reader mode' in view.toPlainText(), timeout=3000)
         assert 'Top Menu' not in view.toPlainText()
         assert 'Site Footer' not in view.toPlainText()
+        assert 'Рекламный слайдер' not in view.toPlainText()
+        assert 'Реклама Adfox' not in view.toPlainText()
+        assert 'Партнёрский материал' not in view.toPlainText()
