@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Optional, Dict, Any
 
 from PyQt5.QtCore import Qt, QUrl, QEvent
@@ -24,6 +25,8 @@ class QuickPreview(QWidget):
     def __init__(self, app_window, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._app = app_window  # RSSReader
+        self._current_entry: Dict[str, Any] = {}
+        self._reader_mode_enabled = False
         self.setAttribute(Qt.WA_DeleteOnClose, True)
         # Frameless, minimal, floating on top
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
@@ -86,9 +89,15 @@ class QuickPreview(QWidget):
             sc_down = QShortcut(QKeySequence(Qt.Key_Down), self)
             sc_down.setContext(Qt.WidgetWithChildrenShortcut)
             sc_down.activated.connect(lambda: self._nav(+1))
+            sc_reader = QShortcut(QKeySequence(Qt.Key_R), self)
+            sc_reader.setContext(Qt.WidgetWithChildrenShortcut)
+            sc_reader.activated.connect(self._toggle_reader_mode)
         except Exception:
             pass
         self.resize(900, 620)
+        # Prevent immediate close when the same Space key event that opened preview
+        # is still propagating in the event loop.
+        self._ignore_space_until = 0.0
 
         # Subtle drop shadow only in QTextBrowser mode.
         # On macOS, applying QGraphicsEffect to a window that hosts QWebEngineView can make it render blank.
@@ -106,12 +115,21 @@ class QuickPreview(QWidget):
     # -------- Content loading --------
     def load_entry(self, entry: Dict[str, Any]) -> None:
         link = (entry or {}).get('link') or ''
+        self._current_entry = dict(entry or {})
         if not link:
             try:
                 self._set_html("<html><body><p style='margin:16px'>No link</p></body></html>")
             except Exception:
                 pass
             return
+        try:
+            if self._reader_mode_enabled:
+                html = self._fetch_reader_html(link, (entry or {}).get('title') or '')
+                if html:
+                    self._set_html(html, base=link)
+                    return
+        except Exception:
+            pass
         if self._use_web:
             try:
                 self.view.load(QUrl(link))
@@ -137,6 +155,148 @@ class QuickPreview(QWidget):
                 self._set_html(f"<html><body><p style='margin:16px'>Failed to load: {link}</p></body></html>")
             except Exception:
                 pass
+
+    def _toggle_reader_mode(self) -> None:
+        try:
+            self._reader_mode_enabled = not bool(self._reader_mode_enabled)
+        except Exception:
+            self._reader_mode_enabled = False
+        try:
+            if self._current_entry:
+                self.load_entry(self._current_entry)
+        except Exception:
+            pass
+
+    def _fetch_reader_html(self, link: str, title: str) -> str:
+        try:
+            import requests
+            resp = requests.get(link, timeout=10, allow_redirects=True, headers={
+                'User-Agent': (
+                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) '
+                    'Chrome/124.0.0.0 Safari/537.36'
+                ),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://habr.com/',
+            })
+            txt = resp.text if hasattr(resp, 'text') else ''
+            if not txt:
+                return ''
+            return self._extract_reader_content(txt, link, title)
+        except Exception:
+            return ''
+
+    def _extract_reader_content(self, html: str, link: str, title: str) -> str:
+        try:
+            import re
+            import html as _html
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html or '', 'html.parser')
+            for t in soup(['script', 'style', 'noscript', 'svg']):
+                try:
+                    t.decompose()
+                except Exception:
+                    pass
+
+            for sel in [
+                'header', 'footer', 'nav', 'aside',
+                '.tm-layout__header', '.tm-layout__sidebar', '.tm-page__top',
+                '.tm-article-sticky-panel', '.tm-article-presenter__meta',
+                '.tm-article-snippet__hubs', '.tm-article-body__tags',
+                '.tm-article-presenter__footer', '.tm-comment',
+                '.tm-comment-thread', '.tm-page-width',
+            ]:
+                try:
+                    for n in soup.select(sel):
+                        n.decompose()
+                except Exception:
+                    pass
+
+            noisy_re = re.compile(r'(ad|ads|banner|promo|related|share|comments?|toolbar|footer|header|menu|sidebar|subscription|recommend)', re.I)
+            for n in list(soup.find_all(True)):
+                try:
+                    cl = ' '.join(n.get('class') or [])
+                    nid = n.get('id') or ''
+                    if noisy_re.search(cl) or noisy_re.search(nid):
+                        n.decompose()
+                except Exception:
+                    pass
+
+            container = None
+            selectors = [
+                'article.tm-article-presenter__content',
+                'article.tm-article-snippet',
+                '.tm-article-body',
+                '.article-formatted-body',
+                '[itemprop="articleBody"]',
+                'article',
+                'main',
+            ]
+            for sel in selectors:
+                container = soup.select_one(sel)
+                if container is not None:
+                    break
+
+            if container is None:
+                return ''
+
+            h1 = soup.select_one('h1')
+            title_html = ''
+            if h1 is not None:
+                try:
+                    title_html = f"<h1>{_html.escape(h1.get_text(' ', strip=True))}</h1>"
+                except Exception:
+                    title_html = ''
+            elif title:
+                title_html = f"<h1>{_html.escape(title)}</h1>"
+
+            for n in list(container.find_all(True)):
+                try:
+                    if n.name in ('button', 'input', 'form', 'aside'):
+                        n.decompose()
+                        continue
+                    attrs = dict(n.attrs or {})
+                    kept = {}
+                    for k, v in attrs.items():
+                        lk = str(k).lower()
+                        if lk.startswith('on'):
+                            continue
+                        if lk in ('style', 'class', 'id', 'href', 'src', 'alt', 'title', 'width', 'height'):
+                            kept[k] = v
+                    n.attrs = kept
+                except Exception:
+                    pass
+
+            mode_label = "Reader mode · R — full page"
+
+            return (
+                "<html><head><meta charset='utf-8'>"
+                f"<base href='{link}'>"
+                "<style>"
+                "html,body{background:#f6f8fb;color:#1f2937;}"
+                "body{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:17px;line-height:1.72;margin:0;}"
+                ".wrap{max-width:860px;margin:18px auto;padding:28px 34px;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.08);}"
+                ".mode{font-size:12px;color:#6b7280;margin-bottom:10px;}"
+                "h1{font-size:30px;line-height:1.25;margin:0 0 16px 0;}"
+                "p,li{font-size:17px;}"
+                "img,video,iframe{max-width:100%;height:auto;border-radius:8px;}"
+                "pre{white-space:pre-wrap;background:#f5f5f5;padding:10px;border-radius:8px;overflow:auto;}"
+                "code{font-family:SFMono-Regular,Menlo,monospace;font-size:13px;}"
+                "a{color:#2563eb;text-decoration:none;}"
+                "a:hover{text-decoration:underline;}"
+                "hr{border:none;border-top:1px solid #e5e7eb;margin:22px 0 14px;}"
+                "</style></head><body>"
+                "<div class='wrap'>"
+                f"<div class='mode'>{mode_label}</div>"
+                f"{title_html}"
+                f"<article>{str(container)}</article>"
+                f"<hr><p><a href='{link}' target='_blank'>Open original</a></p>"
+                "</div>"
+                "</body></html>"
+            )
+        except Exception:
+            return ''
 
     def _set_html(self, html: str, base: str = '') -> None:
         try:
@@ -165,6 +325,11 @@ class QuickPreview(QWidget):
             pass
         self.show()
         try:
+            # Ignore only the immediate propagated Space event right after opening.
+            self._ignore_space_until = time.monotonic() + 0.06
+        except Exception:
+            self._ignore_space_until = 0.0
+        try:
             self.raise_()
             self.activateWindow()
             try:
@@ -178,6 +343,21 @@ class QuickPreview(QWidget):
     def keyPressEvent(self, event):  # noqa: N802
         try:
             key = event.key()
+            if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Escape):
+                self._ignore_space_until = 0.0
+            if key == Qt.Key_R:
+                self._toggle_reader_mode()
+                try:
+                    event.accept()
+                except Exception:
+                    pass
+                return
+            if key == Qt.Key_Space and time.monotonic() < float(getattr(self, '_ignore_space_until', 0.0) or 0.0):
+                try:
+                    event.accept()
+                except Exception:
+                    pass
+                return
             if key in (Qt.Key_Escape, Qt.Key_Space):
                 self.close()
                 return
@@ -199,6 +379,21 @@ class QuickPreview(QWidget):
         try:
             if event.type() == QEvent.KeyPress:
                 key = event.key()
+                if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Escape):
+                    self._ignore_space_until = 0.0
+                if key == Qt.Key_R:
+                    self._toggle_reader_mode()
+                    try:
+                        event.accept()
+                    except Exception:
+                        pass
+                    return True
+                if key == Qt.Key_Space and time.monotonic() < float(getattr(self, '_ignore_space_until', 0.0) or 0.0):
+                    try:
+                        event.accept()
+                    except Exception:
+                        pass
+                    return True
                 if key in (Qt.Key_Escape, Qt.Key_Space):
                     try:
                         event.accept()

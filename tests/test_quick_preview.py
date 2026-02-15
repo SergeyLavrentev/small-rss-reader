@@ -194,6 +194,31 @@ def test_space_on_articles_list_opens_preview(ui_app, qtbot, monkeypatch):
     qtbot.waitUntil(lambda: app._preview is None, timeout=2000)
 
 
+def test_space_keypress_on_articles_list_does_not_instantly_close_preview(ui_app, qtbot, monkeypatch):
+    app = ui_app
+    _prepare_feed(app)
+
+    class Resp:
+        def __init__(self, text):
+            self.text = text
+
+    def fake_get(url, *args, **kwargs):
+        return Resp('OPEN_BY_KEY')
+
+    monkeypatch.setitem(__import__('sys').modules, 'requests', type('R', (), {'get': staticmethod(fake_get)}))
+
+    app.articlesTree.setFocus()
+    qtbot.keyPress(app.articlesTree, Qt.Key_Space)
+
+    qtbot.waitUntil(lambda: getattr(app, '_preview', None) is not None and app._preview.isVisible(), timeout=2000)
+    qtbot.wait(300)
+    assert app._preview is not None and app._preview.isVisible()
+
+    view = app._preview.view
+    if hasattr(view, 'toPlainText'):
+        qtbot.waitUntil(lambda: 'OPEN_BY_KEY' in view.toPlainText(), timeout=3000)
+
+
 def test_preview_syncs_on_external_selection_change(ui_app, qtbot, monkeypatch):
     app = ui_app
     _prepare_feed(app)
@@ -225,3 +250,52 @@ def test_preview_syncs_on_external_selection_change(ui_app, qtbot, monkeypatch):
     # Preview should update to the second item's content automatically
     if hasattr(view, 'toPlainText'):
         qtbot.waitUntil(lambda: 'S2' in view.toPlainText(), timeout=3000)
+
+
+def test_habr_reader_mode_toggle_cleans_page(ui_app, qtbot, monkeypatch):
+    app = ui_app
+    app.feeds = [{
+        'title': 'Habr',
+        'url': 'https://habr.com/ru/rss/articles/',
+        'entries': [
+            {'title': 'Habr T', 'link': 'https://habr.com/ru/articles/996734/'},
+        ],
+    }]
+    app._rebuild_feeds_tree()
+    it = app.feedsTree.topLevelItem(0)
+    if it and not it.data(0, Qt.UserRole) and it.childCount() > 0:
+        it = it.child(0)
+    app.feedsTree.setCurrentItem(it)
+    app._on_feed_selected()
+
+    class Resp:
+        def __init__(self, text):
+            self.text = text
+
+    habr_html = (
+        "<html><body>"
+        "<header>Habr Header</header>"
+        "<nav>Top Menu</nav>"
+        "<article class='tm-article-presenter__content tm-article-presenter__content_narrow'>"
+        "<h1>Как я сделал таймер</h1><div class='article-formatted-body'>Текст статьи</div>"
+        "</article>"
+        "<footer>Site Footer</footer>"
+        "</body></html>"
+    )
+
+    def fake_get(url, *args, **kwargs):
+        return Resp(habr_html)
+
+    monkeypatch.setitem(__import__('sys').modules, 'requests', type('R', (), {'get': staticmethod(fake_get)}))
+
+    app._toggle_quick_preview()
+    qtbot.waitUntil(lambda: getattr(app, '_preview', None) is not None and app._preview.isVisible(), timeout=2000)
+
+    view = app._preview.view
+    if hasattr(view, 'toPlainText'):
+        qtbot.waitUntil(lambda: 'Top Menu' in view.toPlainText(), timeout=3000)
+        qtbot.keyPress(app._preview, Qt.Key_R)
+        qtbot.waitUntil(lambda: 'Текст статьи' in view.toPlainText(), timeout=3000)
+        qtbot.waitUntil(lambda: 'Reader mode' in view.toPlainText(), timeout=3000)
+        assert 'Top Menu' not in view.toPlainText()
+        assert 'Site Footer' not in view.toPlainText()

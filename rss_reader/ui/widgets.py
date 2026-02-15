@@ -7,10 +7,11 @@ if _os.environ.get('SMALL_RSS_TESTS') or _os.environ.get('PYTEST_CURRENT_TEST'):
     QWebEngineView = object  # type: ignore
 else:  # pragma: no cover - UI path
     try:
-        from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineView
+        from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineView, QWebEngineScript
     except Exception:  # pragma: no cover
         QWebEnginePage = object  # type: ignore
         QWebEngineView = object  # type: ignore
+        QWebEngineScript = object  # type: ignore
 from PyQt5.QtGui import QDesktopServices
 
 
@@ -75,6 +76,40 @@ class FeedsTreeWidget(QTreeWidget):
 
 
 class WebEnginePage(QWebEnginePage):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        try:
+            profile = self.profile()
+            if profile and hasattr(profile, 'setHttpUserAgent'):
+                profile.setHttpUserAgent(
+                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) '
+                    'Chrome/124.0.0.0 Safari/537.36'
+                )
+        except Exception:
+            pass
+        try:
+            script = QWebEngineScript()
+            script.setName('polyfill-at')
+            script.setInjectionPoint(QWebEngineScript.DocumentCreation)
+            script.setWorldId(QWebEngineScript.MainWorld)
+            script.setRunsOnSubFrames(True)
+            script.setSourceCode(
+                "(function(){"
+                "if(!Array.prototype.at){Object.defineProperty(Array.prototype,'at',{value:function(n){n=Math.trunc(n)||0;if(n<0)n+=this.length;return this[n];},writable:true,configurable:true});}"
+                "if(!String.prototype.at){Object.defineProperty(String.prototype,'at',{value:function(n){n=Math.trunc(n)||0;if(n<0)n+=this.length;return this[n];},writable:true,configurable:true});}"
+                "if(typeof Int8Array!=='undefined' && !Int8Array.prototype.at){"
+                "var types=[Int8Array,Uint8Array,Uint8ClampedArray,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array];"
+                "if(typeof BigInt64Array!=='undefined')types.push(BigInt64Array);"
+                "if(typeof BigUint64Array!=='undefined')types.push(BigUint64Array);"
+                "for(var i=0;i<types.length;i++){try{Object.defineProperty(types[i].prototype,'at',{value:function(n){n=Math.trunc(n)||0;if(n<0)n+=this.length;return this[n];},writable:true,configurable:true});}catch(e){}}"
+                "}"
+                "})();"
+            )
+            self.scripts().insert(script)
+        except Exception:
+            pass
+
     def acceptNavigationRequest(self, url, _type, isMainFrame):
         if (_type == QWebEnginePage.NavigationTypeLinkClicked):
             QDesktopServices.openUrl(url)
