@@ -8,7 +8,7 @@ import threading
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import webbrowser
 
 # В тестах глушим шумные логи Qt WebEngine, чтобы не мешали выводу pytest
@@ -61,7 +61,7 @@ except Exception:
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
 from rss_reader.utils.settings import qsettings
 
-from rss_reader.utils.net import compute_article_id
+from rss_reader.utils.net import compute_article_id, fetch_url_text_with_retries
 from rss_reader.utils.domains import _domain_variants
 from rss_reader.ui.widgets import FeedsTreeWidget, ArticleTreeWidgetItem
 from rss_reader.ui.preview import QuickPreview
@@ -226,6 +226,105 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
         return ''
+
+    def _get_entry_raw_html(self, e: Dict[str, Any]) -> str:
+        raw = ''
+        try:
+            content = e.get('content')
+            if isinstance(content, list) and content:
+                first = content[0]
+                if isinstance(first, dict):
+                    raw = first.get('value') or first.get('content') or ''
+                elif isinstance(first, str):
+                    raw = first
+        except Exception:
+            raw = ''
+        if not raw:
+            try:
+                raw = e.get('summary') or e.get('description') or ''
+            except Exception:
+                raw = ''
+        if not raw:
+            try:
+                summary_detail = e.get('summary_detail') or {}
+                if isinstance(summary_detail, dict):
+                    raw = summary_detail.get('value') or ''
+            except Exception:
+                raw = ''
+        return str(raw or '')
+
+    def _entry_html_has_image(self, raw_html: str) -> bool:
+        s = (raw_html or '').lower()
+        return ('<img' in s) or ('srcset=' in s) or ('data-src=' in s)
+
+    def _get_entry_preview_image_url(self, e: Dict[str, Any]) -> str:
+        base_url = self._get_entry_link(e)
+        candidates: List[str] = []
+
+        def _normalize_url(value: Any) -> str:
+            if value is None:
+                return ''
+            if isinstance(value, dict):
+                for key in ('url', 'href', 'src'):
+                    nested = value.get(key)
+                    if nested:
+                        return _normalize_url(nested)
+                return ''
+            text = str(value).strip()
+            if not text:
+                return ''
+            lower = text.lower()
+            if lower.startswith('data:image/'):
+                return text
+            if lower.startswith('//'):
+                return 'https:' + text
+            if lower.startswith(('http://', 'https://')):
+                return text
+            if base_url:
+                try:
+                    return urljoin(base_url, text)
+                except Exception:
+                    return text
+            return text if '://' in text else ''
+
+        def _add_candidate(value: Any) -> None:
+            normalized = _normalize_url(value)
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+
+        try:
+            for key in ('image', 'thumbnail', 'image_url', 'thumbnail_url', 'preview_image', 'preview_image_url', 'itunes_image'):
+                _add_candidate(e.get(key))
+
+            for key in ('media_thumbnail', 'media_content', 'enclosures'):
+                items = e.get(key) or []
+                if isinstance(items, dict):
+                    items = [items]
+                for item in items:
+                    if isinstance(item, dict):
+                        media_type = str(item.get('type') or '').lower()
+                        medium = str(item.get('medium') or '').lower()
+                        if media_type and (not media_type.startswith('image/')) and medium not in ('', 'image'):
+                            continue
+                    _add_candidate(item)
+
+            links = e.get('links') or []
+            if isinstance(links, dict):
+                links = [links]
+            for item in links:
+                if not isinstance(item, dict):
+                    _add_candidate(item)
+                    continue
+                rel = str(item.get('rel') or '').lower()
+                media_type = str(item.get('type') or '').lower()
+                medium = str(item.get('medium') or '').lower()
+                href = item.get('href') or item.get('url') or item.get('src')
+                if rel in ('enclosure', 'preview', 'thumbnail') or media_type.startswith('image/') or medium == 'image':
+                    _add_candidate(href)
+        except Exception:
+            pass
+
+        return candidates[0] if candidates else ''
 
     # ---- Full UI for interactive runs ----
     def _init_full_ui(self) -> None:
@@ -528,7 +627,7 @@ class RSSReader(QMainWindow):
         # Prefetch page signals
         try:
             self.page_fetched.connect(self._on_page_fetched)
-            self.page_fetch_failed.connect(lambda _aid: None)
+            self.page_fetch_failed.connect(self._on_page_fetch_failed)
         except Exception:
             pass
         # Habr metrics updates
@@ -1639,8 +1738,10 @@ class RSSReader(QMainWindow):
                     if aid in self.article_html_cache or aid in self._page_fetching_aids:
                         continue
                     link = self._get_entry_link(e)
-                    has_inline = bool(e.get('content') or e.get('summary') or e.get('description'))
-                    if link and not has_inline:
+                    raw_html = self._get_entry_raw_html(e)
+                    has_inline = bool(raw_html.strip())
+                    has_preview = self._entry_html_has_image(raw_html) or bool(self._get_entry_preview_image_url(e))
+                    if link and (not has_inline or not has_preview):
                         self._page_fetching_aids.add(aid)
                         self._start_daemon_runnable(_PageFetchRunnable(aid, link, self))
                 except Exception:
@@ -2417,11 +2518,9 @@ class RSSReader(QMainWindow):
                 # If it's a QTextBrowser (tests or light mode), try to fetch HTML
                 elif not headless_tests:
                     try:
-                        import requests  # lazy import
-                        resp = requests.get(link, timeout=8, headers={
+                        txt = fetch_url_text_with_retries(link, headers={
                             'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'
                         })
-                        txt = resp.text if hasattr(resp, 'text') else ''
                         if txt:
                             try:
                                 self.webView.setHtml(txt, QUrl(link))
@@ -2489,25 +2588,31 @@ class RSSReader(QMainWindow):
         except Exception:
             pass
         # Prefer content.value if available
-        raw = ''
-        try:
-            if entry.get('content'):
-                raw = entry['content'][0].get('value') or ''
-        except Exception:
-            raw = ''
-        if not raw:
-            raw = entry.get('summary') or entry.get('description') or ''
+        raw = self._get_entry_raw_html(entry)
         # If raw seems plain text (no tags), escape and wrap
         def _looks_html(s: str) -> bool:
             s2 = (s or '').strip().lower()
             return any(t in s2 for t in ('<p', '<div', '<br', '<img', '<a ', '<ul', '<ol', '<h1', '<h2', '<table'))
         if raw and not _looks_html(raw):
             raw = '<p>' + _html.escape(str(raw)).replace('\n', '<br>') + '</p>'
-        if not raw:
-            if link:
-                raw = f"<p><a href='{_html.escape(link)}' target='_blank'>{_html.escape(link)}</a></p>"
-            else:
-                raw = "<p>No content</p>"
+        preview_image_url = ''
+        try:
+            if not self._entry_html_has_image(raw):
+                preview_image_url = self._get_entry_preview_image_url(entry)
+        except Exception:
+            preview_image_url = ''
+        body_parts: List[str] = []
+        if preview_image_url:
+            body_parts.append(
+                f"<p><img src='{_html.escape(preview_image_url, quote=True)}' alt='Preview image' loading='lazy'></p>"
+            )
+        if raw:
+            body_parts.append(raw)
+        elif link:
+            body_parts.append(f"<p><a href='{_html.escape(link)}' target='_blank'>{_html.escape(link)}</a></p>")
+        else:
+            body_parts.append("<p>No content</p>")
+        body_html = ''.join(body_parts)
         # Compose HTML with base and sane defaults
         css_body_font = f"{self.default_font.family()}"
         css_font_size = int(self.current_font_size)
@@ -2527,7 +2632,7 @@ class RSSReader(QMainWindow):
             </head>
             <body>
                 <h2>{_html.escape(title)}</h2>
-                <div>{raw}</div>
+                <div>{body_html}</div>
                 <hr>
                 <p><a href='{_html.escape(link)}' target='_blank'>Open original</a></p>
             </body>
@@ -2541,6 +2646,20 @@ class RSSReader(QMainWindow):
             self.article_html_cache[aid] = html
         except Exception:
             pass
+        try:
+            self._page_fetching_aids.discard(aid)
+        except Exception:
+            pass
+        try:
+            current = self._current_entry()
+            if current and self.get_article_id(current) == aid:
+                self._show_article(current)
+                if self._preview is not None:
+                    self._update_quick_preview()
+        except Exception:
+            pass
+
+    def _on_page_fetch_failed(self, aid: str) -> None:
         try:
             self._page_fetching_aids.discard(aid)
         except Exception:
@@ -3622,14 +3741,10 @@ class _PageFetchRunnable(QRunnable):
             return True
 
         try:
-            import requests
             from bs4 import BeautifulSoup
-            import os
-            import os as _os
-            resp = requests.get(self.link, timeout=4, headers={
+            text = fetch_url_text_with_retries(self.link, headers={
                 'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'
             })
-            text = resp.text if hasattr(resp, 'text') else ''
             html = text
             try:
                 if text:

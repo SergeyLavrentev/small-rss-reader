@@ -9,6 +9,8 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextBrowser, QShortcut
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect
 
+from rss_reader.utils.net import fetch_url_text_with_retries
+
 # Do not import QtWebEngine at module import time to avoid crashes in tests
 QWebEngineView = None  # type: ignore
 WebEnginePage = None  # type: ignore
@@ -141,11 +143,9 @@ class QuickPreview(QWidget):
                 pass
         # Fallback: fetch raw HTML and show in QTextBrowser
         try:
-            import requests
-            resp = requests.get(link, timeout=8, headers={
+            txt = fetch_url_text_with_retries(link, headers={
                 'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'
             })
-            txt = resp.text if hasattr(resp, 'text') else ''
             if txt:
                 try:
                     self._set_html(txt, base=link)
@@ -155,7 +155,14 @@ class QuickPreview(QWidget):
                 self._set_html(f"<html><body><p style='margin:16px'>Failed to load: {link}</p></body></html>")
         except Exception:
             try:
-                self._set_html(f"<html><body><p style='margin:16px'>Failed to load: {link}</p></body></html>")
+                fallback_html = ''
+                fallback_base = link
+                if hasattr(self._app, '_build_article_html'):
+                    fallback_html, fallback_base = self._app._build_article_html(entry)
+                if fallback_html:
+                    self._set_html(fallback_html, base=fallback_base)
+                else:
+                    self._set_html(f"<html><body><p style='margin:16px'>Failed to load: {link}</p></body></html>")
             except Exception:
                 pass
 
@@ -172,8 +179,7 @@ class QuickPreview(QWidget):
 
     def _fetch_reader_html(self, link: str, title: str) -> str:
         try:
-            import requests
-            resp = requests.get(link, timeout=10, allow_redirects=True, headers={
+            txt = fetch_url_text_with_retries(link, allow_redirects=True, headers={
                 'User-Agent': (
                     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
                     'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -183,7 +189,6 @@ class QuickPreview(QWidget):
                 'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
                 'Referer': 'https://habr.com/',
             })
-            txt = resp.text if hasattr(resp, 'text') else ''
             if not txt:
                 return ''
             return self._extract_reader_content(txt, link, title)

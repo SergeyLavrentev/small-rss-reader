@@ -111,6 +111,7 @@ def test_quick_preview_up_down_navigates_and_updates(ui_app, qtbot, monkeypatch)
         qtbot.waitUntil(lambda: 'P2' in view.toPlainText(), timeout=2000)
 
     # Space closes (and should not change selection)
+    qtbot.wait(80)
     qtbot.keyPress(app._preview, Qt.Key_Space)
     prev_index = _current_index()
     qtbot.waitUntil(lambda: app._preview is None, timeout=2000)
@@ -250,6 +251,33 @@ def test_preview_syncs_on_external_selection_change(ui_app, qtbot, monkeypatch):
     # Preview should update to the second item's content automatically
     if hasattr(view, 'toPlainText'):
         qtbot.waitUntil(lambda: 'S2' in view.toPlainText(), timeout=3000)
+
+
+def test_quick_preview_retries_slow_page_fetch(ui_app, qtbot, monkeypatch):
+    app = ui_app
+    _prepare_feed(app)
+
+    class Resp:
+        def __init__(self, text):
+            self.text = text
+
+    calls = []
+
+    def fake_get(url, *args, **kwargs):
+        calls.append((url, kwargs.get('timeout')))
+        if len(calls) < 3:
+            raise RuntimeError('temporary timeout')
+        return Resp('RECOVERED_PREVIEW')
+
+    monkeypatch.setitem(__import__('sys').modules, 'requests', type('R', (), {'get': staticmethod(fake_get)}))
+
+    app._toggle_quick_preview()
+    qtbot.waitUntil(lambda: getattr(app, '_preview', None) is not None and app._preview.isVisible(), timeout=2000)
+
+    view = app._preview.view
+    if hasattr(view, 'toPlainText'):
+        qtbot.waitUntil(lambda: 'RECOVERED_PREVIEW' in view.toPlainText(), timeout=4000)
+    assert len(calls) == 3
 
 
 def test_habr_reader_mode_toggle_cleans_page(ui_app, qtbot, monkeypatch):
