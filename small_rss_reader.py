@@ -24,11 +24,11 @@ def get_user_data_path(filename: str) -> str:
 
 
 def main() -> int:
-    app = QApplication(sys.argv)
     try:
         apply_proxy_env_from_settings()
     except Exception:
         pass
+    app = QApplication(sys.argv)
     debug = ('--debug' in sys.argv)
     # Show splash screen only in non-debug runs to avoid perceived hangs during heavy init
     try:

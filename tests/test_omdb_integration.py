@@ -1,3 +1,4 @@
+import os
 import types
 import pytest
 
@@ -134,3 +135,25 @@ def test_settings_test_key_uses_http_probe(qtbot, ui_app, monkeypatch):
     assert captured['opened'] is True
     assert 'i=tt3896198' in captured['url']
     assert 'apikey=VALIDKEY' in captured['url']
+
+
+def test_settings_save_applies_proxy_env_immediately(ui_app, monkeypatch):
+    for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'):
+        monkeypatch.delenv(key, raising=False)
+
+    from rss_reader.ui.dialogs import SettingsDialog
+
+    dlg = SettingsDialog(ui_app)
+    dlg.proxy_enabled_checkbox.setChecked(True)
+    dlg.proxy_http_input.setText('proxy.local:3128')
+    dlg.proxy_https_input.setText('')
+    dlg.proxy_username_input.setText('alice')
+    dlg.proxy_password_input.setText('pa ss')
+
+    dlg.save_settings()
+
+    expected = 'http://alice:pa%20ss@proxy.local:3128'
+    assert os.environ['HTTP_PROXY'] == expected
+    assert os.environ['HTTPS_PROXY'] == expected
+    assert os.environ['http_proxy'] == expected
+    assert os.environ['https_proxy'] == expected

@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont, QIcon, QPixmap
 from PyQt5.QtCore import Qt, QSettings
 from rss_reader.utils.settings import qsettings
-from rss_reader.utils.proxy import apply_proxy_env_from_settings
+from rss_reader.utils.proxy import apply_proxy_env
 
 
 
@@ -251,9 +251,20 @@ class SettingsDialog(QDialog):
         settings.setValue('proxy_username', proxy_username)
         settings.setValue('proxy_password', proxy_password)
 
+        try:
+            settings.sync()
+        except Exception:
+            pass
+
         # Apply proxy settings immediately for the running process
         try:
-            apply_proxy_env_from_settings()
+            apply_proxy_env(
+                enabled=proxy_enabled,
+                http_url=proxy_http,
+                https_url=proxy_https,
+                username=proxy_username,
+                password=proxy_password,
+            )
         except Exception:
             pass
 

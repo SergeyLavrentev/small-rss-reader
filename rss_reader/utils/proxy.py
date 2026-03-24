@@ -60,6 +60,49 @@ def normalize_proxy_url(url: str, username: str = '', password: str = '') -> str
     return urlunsplit((scheme, netloc, path, query, fragment))
 
 
+def resolve_proxy_urls(enabled: bool, http_url: str = '', https_url: str = '', username: str = '', password: str = '') -> Tuple[str, str]:
+    """Return normalized HTTP/HTTPS proxy URLs with sensible fallback.
+
+    If only one proxy field is filled, reuse it for both protocols.
+    This matches how typical HTTP CONNECT proxies are configured in practice.
+    """
+    if not enabled:
+        return '', ''
+
+    http_source = (http_url or '').strip() or (https_url or '').strip()
+    https_source = (https_url or '').strip() or (http_url or '').strip()
+
+    http_norm = normalize_proxy_url(http_source, username=username, password=password) if http_source else ''
+    https_norm = normalize_proxy_url(https_source, username=username, password=password) if https_source else ''
+    return http_norm, https_norm
+
+
+def apply_proxy_env(enabled: bool, http_url: str = '', https_url: str = '', username: str = '', password: str = '') -> None:
+    """Apply proxy configuration directly to the current process environment."""
+    http_norm, https_norm = resolve_proxy_urls(
+        enabled=enabled,
+        http_url=http_url,
+        https_url=https_url,
+        username=username,
+        password=password,
+    )
+
+    def _set_or_unset(key: str, value: str) -> None:
+        try:
+            if value:
+                os.environ[key] = value
+            else:
+                os.environ.pop(key, None)
+        except Exception:
+            pass
+
+    # Uppercase and lowercase variants are both used by different stacks.
+    _set_or_unset('HTTP_PROXY', http_norm)
+    _set_or_unset('HTTPS_PROXY', https_norm)
+    _set_or_unset('http_proxy', http_norm)
+    _set_or_unset('https_proxy', https_norm)
+
+
 def apply_proxy_env_from_settings() -> None:
     """Apply proxy settings from QSettings into process environment.
 
@@ -76,20 +119,10 @@ def apply_proxy_env_from_settings() -> None:
     username = s.value('proxy_username', '', type=str) or ''
     password = s.value('proxy_password', '', type=str) or ''
 
-    http_norm = normalize_proxy_url(http_url, username=username, password=password) if enabled else ''
-    https_norm = normalize_proxy_url(https_url, username=username, password=password) if enabled else ''
-
-    def _set_or_unset(key: str, value: str) -> None:
-        try:
-            if value:
-                os.environ[key] = value
-            else:
-                os.environ.pop(key, None)
-        except Exception:
-            pass
-
-    # Uppercase and lowercase variants are both used by different stacks.
-    _set_or_unset('HTTP_PROXY', http_norm)
-    _set_or_unset('HTTPS_PROXY', https_norm)
-    _set_or_unset('http_proxy', http_norm)
-    _set_or_unset('https_proxy', https_norm)
+    apply_proxy_env(
+        enabled=enabled,
+        http_url=http_url,
+        https_url=https_url,
+        username=username,
+        password=password,
+    )
