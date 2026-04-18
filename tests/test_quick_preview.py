@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from PyQt5.QtCore import Qt
 
@@ -335,3 +337,41 @@ def test_habr_reader_mode_toggle_cleans_page(ui_app, qtbot, monkeypatch):
         assert 'Рекламный слайдер' not in view.toPlainText()
         assert 'Реклама Adfox' not in view.toPlainText()
         assert 'Партнёрский материал' not in view.toPlainText()
+
+
+def test_quick_preview_reader_mode_ignores_stale_response(ui_app, qtbot, monkeypatch):
+    app = ui_app
+    _prepare_feed(app)
+
+    class Resp:
+        def __init__(self, text):
+            self.text = text
+
+    def _reader_html(title, body):
+        return (
+            '<html><body>'
+            f'<article><h1>{title}</h1><div class="article-formatted-body">{body}</div></article>'
+            '</body></html>'
+        )
+
+    def fake_get(url, *args, **kwargs):
+        if url.endswith('x1'):
+            time.sleep(0.25)
+            return Resp(_reader_html('Title 1', 'BODY ONE'))
+        return Resp(_reader_html('Title 2', 'BODY TWO'))
+
+    monkeypatch.setitem(__import__('sys').modules, 'requests', type('R', (), {'get': staticmethod(fake_get)}))
+
+    app._toggle_quick_preview()
+    qtbot.waitUntil(lambda: getattr(app, '_preview', None) is not None and app._preview.isVisible(), timeout=2000)
+
+    qtbot.keyPress(app._preview, Qt.Key_R)
+    qtbot.keyPress(app._preview, Qt.Key_Down)
+
+    view = app._preview.view
+    if hasattr(view, 'toPlainText'):
+        qtbot.waitUntil(lambda: 'BODY TWO' in view.toPlainText(), timeout=4000)
+        qtbot.wait(350)
+        text = view.toPlainText()
+        assert 'BODY TWO' in text
+        assert 'BODY ONE' not in text

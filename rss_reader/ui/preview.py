@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import re
 from typing import Optional, Dict, Any
 
 from PyQt5.QtCore import Qt, QUrl, QEvent
@@ -10,10 +11,114 @@ from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect
 
 from rss_reader.utils.net import fetch_url_text_with_retries
+from rss_reader.utils.article_html import remove_noisy_nodes, remove_selectors, sanitize_soup_tree
 
 # Do not import QtWebEngine at module import time to avoid crashes in tests
 QWebEngineView = None  # type: ignore
 WebEnginePage = None  # type: ignore
+
+
+def fetch_reader_mode_html(link: str, title: str) -> str:
+    try:
+        txt = fetch_url_text_with_retries(link, allow_redirects=True, headers={
+            'User-Agent': (
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/124.0.0.0 Safari/537.36'
+            ),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://habr.com/',
+        })
+        if not txt:
+            return ''
+        return extract_reader_content(txt, link, title)
+    except Exception:
+        return ''
+
+
+def extract_reader_content(html: str, link: str, title: str) -> str:
+    try:
+        import html as _html
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html or '', 'html.parser')
+        remove_selectors(soup, [
+            'header', 'footer', 'nav', 'aside',
+            '.tm-layout__header', '.tm-layout__sidebar', '.tm-page__top',
+            '.tm-article-sticky-panel', '.tm-article-presenter__meta',
+            '.tm-article-snippet__hubs', '.tm-article-body__tags',
+            '.tm-article-presenter__footer', '.tm-comment',
+            '.tm-comment-thread', '.tm-page-width',
+            '.banner-slider',
+            '.promo', '.adfox', '.sponsored',
+            '[id*="adfox"]', '[class*="adfox"]',
+            '[id*="sponsored"]', '[class*="sponsored"]',
+        ])
+
+        noisy_re = re.compile(r'(ad|ads|banner|promo|adfox|sponsored|native-ad|advert|related|share|comments?|toolbar|footer|header|menu|sidebar|subscription|recommend)', re.I)
+        remove_noisy_nodes(soup, noisy_re)
+
+        container = None
+        selectors = [
+            'article.tm-article-presenter__content',
+            'article.tm-article-snippet',
+            '.tm-article-body',
+            '.article-formatted-body',
+            '[itemprop="articleBody"]',
+            'article',
+            'main',
+        ]
+        for sel in selectors:
+            container = soup.select_one(sel)
+            if container is not None:
+                break
+
+        if container is None:
+            return ''
+
+        h1 = soup.select_one('h1')
+        title_html = ''
+        if h1 is not None:
+            try:
+                title_html = f"<h1>{_html.escape(h1.get_text(' ', strip=True))}</h1>"
+            except Exception:
+                title_html = ''
+        elif title:
+            title_html = f"<h1>{_html.escape(title)}</h1>"
+
+        remove_noisy_nodes(container, noisy_re)
+        sanitize_soup_tree(container, base_url=link)
+
+        mode_label = "Reader mode · R — full page"
+
+        return (
+            "<html><head><meta charset='utf-8'>"
+            f"<base href='{link}'>"
+            "<style>"
+            "html,body{background:#f6f8fb;color:#1f2937;}"
+            "body{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:17px;line-height:1.72;margin:0;}"
+            ".wrap{max-width:860px;margin:18px auto;padding:28px 34px;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.08);}"
+            ".mode{font-size:12px;color:#6b7280;margin-bottom:10px;}"
+            "h1{font-size:30px;line-height:1.25;margin:0 0 16px 0;}"
+            "p,li{font-size:17px;}"
+            "img,video{max-width:100%;height:auto;border-radius:8px;}"
+            "pre{white-space:pre-wrap;background:#f5f5f5;padding:10px;border-radius:8px;overflow:auto;}"
+            "code{font-family:SFMono-Regular,Menlo,monospace;font-size:13px;}"
+            "a{color:#2563eb;text-decoration:none;}"
+            "a:hover{text-decoration:underline;}"
+            "hr{border:none;border-top:1px solid #e5e7eb;margin:22px 0 14px;}"
+            "</style></head><body>"
+            "<div class='wrap'>"
+            f"<div class='mode'>{mode_label}</div>"
+            f"{title_html}"
+            f"<article>{str(container)}</article>"
+            f"<hr><p><a href='{link}' target='_blank'>Open original</a></p>"
+            "</div>"
+            "</body></html>"
+        )
+    except Exception:
+        return ''
 
 
 class QuickPreview(QWidget):
@@ -29,6 +134,7 @@ class QuickPreview(QWidget):
         self._app = app_window  # RSSReader
         self._current_entry: Dict[str, Any] = {}
         self._reader_mode_enabled = False
+        self._load_request_token = 0
         self.setAttribute(Qt.WA_DeleteOnClose, True)
         # Frameless, minimal, floating on top
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
@@ -119,8 +225,10 @@ class QuickPreview(QWidget):
 
     # -------- Content loading --------
     def load_entry(self, entry: Dict[str, Any]) -> None:
-        link = (entry or {}).get('link') or ''
         self._current_entry = dict(entry or {})
+        request_token = self._next_load_request_token()
+        link = (entry or {}).get('link') or ''
+        title = (entry or {}).get('title') or ''
         if not link:
             try:
                 self._set_html("<html><body><p style='margin:16px'>No link</p></body></html>")
@@ -129,7 +237,16 @@ class QuickPreview(QWidget):
             return
         try:
             if self._reader_mode_enabled:
-                html = self._fetch_reader_html(link, (entry or {}).get('title') or '')
+                self._set_loading_html("Loading reader mode...", link, title)
+                if hasattr(self._app, '_request_quick_preview_content'):
+                    requested = self._app._request_quick_preview_content(
+                        self._current_entry,
+                        request_token=request_token,
+                        reader_mode=True,
+                    )
+                    if requested:
+                        return
+                html = self._fetch_reader_html(link, title)
                 if html:
                     self._set_html(html, base=link)
                     return
@@ -143,6 +260,15 @@ class QuickPreview(QWidget):
                 pass
         # Fallback: fetch raw HTML and show in QTextBrowser
         try:
+            self._set_loading_html("Loading article...", link, title)
+            if hasattr(self._app, '_request_quick_preview_content'):
+                requested = self._app._request_quick_preview_content(
+                    self._current_entry,
+                    request_token=request_token,
+                    reader_mode=False,
+                )
+                if requested:
+                    return
             txt = fetch_url_text_with_retries(link, headers={
                 'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'
             })
@@ -178,143 +304,77 @@ class QuickPreview(QWidget):
             pass
 
     def _fetch_reader_html(self, link: str, title: str) -> str:
-        try:
-            txt = fetch_url_text_with_retries(link, allow_redirects=True, headers={
-                'User-Agent': (
-                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-                    'AppleWebKit/537.36 (KHTML, like Gecko) '
-                    'Chrome/124.0.0.0 Safari/537.36'
-                ),
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Referer': 'https://habr.com/',
-            })
-            if not txt:
-                return ''
-            return self._extract_reader_content(txt, link, title)
-        except Exception:
-            return ''
+        return fetch_reader_mode_html(link, title)
 
     def _extract_reader_content(self, html: str, link: str, title: str) -> str:
+        return extract_reader_content(html, link, title)
+
+    def _next_load_request_token(self) -> int:
         try:
-            import re
-            import html as _html
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(html or '', 'html.parser')
-            for t in soup(['script', 'style', 'noscript', 'svg']):
-                try:
-                    t.decompose()
-                except Exception:
-                    pass
-
-            for sel in [
-                'header', 'footer', 'nav', 'aside',
-                '.tm-layout__header', '.tm-layout__sidebar', '.tm-page__top',
-                '.tm-article-sticky-panel', '.tm-article-presenter__meta',
-                '.tm-article-snippet__hubs', '.tm-article-body__tags',
-                '.tm-article-presenter__footer', '.tm-comment',
-                '.tm-comment-thread', '.tm-page-width',
-                '.banner-slider',
-                '.promo', '.adfox', '.sponsored',
-                '[id*="adfox"]', '[class*="adfox"]',
-                '[id*="sponsored"]', '[class*="sponsored"]',
-            ]:
-                try:
-                    for n in soup.select(sel):
-                        n.decompose()
-                except Exception:
-                    pass
-
-            noisy_re = re.compile(r'(ad|ads|banner|promo|adfox|sponsored|native-ad|advert|related|share|comments?|toolbar|footer|header|menu|sidebar|subscription|recommend)', re.I)
-            for n in list(soup.find_all(True)):
-                try:
-                    cl = ' '.join(n.get('class') or [])
-                    nid = n.get('id') or ''
-                    if noisy_re.search(cl) or noisy_re.search(nid):
-                        n.decompose()
-                except Exception:
-                    pass
-
-            container = None
-            selectors = [
-                'article.tm-article-presenter__content',
-                'article.tm-article-snippet',
-                '.tm-article-body',
-                '.article-formatted-body',
-                '[itemprop="articleBody"]',
-                'article',
-                'main',
-            ]
-            for sel in selectors:
-                container = soup.select_one(sel)
-                if container is not None:
-                    break
-
-            if container is None:
-                return ''
-
-            h1 = soup.select_one('h1')
-            title_html = ''
-            if h1 is not None:
-                try:
-                    title_html = f"<h1>{_html.escape(h1.get_text(' ', strip=True))}</h1>"
-                except Exception:
-                    title_html = ''
-            elif title:
-                title_html = f"<h1>{_html.escape(title)}</h1>"
-
-            for n in list(container.find_all(True)):
-                try:
-                    cls = ' '.join(n.get('class') or [])
-                    nid = n.get('id') or ''
-                    lowered = (cls + ' ' + str(nid)).lower()
-                    if any(tok in lowered for tok in ('banner-slider', 'promo', 'adfox', 'sponsored', 'native-ad', 'advert')):
-                        n.decompose()
-                        continue
-                    if n.name in ('button', 'input', 'form', 'aside'):
-                        n.decompose()
-                        continue
-                    attrs = dict(n.attrs or {})
-                    kept = {}
-                    for k, v in attrs.items():
-                        lk = str(k).lower()
-                        if lk.startswith('on'):
-                            continue
-                        if lk in ('style', 'class', 'id', 'href', 'src', 'alt', 'title', 'width', 'height'):
-                            kept[k] = v
-                    n.attrs = kept
-                except Exception:
-                    pass
-
-            mode_label = "Reader mode · R — full page"
-
-            return (
-                "<html><head><meta charset='utf-8'>"
-                f"<base href='{link}'>"
-                "<style>"
-                "html,body{background:#f6f8fb;color:#1f2937;}"
-                "body{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:17px;line-height:1.72;margin:0;}"
-                ".wrap{max-width:860px;margin:18px auto;padding:28px 34px;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.08);}"
-                ".mode{font-size:12px;color:#6b7280;margin-bottom:10px;}"
-                "h1{font-size:30px;line-height:1.25;margin:0 0 16px 0;}"
-                "p,li{font-size:17px;}"
-                "img,video,iframe{max-width:100%;height:auto;border-radius:8px;}"
-                "pre{white-space:pre-wrap;background:#f5f5f5;padding:10px;border-radius:8px;overflow:auto;}"
-                "code{font-family:SFMono-Regular,Menlo,monospace;font-size:13px;}"
-                "a{color:#2563eb;text-decoration:none;}"
-                "a:hover{text-decoration:underline;}"
-                "hr{border:none;border-top:1px solid #e5e7eb;margin:22px 0 14px;}"
-                "</style></head><body>"
-                "<div class='wrap'>"
-                f"<div class='mode'>{mode_label}</div>"
-                f"{title_html}"
-                f"<article>{str(container)}</article>"
-                f"<hr><p><a href='{link}' target='_blank'>Open original</a></p>"
-                "</div>"
-                "</body></html>"
-            )
+            self._load_request_token = int(self._load_request_token) + 1
         except Exception:
-            return ''
+            self._load_request_token = 1
+        return self._load_request_token
+
+    def _current_request_aid(self) -> str:
+        try:
+            if self._current_entry and hasattr(self._app, 'get_article_id'):
+                return self._app.get_article_id(self._current_entry)
+        except Exception:
+            pass
+        return ''
+
+    def _matches_async_request(self, aid: str, request_token: int) -> bool:
+        try:
+            return bool(aid) and aid == self._current_request_aid() and int(request_token) == int(self._load_request_token)
+        except Exception:
+            return False
+
+    def _set_loading_html(self, message: str, link: str = '', title: str = '') -> None:
+        safe_title = title or link or 'Preview'
+        html = (
+            "<html><head><meta charset='utf-8'><style>"
+            "html,body{background:#f6f8fb;color:#1f2937;margin:0;}"
+            "body{font-family:-apple-system,Helvetica,Arial,sans-serif;}"
+            ".wrap{max-width:760px;margin:36px auto;padding:28px 30px;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.08);}"
+            ".title{font-size:24px;line-height:1.3;margin:0 0 14px 0;}"
+            ".msg{color:#6b7280;font-size:15px;}"
+            "</style></head><body><div class='wrap'>"
+            f"<h1 class='title'>{safe_title}</h1>"
+            f"<p class='msg'>{message}</p>"
+            "</div></body></html>"
+        )
+        try:
+            if getattr(self, '_use_web', False) and hasattr(self.view, 'stop'):
+                self.view.stop()
+        except Exception:
+            pass
+        self._set_html(html, base=link)
+
+    def apply_async_html(self, aid: str, request_token: int, html: str, base: str = '') -> bool:
+        if not self._matches_async_request(aid, request_token):
+            return False
+        self._set_html(html, base=base)
+        return True
+
+    def apply_async_error(self, aid: str, request_token: int, link: str) -> bool:
+        if not self._matches_async_request(aid, request_token):
+            return False
+        try:
+            fallback_html = ''
+            fallback_base = link
+            if hasattr(self._app, '_build_article_html'):
+                fallback_html, fallback_base = self._app._build_article_html(self._current_entry)
+            if fallback_html:
+                self._set_html(fallback_html, base=fallback_base)
+            else:
+                self._set_html(f"<html><body><p style='margin:16px'>Failed to load: {link}</p></body></html>")
+        except Exception:
+            try:
+                self._set_html(f"<html><body><p style='margin:16px'>Failed to load: {link}</p></body></html>")
+            except Exception:
+                pass
+        return True
 
     def _set_html(self, html: str, base: str = '') -> None:
         try:
@@ -451,6 +511,10 @@ class QuickPreview(QWidget):
         # Best-effort cleanup for QtWebEngine.
         # On macOS especially, leaving a QWebEnginePage alive during application shutdown
         # can lead to crashes ("WebEnginePage still not deleted").
+        try:
+            self._load_request_token = int(self._load_request_token) + 1
+        except Exception:
+            self._load_request_token = 0
         try:
             if getattr(self, '_use_web', False):
                 view = getattr(self, 'view', None)

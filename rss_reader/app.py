@@ -5,6 +5,7 @@ import logging
 import subprocess
 import math
 import threading
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -62,9 +63,10 @@ from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
 from rss_reader.utils.settings import qsettings
 
 from rss_reader.utils.net import compute_article_id, fetch_url_text_with_retries
+from rss_reader.utils.article_html import sanitize_html_fragment
 from rss_reader.utils.domains import _domain_variants
 from rss_reader.ui.widgets import FeedsTreeWidget, ArticleTreeWidgetItem
-from rss_reader.ui.preview import QuickPreview
+from rss_reader.ui.preview import QuickPreview, fetch_reader_mode_html
 from rss_reader.ui.dialogs import AddFeedDialog, SettingsDialog
 from rss_reader.ui.actions import create_actions as _ui_create_actions
 from rss_reader.ui.menus import create_menu as _ui_create_menu
@@ -120,6 +122,8 @@ class RSSReader(QMainWindow):
     # Signals for article page prefetch
     page_fetched = pyqtSignal(str, str, str)  # aid, link, html
     page_fetch_failed = pyqtSignal(str)
+    preview_content_ready = pyqtSignal(str, int, str, str)  # aid, token, html, base_url
+    preview_content_failed = pyqtSignal(str, int, str)  # aid, token, link
     # Habr metrics: emits (aid, data_dict) where data = {rating:int, up:int, down:int, comments:int}
     habr_metrics_fetched = pyqtSignal(str, object)
 
@@ -171,8 +175,12 @@ class RSSReader(QMainWindow):
         # Track domains with in-flight favicon fetch to avoid duplicates
         self._favicon_fetching = set()
         # Cache for cleaned article HTML by article id
-        self.article_html_cache: Dict[str, str] = {}
+        self._article_html_cache_limit = 160
+        self.article_html_cache: OrderedDict[str, str] = OrderedDict()
         self._page_fetching_aids = set()
+        self._page_prefetch_window = 3
+        self._feed_refreshing_urls = set()
+        self.preview_pool = None
         # Quick preview window (lazy)
         self._preview = None
         self._applying_sort = False
@@ -254,8 +262,28 @@ class RSSReader(QMainWindow):
         return str(raw or '')
 
     def _entry_html_has_image(self, raw_html: str) -> bool:
+        try:
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(raw_html or '', 'html.parser')
+            for node in list(soup.find_all(['img', 'source', 'video'])):
+                for attr_name in ('src', 'srcset', 'data-src', 'poster'):
+                    value = node.get(attr_name)
+                    if not value:
+                        continue
+                    text = str(value).strip().lower()
+                    if not text:
+                        continue
+                    if text.startswith(('javascript:', 'vbscript:')):
+                        continue
+                    if text.startswith('data:') and not text.startswith('data:image/'):
+                        continue
+                    return True
+        except Exception:
+            pass
+
         s = (raw_html or '').lower()
-        return ('<img' in s) or ('srcset=' in s) or ('data-src=' in s)
+        return ('<img' in s and 'src=' in s) or ('srcset=' in s) or ('data-src=' in s)
 
     def _get_entry_preview_image_url(self, e: Dict[str, Any]) -> str:
         base_url = self._get_entry_link(e)
@@ -619,6 +647,11 @@ class RSSReader(QMainWindow):
 
         # Infrastructure
         self.thread_pool = QThreadPool.globalInstance()
+        self.preview_pool = QThreadPool(self)
+        try:
+            self.preview_pool.setMaxThreadCount(2)
+        except Exception:
+            pass
         self.icon_fetched.connect(self.on_icon_fetched)
         try:
             self.icon_fetch_failed.connect(self._on_icon_fetch_failed)
@@ -628,6 +661,8 @@ class RSSReader(QMainWindow):
         try:
             self.page_fetched.connect(self._on_page_fetched)
             self.page_fetch_failed.connect(self._on_page_fetch_failed)
+            self.preview_content_ready.connect(self._on_preview_content_ready)
+            self.preview_content_failed.connect(self._on_preview_content_failed)
         except Exception:
             pass
         # Habr metrics updates
@@ -725,6 +760,66 @@ class RSSReader(QMainWindow):
             t.start()
         except Exception:
             pass
+
+    def _start_preview_runnable(self, runnable: QRunnable) -> None:
+        try:
+            if getattr(self, '_shutting_down', False):
+                return
+        except Exception:
+            return
+
+        try:
+            if hasattr(self, 'preview_pool') and self.preview_pool:
+                self.preview_pool.start(runnable)
+                return
+        except Exception:
+            pass
+
+        self._start_daemon_runnable(runnable)
+
+    def _cache_article_html(self, aid: str, html: str) -> None:
+        if not aid or not html:
+            return
+        try:
+            self.article_html_cache.pop(aid, None)
+            self.article_html_cache[aid] = html
+            while len(self.article_html_cache) > int(self._article_html_cache_limit):
+                self.article_html_cache.popitem(last=False)
+        except Exception:
+            try:
+                self.article_html_cache[aid] = html
+            except Exception:
+                pass
+
+    def _get_cached_article_html(self, aid: str) -> Optional[str]:
+        if not aid:
+            return None
+        try:
+            html = self.article_html_cache.get(aid)
+            if html is None:
+                return None
+            try:
+                self.article_html_cache.move_to_end(aid)
+            except Exception:
+                pass
+            return html
+        except Exception:
+            return None
+
+    def _discard_article_cache_for_entries(self, entries: List[Dict[str, Any]]) -> None:
+        for entry in list(entries or []):
+            try:
+                aid = self.get_article_id(entry)
+            except Exception:
+                continue
+            try:
+                self.article_html_cache.pop(aid, None)
+            except Exception:
+                pass
+            try:
+                self._page_fetching_aids.discard(aid)
+            except Exception:
+                pass
     # ---- Icons helper ----
     def _theme_icon(self, names: List[str], fallback: QStyle.StandardPixmap) -> QIcon:
         try:
@@ -1129,6 +1224,11 @@ class RSSReader(QMainWindow):
                 self.storage.remove_feed(url)
             except Exception:
                 pass
+        removed_feed = next((f for f in (self.feeds or []) if f.get('url') == url), None)
+        try:
+            self._discard_article_cache_for_entries((removed_feed or {}).get('entries') or [])
+        except Exception:
+            pass
         # Remove from in-memory list
         try:
             self.feeds = [f for f in (self.feeds or []) if f.get('url') != url]
@@ -1206,6 +1306,17 @@ class RSSReader(QMainWindow):
                     self.storage.remove_feed(u)
                 except Exception:
                     pass
+        removed_entries: List[Dict[str, Any]] = []
+        try:
+            for f in (self.feeds or []):
+                if f.get('url') in set(urls):
+                    removed_entries.extend(list(f.get('entries') or []))
+        except Exception:
+            removed_entries = []
+        try:
+            self._discard_article_cache_for_entries(removed_entries)
+        except Exception:
+            pass
         # In-memory cleanup
         try:
             self.feeds = [f for f in (self.feeds or []) if f.get('url') not in set(urls)]
@@ -1421,6 +1532,14 @@ class RSSReader(QMainWindow):
                 return
         except Exception:
             return
+        if not url:
+            return
+        try:
+            if url in self._feed_refreshing_urls:
+                return
+            self._feed_refreshing_urls.add(url)
+        except Exception:
+            pass
         try:
             from rss_reader.services.feeds import Worker, FetchFeedRunnable
             worker = Worker()
@@ -1428,7 +1547,10 @@ class RSSReader(QMainWindow):
             runnable = FetchFeedRunnable(url, worker)
             self.thread_pool.start(runnable)
         except Exception:
-            pass
+            try:
+                self._feed_refreshing_urls.discard(url)
+            except Exception:
+                pass
 
     @pyqtSlot(str, object)
     def _on_feed_fetched(self, url: str, feed_obj: Any) -> None:
@@ -1437,6 +1559,10 @@ class RSSReader(QMainWindow):
                 return
         except Exception:
             return
+        try:
+            self._feed_refreshing_urls.discard(url)
+        except Exception:
+            pass
         if not feed_obj:
             pass
             return
@@ -1450,10 +1576,16 @@ class RSSReader(QMainWindow):
             except Exception:
                 pass
         # update in-memory and UI if this feed selected
+        old_entries: List[Dict[str, Any]] = []
         for f in self.feeds:
             if f.get('url') == url:
+                old_entries = list(f.get('entries') or [])
                 f['entries'] = entries
                 break
+        try:
+            self._discard_article_cache_for_entries(old_entries)
+        except Exception:
+            pass
         current = self.feedsTree.currentItem()
         if current and current.data(0, Qt.UserRole) == url:
             self._populate_articles(url, entries)
@@ -1514,6 +1646,14 @@ class RSSReader(QMainWindow):
     def _populate_articles(self, feed_url: str, entries: List[Dict[str, Any]]) -> None:
         # QTreeWidget can auto-sort while inserting rows when sorting is enabled.
         # Disable sorting during population; apply the configured sort after.
+        selected_aid_before_clear = ''
+        try:
+            current_item = self.articlesTree.currentItem()
+            current_entry = current_item.data(0, Qt.UserRole) if current_item else None
+            if current_entry:
+                selected_aid_before_clear = self.get_article_id(current_entry)
+        except Exception:
+            selected_aid_before_clear = ''
         try:
             was_sorting_enabled = bool(self.articlesTree.isSortingEnabled())
         except Exception:
@@ -1726,26 +1866,14 @@ class RSSReader(QMainWindow):
 
         # Prefetch pages for items without inline content (skip in tests)
         try:
-            headless_tests = bool(os.environ.get('SMALL_RSS_TESTS') or os.environ.get('PYTEST_CURRENT_TEST'))
+            headless_tests = bool(os.environ.get('SMALL_RSS_TESTS'))
         except Exception:
             headless_tests = False
         if not headless_tests:
-            for e in visible_entries:
-                try:
-                    if getattr(self, '_shutting_down', False):
-                        break
-                    aid = self.get_article_id(e)
-                    if aid in self.article_html_cache or aid in self._page_fetching_aids:
-                        continue
-                    link = self._get_entry_link(e)
-                    raw_html = self._get_entry_raw_html(e)
-                    has_inline = bool(raw_html.strip())
-                    has_preview = self._entry_html_has_image(raw_html) or bool(self._get_entry_preview_image_url(e))
-                    if link and (not has_inline or not has_preview):
-                        self._page_fetching_aids.add(aid)
-                        self._start_daemon_runnable(_PageFetchRunnable(aid, link, self))
-                except Exception:
-                    pass
+            try:
+                self._prefetch_article_pages(visible_entries, selected_aid=selected_aid_before_clear)
+            except Exception:
+                pass
 
         # Schedule Habr metrics fetch for habr.com feeds (skip in tests)
         if not headless_tests and is_habr:
@@ -2564,12 +2692,60 @@ class RSSReader(QMainWindow):
         link = entry.get('link')
         if link:
             try:
-                if sys.platform == 'darwin':
-                    subprocess.run(['open', '-g', link], check=False)
-                else:
-                    webbrowser.open(link)
+                self._open_link_in_browser(link, prefer_background=True)
             except Exception:
                 pass
+
+    def _open_link_in_browser(self, link: str, *, prefer_background: bool = False) -> bool:
+        if not link:
+            return False
+        try:
+            if sys.platform == 'darwin' and prefer_background:
+                return self._open_link_in_background_macos(link)
+            webbrowser.open(link)
+            return True
+        except Exception:
+            return False
+
+    def _open_link_in_background_macos(self, link: str) -> bool:
+        try:
+            subprocess.Popen(['open', '-g', link], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            try:
+                webbrowser.open(link)
+                return True
+            except Exception:
+                return False
+
+        self._schedule_focus_restore_after_browser_open()
+        return True
+
+    def _schedule_focus_restore_after_browser_open(self) -> None:
+        for delay in (0, 120, 260, 520):
+            try:
+                QTimer.singleShot(delay, self._restore_focus_after_browser_open)
+            except Exception:
+                pass
+
+    def _restore_focus_after_browser_open(self) -> None:
+        try:
+            if getattr(self, '_shutting_down', False):
+                return
+        except Exception:
+            return
+        try:
+            self.raise_()
+        except Exception:
+            pass
+        try:
+            self.activateWindow()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'articlesTree') and self.articlesTree:
+                self.articlesTree.setFocus(Qt.ActiveWindowFocusReason)
+        except Exception:
+            pass
 
     def _build_article_html(self, entry: Dict[str, Any]) -> Tuple[str, str]:
         """Return (html, base_url) built from feed entry.
@@ -2582,7 +2758,7 @@ class RSSReader(QMainWindow):
         # If we have a prefetched/cleaned version, prefer it
         try:
             aid = self.get_article_id(entry)
-            cached = self.article_html_cache.get(aid)
+            cached = self._get_cached_article_html(aid)
             if cached:
                 return cached, base_url
         except Exception:
@@ -2595,6 +2771,8 @@ class RSSReader(QMainWindow):
             return any(t in s2 for t in ('<p', '<div', '<br', '<img', '<a ', '<ul', '<ol', '<h1', '<h2', '<table'))
         if raw and not _looks_html(raw):
             raw = '<p>' + _html.escape(str(raw)).replace('\n', '<br>') + '</p>'
+        if raw:
+            raw = sanitize_html_fragment(raw, base_url=base_url)
         preview_image_url = ''
         try:
             if not self._entry_html_has_image(raw):
@@ -2624,7 +2802,7 @@ class RSSReader(QMainWindow):
                 {base_tag}
                 <style>
                     body {{ font-family: {css_body_font}; font-size: {css_font_size}px; margin: 16px; }}
-                    img, video, iframe {{ max-width: 100%; height: auto; }}
+                    img, video {{ max-width: 100%; height: auto; }}
                     pre {{ white-space: pre-wrap; }}
                     a {{ color: #0366d6; text-decoration: none; }}
                     a:hover {{ text-decoration: underline; }}
@@ -2641,9 +2819,68 @@ class RSSReader(QMainWindow):
         return html, base_url
 
     # -------- Prefetch support --------
+    def _should_prefetch_page_for_entry(self, entry: Dict[str, Any]) -> bool:
+        try:
+            if not entry:
+                return False
+            link = self._get_entry_link(entry)
+            if not link:
+                return False
+            raw_html = self._get_entry_raw_html(entry)
+            return not bool(str(raw_html or '').strip())
+        except Exception:
+            return False
+
+    def _ensure_page_prefetch_for_entry(self, entry: Dict[str, Any]) -> bool:
+        try:
+            if getattr(self, '_shutting_down', False):
+                return False
+        except Exception:
+            return False
+        try:
+            if not self._should_prefetch_page_for_entry(entry):
+                return False
+            aid = self.get_article_id(entry)
+            if aid in self.article_html_cache or aid in self._page_fetching_aids:
+                return False
+            link = self._get_entry_link(entry)
+            if not link:
+                return False
+            self._page_fetching_aids.add(aid)
+            self._start_preview_runnable(_PageFetchRunnable(aid, link, self))
+            return True
+        except Exception:
+            return False
+
+    def _prefetch_article_pages(self, entries: List[Dict[str, Any]], selected_aid: str = '') -> None:
+        if not entries:
+            return
+        max_jobs = max(1, int(getattr(self, '_page_prefetch_window', 3) or 3))
+        seen_indices = set()
+        scheduled = 0
+        prioritized: List[int] = []
+        if selected_aid:
+            try:
+                selected_idx = next((i for i, e in enumerate(entries) if self.get_article_id(e) == selected_aid), None)
+            except Exception:
+                selected_idx = None
+            if selected_idx is not None:
+                start = max(0, selected_idx - 1)
+                stop = min(len(entries), selected_idx + 2)
+                prioritized.extend(range(start, stop))
+        prioritized.extend(range(len(entries)))
+        for idx in prioritized:
+            if idx in seen_indices:
+                continue
+            seen_indices.add(idx)
+            if self._ensure_page_prefetch_for_entry(entries[idx]):
+                scheduled += 1
+                if scheduled >= max_jobs:
+                    break
+
     def _on_page_fetched(self, aid: str, link: str, html: str) -> None:
         try:
-            self.article_html_cache[aid] = html
+            self._cache_article_html(aid, html)
         except Exception:
             pass
         try:
@@ -2662,6 +2899,45 @@ class RSSReader(QMainWindow):
     def _on_page_fetch_failed(self, aid: str) -> None:
         try:
             self._page_fetching_aids.discard(aid)
+        except Exception:
+            pass
+
+    def _request_quick_preview_content(self, entry: Dict[str, Any], *, request_token: int, reader_mode: bool) -> bool:
+        try:
+            if getattr(self, '_shutting_down', False):
+                return False
+        except Exception:
+            return False
+        try:
+            if not entry:
+                return False
+            link = self._get_entry_link(entry)
+            if not link:
+                return False
+            aid = self.get_article_id(entry)
+            title = (entry.get('title') or link).strip()
+            self._start_preview_runnable(_PreviewContentRunnable(aid, link, title, int(request_token), bool(reader_mode), self))
+            return True
+        except Exception:
+            return False
+
+    @pyqtSlot(str, int, str, str)
+    def _on_preview_content_ready(self, aid: str, request_token: int, html: str, base_url: str) -> None:
+        preview = getattr(self, '_preview', None)
+        if preview is None:
+            return
+        try:
+            preview.apply_async_html(aid, request_token, html, base=base_url)
+        except Exception:
+            pass
+
+    @pyqtSlot(str, int, str)
+    def _on_preview_content_failed(self, aid: str, request_token: int, link: str) -> None:
+        preview = getattr(self, '_preview', None)
+        if preview is None:
+            return
+        try:
+            preview.apply_async_error(aid, request_token, link)
         except Exception:
             pass
 
@@ -3070,7 +3346,7 @@ class RSSReader(QMainWindow):
             link = entry.get('link')
             if link:
                 try:
-                    webbrowser.open(link)
+                    self._open_link_in_browser(link, prefer_background=(sys.platform == 'darwin'))
                 except Exception:
                     pass
         elif action == actFav and item:
@@ -3770,6 +4046,42 @@ class _PageFetchRunnable(QRunnable):
                 _safe_emit(self.app.page_fetch_failed, self.aid)
             except Exception:
                 pass
+
+
+class _PreviewContentRunnable(QRunnable):
+    def __init__(self, aid: str, link: str, title: str, request_token: int, reader_mode: bool, app: RSSReader) -> None:
+        super().__init__()
+        self.aid = aid
+        self.link = link
+        self.title = title
+        self.request_token = request_token
+        self.reader_mode = reader_mode
+        self.app = app
+
+    def run(self) -> None:
+        def _safe_emit(signal, *args):
+            try:
+                signal.emit(*args)
+            except RuntimeError:
+                return False
+            except Exception:
+                return False
+            return True
+
+        try:
+            if self.reader_mode:
+                html = fetch_reader_mode_html(self.link, self.title)
+            else:
+                html = fetch_url_text_with_retries(self.link, headers={
+                    'User-Agent': 'SmallRSSReader/1.0 (+https://github.com/SergeyLavrentev)'
+                })
+            if html:
+                _safe_emit(self.app.preview_content_ready, self.aid, self.request_token, html, self.link)
+                return
+        except Exception:
+            pass
+
+        _safe_emit(self.app.preview_content_failed, self.aid, self.request_token, self.link)
 
 
 # Background Habr metrics fetch runnable (module-level)
